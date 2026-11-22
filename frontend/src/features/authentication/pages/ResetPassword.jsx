@@ -16,6 +16,8 @@ import { authApi, registrationApi } from "@/services/api";
 import { validatePassword } from "@/utils/validation";
 import { isManagedPersonnelSession, resolvePasswordSetup, saveResetPassword, passwordWasSaved, personnelSetupBlocked, personnelPasswordError } from "../personnelPasswordSetup";
 
+const PERSONNEL_RECOVERY_STORAGE_KEY = "personnelPasswordRecoveryRetry";
+
 /**
  * Password reset and personnel invitation setup share this protected route.
  *
@@ -46,6 +48,8 @@ export default function ResetPassword() {
   const [requestLinkState, setRequestLinkState] = useState({ loading: false, success: "", error: "" });
   const sessionRef = useRef(null);
   const pendingVerifyRef = useRef(null);
+  const recoveryProofRef = useRef(null);
+  const partialRecoveryRef = useRef(null);
   const verifyingLinkRef = useRef(false);
   const inspectedToken = useRef(null);
   const verificationTypeRef = useRef(null);
@@ -56,10 +60,30 @@ export default function ResetPassword() {
 
   const inspectSession = useCallback(async (session, force = false) => {
     if (finishedRef.current || submittingRef.current) return;
-    if (!force && inspectedToken.current === session?.access_token) return;
+    if (!force && inspectedToken.current === session?.access_token && !partialRecoveryRef.current) return;
     const sequence = ++setupSequence.current;
     inspectedToken.current = session?.access_token;
-    if (session?.user?.id !== sessionRef.current?.user?.id) setupRequiredRef.current = false;
+    if (partialRecoveryRef.current) {
+      if (session?.user?.id && session.user.id !== partialRecoveryRef.current.accountId) {
+        try { sessionStorage.removeItem(PERSONNEL_RECOVERY_STORAGE_KEY); } catch { /* Optional storage. */ }
+        partialRecoveryRef.current = null;
+        recoveryProofRef.current = null;
+      } else {
+        const saved = partialRecoveryRef.current;
+        recoveryProofRef.current = { accountId: saved.accountId, secret: saved.secret };
+        sessionRef.current = session?.user?.id ? session : { user: { id: saved.accountId }, access_token: null };
+        setSetupStatus(saved.setupStatus);
+        setupRequiredRef.current = true;
+        setPartialSaved(true);
+        setStatus("ready");
+        setError("Your password was saved but setup was not confirmed. Enter the same password again to finish securely.");
+        return;
+      }
+    }
+    if (session?.user?.id !== sessionRef.current?.user?.id) {
+      setupRequiredRef.current = false;
+      if (recoveryProofRef.current?.accountId !== session?.user?.id) recoveryProofRef.current = null;
+    }
     sessionRef.current = session;
     setStatus("checking");
     setError("");
@@ -91,6 +115,22 @@ export default function ResetPassword() {
     let timer;
     let sessionTimer;
     inspectedToken.current = null;
+    recoveryProofRef.current = null;
+    partialRecoveryRef.current = null;
+    let restoredRecovery = false;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(PERSONNEL_RECOVERY_STORAGE_KEY) || "null");
+      if (saved?.partialSaved === true && typeof saved.accountId === "string"
+        && typeof saved.secret === "string" && saved.secret.length >= 32
+        && saved.setupStatus?.setupRequired === true && saved.setupStatus?.mustChangePassword === true) {
+        partialRecoveryRef.current = saved;
+        recoveryProofRef.current = { accountId: saved.accountId, secret: saved.secret };
+        setSetupStatus(saved.setupStatus);
+        setPartialSaved(true);
+        setupRequiredRef.current = true;
+        restoredRecovery = true;
+      }
+    } catch { /* Session storage is optional; recovery can continue in this page. */ }
 
     // A recovery link that is expired, already used or otherwise rejected by
     // Supabase redirects back with the error in the URL (implicit flow uses the
@@ -112,7 +152,7 @@ export default function ResetPassword() {
     };
 
     const urlError = readUrlError();
-    if (urlError) {
+    if (urlError && !restoredRecovery) {
       setError(`The authentication service rejected this link (${String(urlError).slice(0, 80)}). Request a fresh link and use the newest email.`);
       setStatus("invalid");
       return undefined;
@@ -131,7 +171,11 @@ export default function ResetPassword() {
         setStatus("invalid");
         return undefined;
       }
-      pendingVerifyRef.current = { tokenHash, verificationType };
+      pendingVerifyRef.current = {
+        tokenHash,
+        verificationType,
+        recoverySecret: verificationType === "recovery" ? params.get("recovery_secret") : null,
+      };
       setStatus("awaiting_verification");
       return undefined;
     }
@@ -145,6 +189,10 @@ export default function ResetPassword() {
         // Leave the Auth callback before making an API call that reads its session.
         sessionTimer = setTimeout(() => { if (active) void inspectSession(session); }, 0);
       } else if (event === "SIGNED_OUT") {
+        if (partialRecoveryRef.current) {
+          void inspectSession(null, true);
+          return;
+        }
         sessionRef.current = null;
         setupRequiredRef.current = false;
         setupSequence.current += 1;
@@ -162,6 +210,7 @@ export default function ResetPassword() {
         setStatus("invalid");
       }
       else if (data?.session) void inspectSession(data.session);
+      else if (partialRecoveryRef.current) void inspectSession(null, true);
       else {
         timer = setTimeout(() => {
           if (active) setStatus((s) => (s === "checking" ? "invalid" : s));
@@ -192,7 +241,7 @@ export default function ResetPassword() {
     setVerifyingLink(true);
     setError("");
     try {
-      const { tokenHash, verificationType } = pendingVerifyRef.current;
+      const { tokenHash, verificationType, recoverySecret } = pendingVerifyRef.current;
       const { data, error: verifyError } = await supabase.auth.verifyOtp({
         token_hash: tokenHash,
         type: verificationType,
@@ -205,6 +254,7 @@ export default function ResetPassword() {
         return;
       }
       pendingVerifyRef.current = null;
+      recoveryProofRef.current = recoverySecret ? { accountId: session.user.id, secret: recoverySecret } : null;
       window.history.replaceState({}, document.title, window.location.pathname);
       await inspectSession(session, true);
     } catch (failure) {
@@ -255,7 +305,7 @@ export default function ResetPassword() {
       await authApi.requestPasswordReset(email);
       setRequestLinkState({
         loading: false,
-        success: "A fresh password link has been sent to your email. Use the newest message to continue.",
+        success: "If a password link can be sent for this account, it has been sent. Staff using administrator-issued temporary passwords must request a fresh invitation from an administrator.",
         error: "",
       });
       setRequestLinkEmail("");
@@ -295,15 +345,24 @@ export default function ResetPassword() {
     submittingRef.current = true;
     let saving = false;
     try {
-      const { data, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-      const session = data?.session;
+      const retryRecovery = partialSaved && recoveryProofRef.current && setupStatus?.mustChangePassword === true;
+      let session;
+      if (retryRecovery) {
+        session = { user: { id: recoveryProofRef.current.accountId }, access_token: null };
+      } else {
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        session = data?.session;
+      }
       if (!session?.user?.id || session.user.id !== sessionRef.current?.user?.id) {
-        setStatus("invalid");
-        return;
+        if (!retryRecovery || session?.user?.id !== recoveryProofRef.current?.accountId) {
+          setStatus("invalid");
+          return;
+        }
       }
       // Re-check requirements before mutation, including after a token refresh.
-      const verifiedSetup = await resolvePasswordSetup(session, authApi.personnelSetupStatus, { knownRequired: setupRequiredRef.current });
+      const verifiedSetup = retryRecovery ? setupStatus
+        : await resolvePasswordSetup(session, authApi.personnelSetupStatus, { knownRequired: setupRequiredRef.current });
       setSetupStatus(verifiedSetup);
       setupRequiredRef.current = verifiedSetup.setupRequired;
       if (personnelSetupBlocked(verifiedSetup)) {
@@ -316,11 +375,15 @@ export default function ResetPassword() {
         password: newPassword,
         setupStatus: verifiedSetup,
         passwordPreviouslySaved: partialSaved,
+        recoverySecret: recoveryProofRef.current?.accountId === session.user.id ? recoveryProofRef.current.secret : null,
         auth: supabase.auth,
         personnelSetup: authApi.personnelPasswordSetup,
         activateResident: registrationApi.activate,
       });
       finishedRef.current = true;
+      try { sessionStorage.removeItem(PERSONNEL_RECOVERY_STORAGE_KEY); } catch { /* Optional storage. */ }
+      partialRecoveryRef.current = null;
+      recoveryProofRef.current = null;
       setCompletion(outcome);
       setPartialSaved(false);
       setNewPassword("");
@@ -337,9 +400,19 @@ export default function ResetPassword() {
       const msg = String(failure?.message || "").toLowerCase();
       if (passwordWasSaved(failure)) {
         setPartialSaved(true);
+        const proof = recoveryProofRef.current;
+        if (proof && setupStatus?.mustChangePassword === true) {
+          partialRecoveryRef.current = { accountId: proof.accountId, secret: proof.secret, setupStatus, partialSaved: true };
+          try { sessionStorage.setItem(PERSONNEL_RECOVERY_STORAGE_KEY, JSON.stringify(partialRecoveryRef.current)); }
+          catch { /* Same-page retry remains available if storage is blocked. */ }
+        }
         setError(`Your password was saved, but account setup or activation is incomplete. ${failure?.message || "The server could not confirm finalization."} You may retry account setup; do not assume sign-in is enabled.`);
       } else if ([401, 403].includes(failure?.status) || msg.includes("session") || msg.includes("expired") || msg.includes("jwt")) {
-        if (saving) {
+        if (saving && partialSaved && recoveryProofRef.current) {
+          setPartialSaved(true);
+          setStatus("ready");
+          setError("The same password submitted before is required to finish setup. Re-enter it and retry.");
+        } else if (saving) {
           setStatus("setup_error");
           setError("The password request was submitted, but the server could not confirm the final result. Try signing in with the password you just chose. If sign-in fails, request a fresh reset link.");
         } else {

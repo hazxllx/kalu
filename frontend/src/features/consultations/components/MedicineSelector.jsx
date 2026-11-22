@@ -1,9 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Search, Plus, Trash2, Pill } from "lucide-react";
 import { medicinesApi } from "@/services/api";
 
 const inputCls =
   "w-full bg-white border border-brand-border rounded-btn px-2.5 py-1.5 text-sm outline-none focus:border-brand-blue";
+
+const frequencyOptions = [
+  "Once daily", "Twice daily", "Three times daily", "Every 4 hours", "Every 6 hours",
+  "Every 8 hours", "Every 12 hours", "As prescribed", "As needed (PRN)",
+];
 
 const emptyMedication = (overrides = {}) => ({
   medicineId: null,
@@ -52,6 +57,7 @@ const SourceTag = ({ source }) => {
  * entry. The value is an array of medication objects owned by the parent form.
  */
 export default function MedicineSelector({ value = [], onChange, errors = {} }) {
+  const frequencyListId = useId();
   const medications = Array.isArray(value) ? value : [];
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -140,6 +146,9 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
 
   return (
     <div>
+      <datalist id={frequencyListId}>
+        {frequencyOptions.map((option) => <option key={option} value={option} />)}
+      </datalist>
       {/* Added medicines */}
       {medications.length > 0 && (
         <ul className="mb-3 space-y-2">
@@ -222,6 +231,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
                 />
                 <input
                   aria-label="Frequency"
+                  list={frequencyListId}
                   value={m.frequency}
                   onChange={(e) => updateAt(i, { frequency: e.target.value })}
                   placeholder="Frequency (e.g. TID)"

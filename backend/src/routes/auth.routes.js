@@ -18,7 +18,10 @@ import * as authController from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import rateLimit from '../middleware/rateLimit.js';
 import validate from '../middleware/validate.js';
-import { signInValidator, passwordResetRequestValidator, personnelPasswordSetupValidator } from '../validators/auth.validators.js';
+import {
+  signInValidator, passwordResetRequestValidator, personnelPasswordSetupValidator,
+  temporaryPersonnelPasswordChangeValidator,
+} from '../validators/auth.validators.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 const router = Router();
@@ -73,7 +76,7 @@ router.get('/personnel/setup-status', setupStatusLimiter, asyncHandler(authContr
 // POST /api/auth/personnel/password-setup — Complete initial password setup and activate an invited personnel profile (`personnelPasswordSetupValidator`).
 router.post('/personnel/password-setup', passwordSetupLimiter, validate(personnelPasswordSetupValidator), asyncHandler(authController.personnelPasswordSetup));
 // POST /api/auth/personnel/temporary-password-change — Replace an admin-issued temporary password (`personnelPasswordSetupValidator`).
-router.post('/personnel/temporary-password-change', temporaryPasswordChangeLimiter, validate(personnelPasswordSetupValidator), asyncHandler(authController.temporaryPasswordChange));
+router.post('/personnel/temporary-password-change', temporaryPasswordChangeLimiter, validate(temporaryPersonnelPasswordChangeValidator), asyncHandler(authController.temporaryPasswordChange));
 // POST /api/auth/forgot-password — Request a password reset email for an existing account (`passwordResetRequestValidator`).
 router.post('/forgot-password', passwordResetRequestLimiter, validate(passwordResetRequestValidator), asyncHandler(authController.forgotPassword));
 

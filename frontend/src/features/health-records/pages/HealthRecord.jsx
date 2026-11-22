@@ -2,41 +2,20 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
-import DateRangeFilter from "@/components/common/DateRangeFilter";
+import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
 import {
-  Activity,
-  CalendarDays,
-  CheckCircle2,
   ChevronDown,
-  ClipboardList,
-  Clock3,
-  Droplets,
-  FileText,
-  FlaskConical,
-  Heart,
-  HeartPulse,
   Loader2,
-  Pill,
   RotateCcw,
-  Ruler,
-  Scale,
-  Search,
-  SearchX,
-  Stethoscope,
-  Syringe,
-  Thermometer,
-  UserRoundCheck,
-  Wind,
   Download,
-  Filter,
 } from "lucide-react";
 import { residentsApi, visitPlansApi } from "@/services/api";
 import { downloadHealthRecordPdf } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
+import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
 import { formatLongDate } from "@/lib/dateUtils";
 
-// Laboratory and medical-history sections have no resident-facing data source
-// yet. Immunizations and consultations are loaded from their canonical records.
+// Uploaded laboratory files are listed separately and are not embedded in PDF exports.
 const labs = [];
 const MEDICAL_HISTORY = {};
 
@@ -59,14 +38,14 @@ const formatDate = (iso) => {
 /** Build the vital-sign display from the consultation's backend-validated values. */
 const vitalCards = (vitals = {}) => {
   const cards = [
-    { label: "Blood Pressure", value: vitals.bloodPressure, unit: "mmHg", Icon: HeartPulse },
-    { label: "Temperature", value: vitals.temperature, unit: "°C", Icon: Thermometer },
-    { label: "Pulse Rate", value: vitals.pulseRate, unit: "bpm", Icon: Heart },
-    { label: "Respiratory Rate", value: vitals.respiratoryRate, unit: "breaths/min", Icon: Wind },
-    { label: "Oxygen Saturation", value: vitals.oxygenSaturation, unit: "%", Icon: Droplets },
-    { label: "Height", value: vitals.height, unit: "cm", Icon: Ruler },
-    { label: "Weight", value: vitals.weight, unit: "kg", Icon: Scale },
-    { label: "BMI", value: vitals.bmi, unit: "", Icon: Activity, category: vitals.bmiCategory },
+    { label: "Blood Pressure", value: vitals.bloodPressure, unit: "mmHg" },
+    { label: "Temperature", value: vitals.temperature, unit: "°C" },
+    { label: "Pulse Rate", value: vitals.pulseRate, unit: "bpm" },
+    { label: "Respiratory Rate", value: vitals.respiratoryRate, unit: "breaths/min" },
+    { label: "Oxygen Saturation", value: vitals.oxygenSaturation, unit: "%" },
+    { label: "Height", value: vitals.height, unit: "cm" },
+    { label: "Weight", value: vitals.weight, unit: "kg" },
+    { label: "BMI", value: vitals.bmi, unit: "", category: vitals.bmiCategory },
   ];
   return cards.filter((c) => c.value !== null && c.value !== undefined && c.value !== "");
 };
@@ -97,21 +76,20 @@ const bmiBadgeClass = (category) => {
 
 const consultationFields = (consultation) => [
   [
-    { label: "Chief Complaint", value: consultation.chiefComplaint, Icon: ClipboardList },
-    { label: "Findings", value: consultation.findings, Icon: FileText },
-    { label: "Medications", value: consultation.medications, Icon: Pill, preserveLines: true },
-    { label: "Health Service", value: consultation.serviceName, Icon: Stethoscope },
+    { label: "Chief Complaint", value: consultation.chiefComplaint },
+    { label: "Findings", value: consultation.findings },
+    { label: "Medications", value: consultation.medications, preserveLines: true },
+    { label: "Health Service", value: consultation.serviceName },
   ],
   [
-    { label: "Diagnosis", value: consultation.diagnosis, Icon: Activity },
-    { label: "Treatment", value: consultation.treatmentGiven, Icon: HeartPulse },
-    { label: "Recommendations", value: consultation.recommendations, Icon: FileText },
+    { label: "Diagnosis", value: consultation.diagnosis },
+    { label: "Treatment", value: consultation.treatmentGiven },
+    { label: "Recommendations", value: consultation.recommendations },
     {
       label: "Follow-up",
       value: consultation.followUpRequired === "Yes"
         ? `Yes${consultation.nextVisitDate ? ` · ${formatDate(consultation.nextVisitDate)}` : ""}`
         : consultation.followUpRequired === "No" ? "No" : "",
-      Icon: CalendarDays,
     },
   ],
 ];
@@ -125,6 +103,8 @@ const dateRangeError = (from, to) => {
 export default function HealthRecord() {
   const [resident, setResident] = useState(null);
   const [consultations, setConsultations] = useState([]);
+  const [latestRecord, setLatestRecord] = useState(null);
+  const historyRequest = useRef(0);
   const [vaccinations, setVaccinations] = useState([]);
   const [healthServiceRecords, setHealthServiceRecords] = useState([]);
   const [referrals, setReferrals] = useState([]);
@@ -167,6 +147,7 @@ export default function HealthRecord() {
   );
 
   const loadConsultations = useCallback((active) => {
+    const request = ++historyRequest.current;
     setLoading(true);
     setError(null);
     const params = {};
@@ -178,6 +159,10 @@ export default function HealthRecord() {
     return residentsApi
       .myHealthRecords(params)
       .then((data) => {
+        // Keep the latest summary independent of history filters, including when
+        // the initial request resolves after the resident selects a range.
+        if (!filtersActive(active)) setLatestRecord(data);
+        if (request !== historyRequest.current) return;
         setResident(data?.resident || null);
         const rows = Array.isArray(data?.consultations) ? data.consultations : [];
         setConsultations(rows);
@@ -201,6 +186,7 @@ export default function HealthRecord() {
         });
       })
       .catch((err) => {
+        if (request !== historyRequest.current) return;
         setError(err?.message || "Could not load your health record. Please try again.");
         setConsultations([]);
         setVaccinations([]);
@@ -208,7 +194,9 @@ export default function HealthRecord() {
         setReferrals([]);
         setFollowUps([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (request === historyRequest.current) setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -293,8 +281,8 @@ export default function HealthRecord() {
   };
 
   const latestVitals = useMemo(
-    () => (consultations.length ? vitalCards(consultations[0].vitals) : []),
-    [consultations],
+    () => vitalCards(latestRecord?.consultations?.[0]?.vitals),
+    [latestRecord],
   );
 
   // Pregnancy Status is suppressed only for residents explicitly recorded as
@@ -308,12 +296,16 @@ export default function HealthRecord() {
 
   /**
    * Export the resident's own health record as a formatted PDF document. The
-   * PDF is generated in the browser (jsPDF) from the SAME data object this page
-   * already loaded — nothing is re-fetched, uploaded or sent to a server.
+    * PDF is generated in the browser (jsPDF) from the records selected by the
+    * history filters. Fetch again to include the current range.
    */
   const exportHealthRecord = useCallback(async () => {
     // Prevent overlapping / simultaneous exports.
     if (exportingRef.current) return;
+    if (dateRangeError(filters.from, filters.to)) {
+      setExportError(dateRangeError(filters.from, filters.to));
+      return;
+    }
     if (!resident && consultations.length === 0) {
       setExportError("Unable to export health record. Please try again.");
       return;
@@ -322,12 +314,16 @@ export default function HealthRecord() {
     setExporting(true);
     setExportError("");
     try {
+      // Fetch the selected range directly so export never uses a pending
+      // debounce or an older history response.
+      const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value));
+      const data = await residentsApi.myHealthRecords(params);
       await downloadHealthRecordPdf({
-        resident: resident || {},
-        consultations,
+        resident: data?.resident || resident || {},
+        consultations: data?.consultations || [],
         // Laboratory and medical-history data have no resident-facing source
         // yet; the PDF renders them as empty / "Not available".
-        vaccinations,
+        vaccinations: (data?.vaccinations || []).filter((item) => matchesDateRange(item.date, filters.from, filters.to)),
         labs,
         medicalHistory: MEDICAL_HISTORY,
       });
@@ -337,7 +333,7 @@ export default function HealthRecord() {
       exportingRef.current = false;
       setExporting(false);
     }
-  }, [resident, consultations]);
+  }, [resident, consultations, filters]);
 
   const hasFilters = filtersActive(appliedFilters);
   const consultationPageCount = Math.max(1, Math.ceil(consultations.length / consultationPageSize));
@@ -460,32 +456,39 @@ export default function HealthRecord() {
     <section aria-labelledby="consultation-history-title">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue">
-            <Stethoscope className="h-5 w-5" aria-hidden="true" />
-          </span>
           <div>
             <h2 id="consultation-history-title" className="text-lg font-semibold leading-6 text-brand-ink">Consultation History</h2>
             <p className="mt-0.5 text-sm text-brand-gray">View your past consultations and health records.</p>
           </div>
         </div>
-        <p className="pl-14 text-sm text-brand-gray sm:pl-0" aria-live="polite">
+        <p className="text-sm text-brand-gray" aria-live="polite">
           {loading ? "Counting…" : `${consultations.length} matching consultation${consultations.length === 1 ? "" : "s"}`}
         </p>
       </div>
 
       <div className="mb-4 rounded-xl border border-brand-border bg-white p-3 sm:p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand-gray">
-            <Filter className="h-3.5 w-3.5 text-brand-blue" aria-hidden="true" /> Filter records
+            Filter records
           </p>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <DateRangeFilter
+              from={filters.from}
+              to={filters.to}
+              onFromChange={(value) => setFilters((current) => ({ ...current, from: value }))}
+              onToChange={(value) => setFilters((current) => ({ ...current, to: value }))}
+              className="min-w-0 flex-1 sm:w-52 sm:flex-none"
+              portal
+            />
           <button
             type="button"
             onClick={resetFilters}
             disabled={!filtersActive(filters) && !hasFilters}
             className="inline-flex items-center gap-1.5 rounded-btn px-2 py-1 text-xs font-medium text-brand-blue transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-brand-gray/60 disabled:hover:bg-transparent"
           >
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Clear Filters
+            Reset filters
           </button>
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <div>
@@ -536,7 +539,7 @@ export default function HealthRecord() {
               disabled={loading}
               className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-3 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Search className="h-4 w-4" aria-hidden="true" /> Apply Filters
+              Apply Filters
             </button>
           </div>
         </div>
@@ -561,8 +564,7 @@ export default function HealthRecord() {
         <div className="rounded-2xl border border-dashed border-brand-border p-8 text-center">
           {hasFilters ? (
             <>
-              <SearchX className="mx-auto h-8 w-8 text-brand-gray/60" />
-              <p className="mt-3 text-sm font-medium text-brand-ink">No consultations match your filters</p>
+              <p className="text-sm font-medium text-brand-ink">No consultations match your filters</p>
               <p className="mt-1 text-xs text-brand-gray">Try widening the date range or clearing a filter.</p>
               <button
                 type="button"
@@ -574,8 +576,7 @@ export default function HealthRecord() {
             </>
           ) : (
             <>
-              <Stethoscope className="mx-auto h-8 w-8 text-brand-gray/60" />
-              <p className="mt-3 text-sm font-medium text-brand-ink">No consultations recorded yet</p>
+              <p className="text-sm font-medium text-brand-ink">No consultations recorded yet</p>
               <p className="mt-1 text-xs text-brand-gray">Your completed consultations will appear here.</p>
             </>
           )}
@@ -587,13 +588,10 @@ export default function HealthRecord() {
             <article key={c.id} className="overflow-hidden rounded-xl border border-brand-border bg-white">
               <div className="grid min-w-0 gap-4 p-4 md:grid-cols-[9.5rem_minmax(0,1fr)] md:gap-5">
                 <div className="flex items-center gap-3 border-b border-brand-border pb-3 md:block md:border-b-0 md:border-r md:pb-0 md:pr-5">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-blue">
-                    <CalendarDays className="h-5 w-5" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0 md:mt-3">
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-brand-ink">{formatDate(c.date)}</p>
                     <p className="mt-1 flex items-center gap-1.5 text-xs text-brand-gray">
-                      <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {dash(c.time)}
+                      {dash(c.time)}
                     </p>
                   </div>
                 </div>
@@ -605,7 +603,7 @@ export default function HealthRecord() {
                       )}
                       {c.seenBy && (
                         <span className="inline-flex items-center gap-1.5 text-xs text-brand-gray">
-                          <UserRoundCheck className="h-3.5 w-3.5 text-brand-blue" aria-hidden="true" /> {c.seenBy}
+                          Seen by {c.seenBy}
                         </span>
                       )}
                     </div>
@@ -615,7 +613,6 @@ export default function HealthRecord() {
                           ? "bg-green-50 text-green-800"
                           : "bg-slate-100 text-slate-700"
                       }`}>
-                        {String(c.status).toLowerCase() === "completed" && <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
                         {String(c.status).replaceAll("_", " ")}
                       </span>
                     )}
@@ -623,9 +620,8 @@ export default function HealthRecord() {
                   <div className="grid min-w-0 gap-x-6 gap-y-3 lg:grid-cols-2 lg:gap-y-2">
                     {consultationFields(c).map((column, columnIndex) => (
                       <div key={columnIndex} className="min-w-0 space-y-2">
-                        {column.map(({ label, value, Icon, preserveLines }) => (
-                          <div key={label} className="grid min-w-0 grid-cols-[1rem_7.5rem_minmax(0,1fr)] items-start gap-x-2 text-sm leading-5">
-                            <Icon className="mt-0.5 h-3.5 w-3.5 text-brand-blue" aria-hidden="true" />
+                        {column.map(({ label, value, preserveLines }) => (
+                          <div key={label} className="grid min-w-0 grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-x-2 text-sm leading-5">
                             <span className="font-medium text-brand-ink">{label}</span>
                             <span className={`min-w-0 break-words text-brand-gray ${preserveLines ? "whitespace-pre-line" : ""}`}>{dash(value)}</span>
                           </div>
@@ -638,10 +634,10 @@ export default function HealthRecord() {
               {vitalCards(c.vitals).length > 0 && (
                 <div className="border-t border-brand-border bg-slate-50/60 px-4 py-3">
                   <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-brand-ink">
-                    <Activity className="h-4 w-4 text-brand-blue" aria-hidden="true" /> Vital Signs
+                    Vital Signs
                   </h3>
                   <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-4 xl:grid-cols-8">
-                    {vitalCards(c.vitals).map(({ label, value, unit, Icon, category }, index) => (
+                    {vitalCards(c.vitals).map(({ label, value, unit, category }, index) => (
                       <div
                         key={label}
                         className={`min-w-0 border-brand-border px-2 first:pl-0 xl:px-3 ${
@@ -651,7 +647,7 @@ export default function HealthRecord() {
                         }`}
                       >
                         <p className="flex items-center gap-1.5 truncate text-xs text-brand-gray">
-                          <Icon className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" /> {label}
+                          {label}
                         </p>
                         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
                           <span className="whitespace-nowrap text-sm font-semibold text-brand-ink">
@@ -687,19 +683,10 @@ export default function HealthRecord() {
   return (
     <div className="mx-auto w-full max-w-[1180px]">
       <PageHeader
-        crumbs={["My Health Record"]}
         title="My Health Record"
         subtitle="A complete view of your medical history and vitals."
         action={
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end sm:justify-end">
-            <DateRangeFilter
-              from={filters.from}
-              to={filters.to}
-              onFromChange={(value) => setFilters((current) => ({ ...current, from: value }))}
-              onToChange={(value) => setFilters((current) => ({ ...current, to: value }))}
-              className="w-full sm:w-52"
-              portal
-            />
             <button
               onClick={exportHealthRecord}
               disabled={loading || !!error || exporting}
@@ -720,7 +707,7 @@ export default function HealthRecord() {
         </Card>
       )}
 
-      {loading && activeTab === "overview" ? (
+      {loading && !latestRecord && activeTab === "overview" ? (
         <Card className="p-6 text-sm text-brand-gray">Loading your health record…</Card>
       ) : (
         <>
@@ -778,7 +765,7 @@ export default function HealthRecord() {
             <>
               <div className="mb-2 flex items-center gap-2">
                 <h3 className="text-base font-semibold text-brand-ink">
-                  Latest Vitals{consultations.length ? ` — ${formatDate(consultations[0].date)}` : ""}
+                  Latest Vitals{latestRecord?.consultations?.length ? ` — ${formatDate(latestRecord.consultations[0].date)}` : ""}
                 </h3>
               </div>
               <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
@@ -810,12 +797,12 @@ export default function HealthRecord() {
                 </Card>
 
                 <Card className="rounded-lg p-5 shadow-none">
-                  <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><Syringe className="w-4 h-4 text-brand-blue" /> Vaccinations</h3>
+                  <h3 className="font-semibold text-brand-ink mb-4">Vaccinations</h3>
                   <div className="space-y-3">
-                    {vaccinations.length === 0 ? (
+                    {!latestRecord?.vaccinations?.length ? (
                       <p className="text-sm text-brand-gray">No vaccinations recorded yet.</p>
                     ) : (
-                      vaccinations.map((v) => (
+                      latestRecord.vaccinations.map((v) => (
                         <div key={v.id || `${v.name}-${v.date}`} className="flex items-center justify-between gap-3 border-b border-brand-border pb-3 text-sm last:border-0 last:pb-0">
                           <div className="min-w-0"><p className="truncate font-medium text-brand-ink">{v.name}{v.dose ? ` · ${v.dose}` : ""}</p><p className="text-xs text-brand-gray">{v.date ? formatDate(v.date) : "Date not recorded"}{v.nextDose ? ` · Next dose ${formatDate(v.nextDose)}` : ""}</p></div>
                           <span className="text-xs text-brand-green bg-brand-green/10 px-2 py-1 rounded-full">{v.status}</span>
@@ -826,19 +813,7 @@ export default function HealthRecord() {
                 </Card>
 
                 <Card className="rounded-lg p-5 shadow-none">
-                  <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><FlaskConical className="w-4 h-4 text-brand-blue" /> Laboratory Results</h3>
-                  <div className="space-y-3">
-                    {labs.length === 0 ? (
-                      <p className="text-sm text-brand-gray">No laboratory results recorded yet.</p>
-                    ) : (
-                      labs.map((l) => (
-                        <div key={l.name} className="flex items-center justify-between text-sm border-b border-brand-border pb-3 last:border-0 last:pb-0">
-                          <div><p className="text-brand-ink font-medium">{l.name}</p><p className="text-brand-gray text-xs">{l.date}</p></div>
-                          <span className="text-brand-ink font-medium">{l.result}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <LabResultsPanel canUpload />
                 </Card>
               </div>
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
-import { MapContainer, CircleMarker, GeoJSON, Popup, Tooltip, ZoomControl, useMap } from "react-leaflet";
+import { MapContainer, CircleMarker, GeoJSON, Pane, Popup, Tooltip, ZoomControl, useMap } from "react-leaflet";
 import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
 import { setWorkerUrl } from "maplibre-gl";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
@@ -14,6 +14,7 @@ import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { validPurokGeoJson } from "@/features/analytics/lib/purokGeometry";
 import { DEFAULT_MAP_STYLE_URL } from "@/lib/localSafety";
+import { conditionColor, mapLegend } from "@/features/analytics/lib/communityMapLegend";
 
 setWorkerUrl(maplibreWorkerUrl);
 
@@ -169,6 +170,17 @@ function intensityColor(intensity, caseCount) {
   return "#F6C453"; // low
 }
 
+function BoundaryAttribution({ visible }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!visible) return;
+    const attribution = 'Boundaries: PSA/NAMRIA via <a href="https://data.humdata.org/dataset/cod-ab-phl">OCHA HDX</a>';
+    map.attributionControl?.addAttribution(attribution);
+    return () => map.attributionControl?.removeAttribution(attribution);
+  }, [map, visible]);
+  return null;
+}
+
 export default function CommunityHealthMap({
   barangays: barangaysProp = null,
   center: centerProp = null,
@@ -188,6 +200,8 @@ export default function CommunityHealthMap({
   metricLabel = "Recorded cases",
   purokLayer = null,
   detailsHref = null,
+  boundaryLayer = null,
+  boundaryError = "",
 }) {
   const dashboard = variant === "dashboard";
   const supervisor = variant === "supervisor" || dashboard;
@@ -221,6 +235,22 @@ export default function CommunityHealthMap({
   const plotted = useMemo(() => barangays.filter(hasValidCoordinates), [barangays]);
   const missing = useMemo(() => barangays.filter((b) => !hasValidCoordinates(b)), [barangays]);
   const points = useMemo(() => plotted.map((b) => [b.latitude, b.longitude]), [plotted]);
+  const boundaryFeatures = useMemo(() => (boundaryLayer?.features || []).filter((feature) => barangays.some((row) => row.name === feature.properties?.name)), [boundaryLayer, barangays]);
+  const mapExtent = useMemo(() => {
+    const vertices = [];
+    const collect = (coordinates) => {
+      if (!Array.isArray(coordinates)) return;
+      if (coordinates.length >= 2 && coordinates.slice(0, 2).every(Number.isFinite)) vertices.push([coordinates[1], coordinates[0]]);
+      else coordinates.forEach(collect);
+    };
+    boundaryFeatures.forEach((feature) => collect(feature.geometry?.coordinates));
+    if (!vertices.length) return points;
+    return [
+      [Math.min(...vertices.map((point) => point[0])), Math.min(...vertices.map((point) => point[1]))],
+      [Math.max(...vertices.map((point) => point[0])), Math.max(...vertices.map((point) => point[1]))],
+      ...points,
+    ];
+  }, [boundaryFeatures, points]);
   
   const markerData = useMemo(() => {
     const selected = Array.isArray(visibleConditions) ? new Set(visibleConditions) : null;
@@ -275,7 +305,9 @@ export default function CommunityHealthMap({
   }
 
   if (errText) {
-    if (supervisor) return <ErrorState compact title="Community health map unavailable" message={typeof errText === "string" ? errText : "Please try again."} onRetry={retry} />;
+    if (supervisor) return dashboard
+      ? <div className="hs-map-empty" style={{ height: `${height}px` }}><ErrorState compact title="Community health map unavailable" message={typeof errText === "string" ? errText : "Please try again."} onRetry={retry} /></div>
+      : <ErrorState compact title="Community health map unavailable" message={typeof errText === "string" ? errText : "Please try again."} onRetry={retry} />;
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
         <AlertCircle className="h-5 w-5 text-brand-danger" strokeWidth={1.8} />
@@ -293,10 +325,14 @@ export default function CommunityHealthMap({
     );
   }
 
-  if (metricUnavailable) return <ErrorState compact title="Selected map metric unavailable" message="The selected metric did not contain a complete recorded count. No value has been substituted." onRetry={retry} />;
+  if (metricUnavailable) return dashboard
+    ? <div className="hs-map-empty" style={{ height: `${height}px` }}><ErrorState compact title="Selected map metric unavailable" message="The selected metric did not contain a complete recorded count. No value has been substituted." onRetry={retry} /></div>
+    : <ErrorState compact title="Selected map metric unavailable" message="The selected metric did not contain a complete recorded count. No value has been substituted." onRetry={retry} />;
 
   if (barangays.length === 0) {
-    if (supervisor) return <EmptyState compact icon={MapPin} title="No available barangay data" description="No barangay records are available for your authorized scope and reporting period." />;
+    if (supervisor) return dashboard
+      ? <div className="hs-map-empty" style={{ height: `${height}px` }}><EmptyState compact icon={MapPin} title="No available barangay data" description="No barangay records are available for your authorized scope and reporting period." /></div>
+      : <EmptyState compact icon={MapPin} title="No available barangay data" description="No barangay records are available for your authorized scope and reporting period." />;
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
         <MapPin className="h-5 w-5 text-brand-gray" strokeWidth={1.6} />
@@ -321,11 +357,12 @@ export default function CommunityHealthMap({
   const PopupCompat = /** @type {any} */ (Popup);
   const TooltipCompat = /** @type {any} */ (Tooltip);
   const GeoJSONCompat = /** @type {any} */ (GeoJSON);
+  const legend = mapLegend(metricLabel, visibleMarkers, boundaryFeatures.length > 0);
 
   return (
     <div className={supervisor ? `supervisor-health-map ${dashboard ? "hs-community-map" : ""}` : undefined}>
       {plotted.length === 0 ? (
-        supervisor ? <EmptyState compact icon={MapPin} title={dashboard ? "Recorded coordinates unavailable" : "Verified coordinates unavailable"} description="The assigned barangay has no recorded reference point. No geographic location has been substituted." /> : <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
+        supervisor ? dashboard ? <div className="hs-map-empty" style={{ height: `${height}px` }}><EmptyState compact icon={MapPin} title="Recorded coordinates unavailable" description="The assigned barangay has no recorded reference point. No geographic location has been substituted." /></div> : <EmptyState compact icon={MapPin} title="Verified coordinates unavailable" description="The assigned barangay has no recorded reference point. No geographic location has been substituted." /> : <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
           <MapPin className="h-5 w-5 text-brand-gray" strokeWidth={1.6} />
           <p className="text-sm font-semibold text-brand-ink">No mappable health data</p>
           <p className="max-w-sm text-xs text-brand-gray">
@@ -351,8 +388,21 @@ export default function CommunityHealthMap({
           >
             <IconFreeBasemap key={basemapVersion} onError={setBasemapError} />
             <ZoomControl position="bottomleft" />
-            <FitToMarkers points={points} smooth={dashboard} reducedMotion={reducedMotion} />
+            <FitToMarkers points={mapExtent} smooth={dashboard} reducedMotion={reducedMotion} />
             <InvalidateSize />
+            <BoundaryAttribution visible={boundaryFeatures.length > 0} />
+            <Pane name="barangay-boundaries" style={{ zIndex: 350 }}>
+              {boundaryFeatures.map((feature) => {
+                const row = markerData.find((item) => item.name === feature.properties.name);
+                const selected = selectedName === row?.name;
+                return <GeoJSONCompat key={feature.properties.name} data={feature}
+                  style={{ color: selected ? '#2563A6' : '#739ABD', weight: selected ? 3 : 1, opacity: selected ? 1 : 0.65, fillColor: '#60A5FA', fillOpacity: selected ? 0.14 : 0.06 }}
+                  eventHandlers={{ click: () => row && onSelect?.(row) }}>
+                  <TooltipCompat direction="center" sticky>{feature.properties.name}</TooltipCompat>
+                  {row && <PopupCompat><BarangayPopup barangay={row} dashboard={dashboard} metricLabel={metricLabel} periodLabel={periodLabel} detailsHref={detailsHref} /></PopupCompat>}
+                </GeoJSONCompat>;
+              })}
+            </Pane>
             {purokFeatures && (
               <GeoJSONCompat
                 data={purokFeatures}
@@ -367,9 +417,18 @@ export default function CommunityHealthMap({
             )}
             {visibleMarkers.map((b) => {
               const caseCount = b.displayedCaseCount;
-              const fillColor = supervisor ? caseCount > 0 ? "#0B4A8F" : "#64748B" : intensityColor(b.displayedIntensity, caseCount);
+                const fillColor = dashboard
+                  ? caseCount > 0 ? metricLabel.startsWith('Common Conditions') ? conditionColor(b.displayedConditions.find((item) => item.value > 0)?.name) : legend.color : '#8294A8'
+                  : supervisor ? caseCount > 0 ? "#0B4A8F" : "#64748B" : intensityColor(b.displayedIntensity, caseCount);
               const isSelected = selectedName && b.name === selectedName;
-              return (
+              return (<React.Fragment key={b.id}>
+                {dashboard && metricLabel.startsWith('Common Conditions') && b.displayedConditions.filter((item) => item.value > 0).map((condition, index, rows) => (
+                  <CircleMarkerCompat key={condition.name} center={[b.latitude, b.longitude]} radius={Math.min(28, 13 + Math.sqrt(caseCount) * 1.2) + (rows.length - index) * 3}
+                    pathOptions={{ color: conditionColor(condition.name), fill: false, weight: 3 }} eventHandlers={{ click: () => onSelect?.(b) }}>
+                    <TooltipCompat>{condition.name}: {condition.value}</TooltipCompat>
+                    <PopupCompat><BarangayPopup barangay={b} dashboard={dashboard} metricLabel={metricLabel} periodLabel={periodLabel} detailsHref={detailsHref} /></PopupCompat>
+                  </CircleMarkerCompat>
+                ))}
                 <CircleMarkerCompat
                   key={b.id}
                   center={[b.latitude, b.longitude]}
@@ -378,23 +437,24 @@ export default function CommunityHealthMap({
                     color: fillColor,
                     fillColor,
                     fillOpacity: caseCount ? 0.7 : 0.4,
-                    weight: isSelected ? 4 : 2,
+                    weight: isSelected ? 4 : dashboard ? 3 : 2,
                     className: dashboard ? "hs-map-marker" : undefined,
                   }}
                   eventHandlers={onSelect ? { click: () => onSelect(b) } : undefined}
                 >
                   {showCountLabels && <TooltipCompat
                     permanent
-                    direction="center"
-                    className="health-map-count-tooltip"
+                    direction={dashboard ? "right" : "center"}
+                    offset={dashboard ? [10, 0] : [0, 0]}
+                    className={`health-map-count-tooltip${dashboard ? " hs-map-place-label" : ""}`}
                     opacity={1}
                   >
                     <span style={{
-                      color: supervisor || b.displayedIntensity >= 0.75 ? "#FFFFFF" : "#1F2937",
+                      color: dashboard ? "#163957" : supervisor || b.displayedIntensity >= 0.75 ? "#FFFFFF" : "#1F2937",
                       fontSize: "11px",
                       fontWeight: 700,
                     }}>
-                      {caseCount}
+                      {dashboard ? <><strong>{b.name}</strong><span>{caseCount.toLocaleString("en-PH")}</span></> : caseCount}
                     </span>
                   </TooltipCompat>}
 <PopupCompat
@@ -408,13 +468,14 @@ export default function CommunityHealthMap({
                   >
                     <BarangayPopup
                       barangay={b}
+                      dashboard={dashboard}
                       onSelect={onSelect}
                       detailsHref={detailsHref}
                       metricLabel={metricLabel}
                       periodLabel={periodLabel}
                     />
                   </PopupCompat>
-                </CircleMarkerCompat>
+                </CircleMarkerCompat></React.Fragment>
               );
             })}
           </MapContainerCompat>
@@ -437,8 +498,13 @@ export default function CommunityHealthMap({
         </div>
       )}
 
+      {dashboard && plotted.length > 0 && <div className="hs-map-legend" role="group" aria-label={`${metricLabel} map legend`}>
+        {legend.entries.map((entry) => <span key={entry.label}><i aria-hidden="true" style={{ background: entry.outline ? '#DBEAFE' : entry.color, borderColor: entry.color, borderRadius: entry.outline ? 2 : '50%' }} />{entry.label}</span>)}
+      </div>}
+      {dashboard && boundaryError && <p className="hs-map-boundary-note" role="status">{boundaryError}</p>}
+
       {/* Case-intensity legend + any barangays we could not plot (coordinates unavailable). */}
-      {dashboard ? <div className="hs-map-legend"><p><span aria-hidden="true" />{metricLabel} at the recorded barangay reference</p></div> : supervisor ? <div className="mt-3 space-y-1 text-caption text-brand-gray"><p className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2 w-2 rounded-sm bg-brand-blue" /><span className="font-medium text-brand-ink">{metricLabel}</span> at a verified barangay reference point</p><p>Aggregated barangay data, not resident locations or clinical risk ratings.</p></div> : <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-brand-gray">
+      {!dashboard && (supervisor ? <div className="mt-3 space-y-1 text-caption text-brand-gray"><p className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2 w-2 rounded-sm bg-brand-blue" /><span className="font-medium text-brand-ink">{metricLabel}</span> at a verified barangay reference point</p><p>Aggregated barangay data, not resident locations or clinical risk ratings.</p></div> : <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-brand-gray">
         <span className="font-medium text-brand-ink">{metricLabel}: relative intensity</span>
         <span className="text-[11px]">Relative to the largest displayed count in scope; not a clinical risk rating.</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#94A3B8" }} /> No recorded count</span>
@@ -446,7 +512,7 @@ export default function CommunityHealthMap({
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F59E0B" }} /> Moderate</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#EA580C" }} /> Elevated</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#B91C1C" }} /> Highest in scope</span>
-      </div>}
+      </div>)}
       {missing.length > 0 && (
         <p className="mt-2 text-xs text-brand-gray">
           Coordinates unavailable (not plotted): {missing.map((b) => b.name).join(", ")}.
@@ -463,21 +529,25 @@ export default function CommunityHealthMap({
  * opened via `detailsHref` (or, when absent, via `onSelect` for consumers that
  * render their own detail panel). Values come from the live aggregate record.
  */
-const BarangayPopup = React.memo(function BarangayPopup({ barangay: b, onSelect, detailsHref, metricLabel, periodLabel }) {
-  const highRiskResidents = b.reportingHighRiskResidents ?? b.highRiskResidents;
+const BarangayPopup = React.memo(function BarangayPopup({ barangay: b, dashboard = false, onSelect, detailsHref, metricLabel, periodLabel }) {
+  const count = dashboard ? b.caseCount : b.displayedCaseCount;
+  const highRisk = dashboard ? b.highRiskResidents : b.reportingHighRiskResidents ?? b.highRiskResidents;
   return (
     <div className="health-map-popup-body">
       <h3 className="health-map-popup-title">{b.name}</h3>
 
       <dl className="health-map-popup-rows">
         <div className="health-map-popup-row">
-          <dt>High-risk residents</dt>
-          <dd>{Number.isSafeInteger(highRiskResidents) ? highRiskResidents : "—"}</dd>
+          <dt>{dashboard ? 'Recorded cases' : metricLabel}</dt>
+          <dd>{Number.isSafeInteger(count) ? count.toLocaleString("en-PH") : "—"}</dd>
         </div>
         <div className="health-map-popup-row">
-          <dt>{metricLabel}</dt>
-          <dd>{Number.isSafeInteger(b.displayedCaseCount) ? b.displayedCaseCount : "—"}</dd>
+          <dt>High-risk residents</dt>
+          <dd>{Number.isSafeInteger(highRisk) ? highRisk.toLocaleString("en-PH") : "—"}</dd>
         </div>
+        {Number.isSafeInteger(b.pendingFollowUps) && <div className="health-map-popup-row"><dt>Pending follow-ups</dt><dd>{b.pendingFollowUps.toLocaleString("en-PH")}</dd></div>}
+        {metricLabel.startsWith("Common Conditions") && <div className="health-map-popup-row"><dt>{metricLabel}</dt><dd>{Number.isSafeInteger(b.displayedCaseCount) ? b.displayedCaseCount.toLocaleString("en-PH") : "—"}</dd></div>}
+        {metricLabel.startsWith("Common Conditions") && b.displayedConditions?.filter((item) => item.value > 0).map((item) => <div className="health-map-popup-row" key={item.name}><dt>{item.name}</dt><dd>{item.value.toLocaleString('en-PH')}</dd></div>)}
       </dl>
       <p className="text-xs text-brand-gray">{periodLabel}</p>
 

@@ -55,23 +55,34 @@ export const passwordResetRequestValidator = (input = {}) => {
 
 /**
  * Validates first-time or forced password setup payloads for health personnel accounts.
- * Enforces strict object shape (only the `password` key is permitted) and a hardened
+ * Enforces strict object shape (plus an optional invitation proof for recovery) and a hardened
  * personnel password policy: 8 to 200 characters, no whitespace or ASCII control
  * characters, and at least one uppercase letter, lowercase letter, digit, and special character.
  *
  * @param {Object} [input] - Raw request body.
  * @returns {Object} Validation result `{ value: { password } }` or `{ error }`.
  */
-export const personnelPasswordSetupValidator = (input = {}) => {
+export const personnelPasswordSetupValidator = (input = {}, { allowRecoverySecret = true } = {}) => {
   const errors = {};
   if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid({ password: 'A password is required.' });
   const password = typeof input.password === 'string' ? input.password : '';
-  if (Object.keys(input).some((key) => key !== 'password')) errors.request = 'Only the new password may be supplied.';
+  const allowedKeys = allowRecoverySecret ? ['password', 'recoverySecret'] : ['password'];
+  if (Object.keys(input).some((key) => !allowedKeys.includes(key))) errors.request = allowRecoverySecret
+    ? 'Only the new password and invitation recovery proof may be supplied.'
+    : 'Only the new password may be supplied.';
+  if (input.recoverySecret !== undefined && (typeof input.recoverySecret !== 'string'
+    || input.recoverySecret.length < 16 || input.recoverySecret.length > 2048
+    || /[\s\u0000-\u001f]/.test(input.recoverySecret))) {
+    errors.recoverySecret = 'The invitation recovery proof is invalid.';
+  }
   if (!password || password.length > 200 || /\s/.test(password) || hasControlChars(password)
       || !/^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9\s]).{8,}$/.test(password)) {
     errors.password = 'Use 8 to 200 characters including uppercase, lowercase, a number and a special character.';
   }
-  return Object.keys(errors).length ? invalid(errors) : valid({ password });
+  return Object.keys(errors).length ? invalid(errors) : valid({ password, ...(input.recoverySecret === undefined ? {} : { recoverySecret: input.recoverySecret }) });
 };
 
-export default { signInValidator, passwordResetRequestValidator, personnelPasswordSetupValidator };
+export const temporaryPersonnelPasswordChangeValidator = (input = {}) =>
+  personnelPasswordSetupValidator(input, { allowRecoverySecret: false });
+
+export default { signInValidator, passwordResetRequestValidator, personnelPasswordSetupValidator, temporaryPersonnelPasswordChangeValidator };

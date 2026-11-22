@@ -1,3 +1,5 @@
+import { classifyBloodPressure, parseBloodPressure } from '../../../../../shared/bloodPressure.js';
+
 // Entry safeguards, not diagnostic or age-specific normal ranges.
 export const VITAL_FIELDS = Object.freeze([
   { key: "heightCm", label: "Height", unit: "cm", min: 20, max: 300 },
@@ -71,7 +73,7 @@ export function validateVisitDetails(vitals, reason, reasonDetail, notes = "") {
   if (bp) {
     const match = /^(\d{2,3})\s*\/\s*(\d{2,3})$/.exec(bp);
     if (!match) errors.bloodPressure = "Use systolic/diastolic whole numbers, for example 120/80.";
-    else if (+match[1] < 40 || +match[1] > 300 || +match[2] < 20 || +match[2] > 200 || +match[1] <= +match[2]) errors.bloodPressure = "Use systolic 40 to 300 and diastolic 20 to 200; systolic must be higher.";
+    else if (!parseBloodPressure(bp)) errors.bloodPressure = "Use systolic 40 to 300 and diastolic 20 to 200; systolic must be higher.";
   }
   if (!text(reason)) errors.reason = "Please choose the reason for this visit.";
   if (reason === "Other" && !text(reasonDetail)) errors.reasonDetail = "Please describe the reason.";
@@ -87,7 +89,7 @@ export function previewBmi(vitals) {
   return (Math.round(Number(vitals.weightKg) / ((Number(vitals.heightCm) / 100) ** 2) * 10) / 10).toFixed(1);
 }
 
-export function reviewFlags(vitals) {
+export function reviewFlags(vitals, context = {}) {
   const invalid = validateVisitDetails(vitals, "Check-up", "");
   const flags = [];
   const flag = (key, unusual) => {
@@ -99,8 +101,9 @@ export function reviewFlags(vitals) {
   flag("oxygenSaturation", (v) => v < 94);
   flag("bloodSugar", (v) => v < 70 || v > 250);
   if (isRecorded(vitals.bloodPressure) && !invalid.bloodPressure) {
-    const [systolic, diastolic] = vitals.bloodPressure.split("/").map(Number);
-    if (systolic < 90 || systolic >= 180 || diastolic >= 120) flags.push(`Blood Pressure: ${vitals.bloodPressure} - unusual reading; verify and review during consultation.`);
+    const bp = classifyBloodPressure(vitals.bloodPressure, context);
+    if (bp?.referralEvaluationRequired) flags.push(`Blood Pressure: ${vitals.bloodPressure} - ${bp.message}`);
+    else if (bp && (bp.systolic < 90 || bp.systolic >= 180 || bp.diastolic >= 120)) flags.push(`Blood Pressure: ${vitals.bloodPressure} - unusual reading; verify and review during consultation.`);
   }
   return flags;
 }

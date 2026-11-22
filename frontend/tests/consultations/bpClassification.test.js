@@ -6,11 +6,11 @@ import {
 } from "../../src/features/consultations/utils/bpClassification.js";
 
 test("classifies the requested routine category examples", () => {
-  assert.equal(classifyBloodPressure("118/76").category, "Normal Blood Pressure");
-  assert.equal(classifyBloodPressure("125/78").category, "Elevated Blood Pressure");
+  assert.equal(classifyBloodPressure("118/76").category, "Normal");
+  assert.equal(classifyBloodPressure("125/78").category, "Elevated");
   assert.equal(classifyBloodPressure("135/85").category, "Stage 1 Hypertension");
   assert.equal(classifyBloodPressure("150/95").category, "Stage 2 Hypertension");
-  assert.equal(classifyBloodPressure("185/125").category, "Hypertensive Crisis");
+  assert.equal(classifyBloodPressure("185/125").category, "Severe Hypertension");
 });
 
 test("applies systolic boundary values", () => {
@@ -44,19 +44,19 @@ test("classifies crisis only above 180 systolic or above 120 diastolic", () => {
 
 test("crisis guidance does not claim emergency based on numbers alone", () => {
   const result = classifyBloodPressure("185/125");
-  assert.equal(result.category, "Hypertensive Crisis");
+  assert.equal(result.category, "Severe Hypertension");
   assert.equal(result.emergency, false);
-  assert.match(result.message, /concerning symptoms/i);
+  assert.match(result.message, /emergency symptoms/i);
   assert.match(result.message, /does not establish a hypertensive emergency/i);
 });
 
 test("returns category styling for the five requested routine classifications", () => {
   const cases = [
-    ["118/76", "Normal Blood Pressure", "bg-green-100"],
-    ["125/78", "Elevated Blood Pressure", "bg-yellow-100"],
+    ["118/76", "Normal", "bg-green-100"],
+    ["125/78", "Elevated", "bg-yellow-100"],
     ["135/85", "Stage 1 Hypertension", "bg-orange-100"],
     ["150/95", "Stage 2 Hypertension", "bg-red-100"],
-    ["185/125", "Hypertensive Crisis", "bg-red-800"],
+    ["185/125", "Severe Hypertension", "bg-red-800"],
   ];
   for (const [reading, category, badgeClass] of cases) {
     const result = classifyBloodPressure(reading);

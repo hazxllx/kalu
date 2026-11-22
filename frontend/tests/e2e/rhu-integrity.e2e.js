@@ -12,6 +12,7 @@ test.use({ video: 'off' });
 
 const frontend = fileURLToPath(new URL('../../', import.meta.url));
 const modules = {
+  '@/features/health-records/components/LabResultsPanel': 'export default function LabResultsPanel() { return null; }',
   '@/components/common/PageHeader': `import React from 'react'; export default function PageHeader({ title, subtitle }) { return <header><h1>{title}</h1><p>{subtitle}</p></header>; }`,
   '@/components/common/Card': `import React from 'react'; export const Card = ({ children, className = '', ...props }) => <section className={className} {...props}>{children}</section>;`,
   '@/components/system': `import React from 'react'; export function ButtonSelectGroup({ ariaLabel, options, value, onChange }) { return <div role="group" aria-label={ariaLabel}>{options.map(option => <button type="button" key={option} aria-pressed={value === option} onClick={() => onChange(option)}>{option}</button>)}</div>; }`,

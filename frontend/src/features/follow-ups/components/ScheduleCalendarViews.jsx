@@ -1,8 +1,7 @@
 import React from "react";
 import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
-import EmptyState from "@/components/common/EmptyState";
-import { CalendarDays, Check, Clock, MapPin, User, X } from "lucide-react";
+import { Bell, CalendarClock, CalendarDays, Check, ChevronRight, Clock, HeartPulse, MapPin, Plus, Stethoscope, TriangleAlert, User, Users, X } from "lucide-react";
 import { buildMonthGrid, calendarEventKey, formatCalendarStatus, parseCalendarDate, toDateKey } from "@/features/dashboards/components/scheduleCalendarUtils";
 import ScheduleStatusBadge, { ConfirmationBadge, STATUS_DOTS, STATUS_TONES } from "./ScheduleStatusBadge";
 import { formatDateTime, formatTime, fromKey, monthGrid, sameDay, toKey, weekDays } from "../lib/scheduleDates";
@@ -29,6 +28,7 @@ const activityTime = (event) => event.time ? formatTime(event.time) : "Time not 
 /** Restrained category indicator colors, kept consistent across every view. */
 const CATEGORY_DOT = (event) => {
   if (event.type === "follow-up") return "bg-brand-blue";
+  if (event.type === "calendar-activity") return "bg-brand-blue";
   if (event.type === "health-service") {
     const category = String(event.category || "").toLowerCase();
     if (category.includes("consult")) return "bg-brand-sky";
@@ -38,19 +38,28 @@ const CATEGORY_DOT = (event) => {
 };
 const CATEGORY_LABEL = (event) => {
   if (event.type === "follow-up") return "Follow-up";
+  if (event.type === "calendar-activity") return event.activityType || "Personal activity";
   if (event.type === "health-service") return event.category || "Health service";
   return "Activity";
 };
-const MAX_MONTH_INDICATORS = 3;
+const MAX_MONTH_INDICATORS = 2;
+const ACTIVITY_ICONS = {
+  Reminder: Bell,
+  "Follow-up": CalendarClock,
+  Meeting: Users,
+  "Field Visit": MapPin,
+  "Health Activity": HeartPulse,
+  Other: CalendarDays,
+};
 
 /** Compact single-line event indicator: a category dot + short label. */
-function EventIndicator({ event, onOpenEvent, variant = "supervisor", preview = false }) {
-  const label = variant === "supervisor" ? event.residentName || event.label : event.label;
+function EventIndicator({ event, onOpenEvent, onSelectDay, variant = "supervisor", preview = false }) {
+  const label = event.label || (variant === "supervisor" ? event.residentName : "");
   return (
     <button
       type="button"
-      onClick={(e) => { e.stopPropagation(); onOpenEvent(calendarEventKey(event)); }}
-      className="flex w-full min-w-0 items-center gap-1.5 truncate rounded px-1 py-[3px] text-left hover:bg-brand-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue"
+      onClick={(e) => { e.stopPropagation(); onSelectDay?.(event.date ? parseCalendarDate(event.date) : null); onOpenEvent(calendarEventKey(event)); }}
+      className="flex w-full min-w-0 items-center gap-1 truncate rounded px-1 py-px text-left hover:bg-brand-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue"
       aria-label={`${event.typeLabel}: ${event.label}. ${activityTime(event)}. Category: ${CATEGORY_LABEL(event)}. Status: ${formatCalendarStatus(event.status)}.`}
       title={`${event.label} · ${event.residentName || ""} · ${activityTime(event)} · ${formatCalendarStatus(event.status)}`}
     >
@@ -77,43 +86,57 @@ function ActivityPagination({ page, total, pageSize, onChange }) {
   );
 }
 
-function ActivityEmpty({ loading, incomplete, title }) {
-  return loading ? <p role="status" className="py-3 text-ui text-brand-gray">Loading activities...</p> : (
-    <EmptyState
-      compact
-      title={incomplete ? "Activity list is incomplete" : title}
-      description={incomplete ? "A source is unavailable or showing device records. Retry above to verify this date." : "No activities match this date and the current filters."}
-    />
+function ActivityEmpty({ loading = false, incomplete = false, title = "Nothing scheduled", description = "Activities added for this date will appear here.", incompleteMessage = "Some activities could not be loaded.", onRetry = undefined, onAction = undefined, actionLabel = "Add Activity" }) {
+  if (loading || incomplete) return (
+    <div role="status" className="flex items-center gap-2 px-3 py-2 text-caption text-brand-gray">
+      {incomplete && <TriangleAlert className="h-3.5 w-3.5 shrink-0 self-start mt-0.5 text-brand-amber" strokeWidth={1.8} aria-hidden="true" />}
+      <p className="min-w-0 flex-1 break-words">{incomplete ? incompleteMessage : "Loading activities..."}</p>
+      {incomplete && onRetry && <button type="button" onClick={onRetry} disabled={loading} className="supervisor-button is-quiet schedule-inline-action">Retry</button>}
+    </div>
+  );
+  return (
+    <div className="flex flex-col items-center px-4 py-7 text-center">
+      <CalendarDays className="h-6 w-6 text-brand-gray/60" strokeWidth={1.5} aria-hidden="true" />
+      <h3 className="mt-3 text-ui font-medium text-brand-ink">{title}</h3>
+      <p className="mt-1 max-w-[16rem] text-ui text-brand-gray">{description}</p>
+      {onAction && <button type="button" onClick={onAction} className="supervisor-button is-quiet schedule-inline-action mt-3">{actionLabel}</button>}
+    </div>
   );
 }
 
-/* Clean single-row activity entry used by the selected-day panel and agenda.
-   Supervisor layout: time — resident name on the primary line, with the
-   activity description and provider · status below. */
+/** Title-first activity rows shared by the supervisor day panel and agenda. */
 function ScheduleRow({ event, onOpenEvent }) {
+  const personal = event.type === "calendar-activity";
+  const Icon = event.type === "follow-up" ? CalendarClock
+    : event.type === "health-service" ? Stethoscope
+      : ACTIVITY_ICONS[event.activityType] || CalendarDays;
+  const status = formatCalendarStatus(event.status);
+  const metadata = personal ? CATEGORY_LABEL(event)
+    : event.provider ? `Provider: ${event.provider}`
+      : event.recordedBy ? `Recorded by: ${event.recordedBy}`
+        : event.type === "follow-up" ? "Provider not recorded" : CATEGORY_LABEL(event);
   return (
     <li>
       <button
         type="button"
         onClick={() => onOpenEvent(calendarEventKey(event))}
-        className="flex w-full min-w-0 items-start gap-3 px-3 py-2.5 text-left hover:bg-brand-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue"
-        aria-label={`${event.typeLabel}: ${event.residentName || event.label}. ${event.label}. ${activityTime(event)}. Provider: ${event.provider || "Not recorded"}. Status: ${formatCalendarStatus(event.status)}.`}
+        className="group flex w-full min-w-0 items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-brand-bg/60 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-blue"
+        aria-label={`View ${event.typeLabel}: ${event.label}.${event.residentName ? ` Resident: ${event.residentName}.` : ""}${event.time ? ` ${formatTime(event.time)}.` : ""} ${metadata}. Status: ${status}.`}
       >
-        <span className="w-20 shrink-0 pt-0.5 text-caption text-brand-gray">{activityTime(event)}</span>
-        <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${CATEGORY_DOT(event)}`} aria-hidden="true" />
+        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" strokeWidth={1.7} aria-hidden="true" />
         <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-            <span className="truncate text-ui font-medium text-brand-ink">{event.residentName || event.label}</span>
+          <span className="flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-1">
+            <span className="min-w-0 flex-1 basis-32 break-words text-ui font-medium text-brand-ink [overflow-wrap:anywhere]">{event.label}</span>
+            <ScheduleStatusBadge value={status} compact />
+          </span>
+          {event.residentName && <span className="mt-0.5 block break-words text-ui text-brand-gray">{event.residentName}</span>}
+          <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-brand-gray">
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{metadata}</span>
+            {event.time && <time dateTime={event.time} className="shrink-0 tabular-nums">{formatTime(event.time)}</time>}
             {event.preview && <span className="shrink-0 text-[10px] font-medium text-brand-gold" aria-label="Preview sample">preview</span>}
           </span>
-          <span className="mt-0.5 block truncate text-caption text-brand-gray">{event.label}</span>
-          <span className="mt-0.5 block truncate text-caption text-brand-gray">
-            {event.provider ? `Provider: ${event.provider}` : "Provider: Not recorded"}
-            <span className="mx-1.5 text-brand-border" aria-hidden="true">·</span>
-            {formatCalendarStatus(event.status)}
-          </span>
         </span>
-        <span className="mt-0.5 hidden shrink-0 text-caption font-medium text-brand-blue sm:block">View</span>
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 self-center text-brand-gray/60 group-hover:text-brand-blue" strokeWidth={1.8} aria-hidden="true" />
       </button>
     </li>
   );
@@ -125,7 +148,7 @@ function ScheduleRowList({ events, onOpenEvent, emptyTitle = "No activities for 
     return <p className="px-3 py-6 text-center text-ui text-brand-gray">{emptyTitle}</p>;
   }
   return (
-    <ul className="divide-y divide-brand-border">
+    <ul className="divide-y divide-brand-border/60">
       {events.map((event) => <ScheduleRow key={calendarEventKey(event)} event={event} onOpenEvent={onOpenEvent} />)}
     </ul>
   );
@@ -152,7 +175,7 @@ export function MonthView({ cursor, today, byDay, variant = "supervisor", presen
   if (presentation === "supervisor") {
     const selectedKey = toDateKey(selectedDay);
     return (
-      <section className="supervisor-panel" aria-label="Month calendar">
+      <section className="supervisor-panel schedule-month-panel" aria-label="Month calendar">
         <div className="grid grid-cols-7 border-b border-brand-border bg-brand-bg">
           {WEEKDAY_HEADERS.map((day) => <p key={day} className="py-2 text-center text-caption font-medium text-brand-gray">{day}</p>)}
         </div>
@@ -165,7 +188,7 @@ export function MonthView({ cursor, today, byDay, variant = "supervisor", presen
             const selected = key === selectedKey;
             const hidden = Math.max(0, list.length - MAX_MONTH_INDICATORS);
             return (
-              <div key={key} className={`flex h-28 min-w-0 flex-col overflow-hidden border-b border-r border-brand-border p-1 sm:h-32 ${!inMonth ? "bg-brand-bg/60" : ""} ${isToday && !selected ? "bg-brand-blue/5" : ""} ${selected ? "bg-brand-blue/5 ring-2 ring-inset ring-brand-blue" : ""}`}>
+              <div key={key} onClick={() => onSelectDay(day)} className={`schedule-month-cell flex min-w-0 cursor-pointer flex-col overflow-hidden border-b border-r border-brand-border p-1 ${!inMonth ? "bg-brand-bg/60" : ""} ${isToday && !selected ? "bg-brand-blue/5" : ""} ${selected ? "bg-brand-blue/5 ring-2 ring-inset ring-brand-blue" : ""}`}>
                 <button
                   type="button"
                   onClick={() => onSelectDay(day)}
@@ -175,15 +198,16 @@ export function MonthView({ cursor, today, byDay, variant = "supervisor", presen
                 >
                   <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-0.5 font-semibold ${isToday ? "bg-brand-blue text-white" : inMonth ? "text-brand-ink" : "text-brand-gray"}`}>{day.getDate()}</span>
                   {isToday && <span className="truncate text-[10px] font-medium text-brand-blue">Today</span>}
+                  {list.length > 1 && <span className="ml-auto rounded-full bg-brand-blue/10 px-1.5 text-[10px] font-medium text-brand-blue">{list.length}</span>}
                 </button>
                 {list.length ? (
                   <div className="mt-0.5 min-w-0 space-y-[1px]">
-                    {list.slice(0, MAX_MONTH_INDICATORS).map((event) => <EventIndicator key={calendarEventKey(event)} event={event} variant={variant} preview={event.preview} onOpenEvent={onOpenEvent} />)}
+                    {list.slice(0, MAX_MONTH_INDICATORS).map((event) => <EventIndicator key={calendarEventKey(event)} event={event} variant={variant} preview={event.preview} onOpenEvent={onOpenEvent} onSelectDay={() => onSelectDay(day)} />)}
                   </div>
-                ) : <div className="flex-1" />}
+                ) : null}
                 {hidden > 0 ? (
-                  <button type="button" onClick={() => onSelectDay(day)} className="mt-auto truncate rounded px-1 text-left text-caption font-medium text-brand-blue hover:underline" aria-label={`View all ${list.length} activities on ${key}`}>+{hidden} more</button>
-                ) : <div className="flex-1" />}
+                  <button type="button" onClick={() => onSelectDay(day)} className="mt-0.5 shrink-0 truncate rounded px-1 text-left text-[10px] font-medium leading-[14px] text-brand-blue hover:underline" aria-label={`View all ${list.length} activities on ${key}`}>+{hidden} more</button>
+                ) : null}
               </div>
             );
           })}
@@ -275,7 +299,7 @@ export function WeekView({ cursor, today, byDay, variant = "supervisor", present
                 <span className="text-section font-semibold text-brand-ink">{day.getDate()}</span>
                 {key === toDateKey(today) && <span className="ml-1 text-caption text-brand-blue">Today</span>}
               </button>
-              {list.length ? <div className="min-w-0 space-y-0.5">{list.slice(0, MAX_MONTH_INDICATORS).map((event) => <EventIndicator key={calendarEventKey(event)} event={event} variant={variant} preview={event.preview} onOpenEvent={onOpenEvent} />)}</div>
+              {list.length ? <div className="min-w-0 space-y-0.5">{list.slice(0, MAX_MONTH_INDICATORS).map((event) => <EventIndicator key={calendarEventKey(event)} event={event} variant={variant} preview={event.preview} onOpenEvent={onOpenEvent} onSelectDay={() => onSelectDay(day)} />)}</div>
                 : <p className="text-caption text-brand-gray">No loaded activities</p>}
               {list.length > MAX_MONTH_INDICATORS && <button type="button" onClick={() => onSelectDay(day)} className="mt-2 truncate text-caption font-medium text-brand-blue hover:underline">+{list.length - MAX_MONTH_INDICATORS} more</button>}
             </div>
@@ -332,8 +356,8 @@ export function WeekView({ cursor, today, byDay, variant = "supervisor", present
 
 /* ----------------------------------- Day ----------------------------------- */
 
-export function DayView({ cursor, byDay, variant = "supervisor", presentation = "default", loading = false, incomplete = false, onOpenEvent }) {
-  if (presentation === "supervisor") return <SupervisorDayView cursor={cursor} byDay={byDay} loading={loading} incomplete={incomplete} onOpenEvent={onOpenEvent} />;
+export function DayView({ cursor, byDay, variant = "supervisor", presentation = "default", loading = false, incomplete = false, incompleteMessage = undefined, onRetry = undefined, filtersActive = false, onClearFilters = undefined, onOpenEvent, onAddActivity = undefined, canAddActivity = false }) {
+  if (presentation === "supervisor") return <SupervisorDayView cursor={cursor} byDay={byDay} loading={loading} incomplete={incomplete} incompleteMessage={incompleteMessage} onRetry={onRetry} filtersActive={filtersActive} onClearFilters={onClearFilters} onOpenEvent={onOpenEvent} onAddActivity={onAddActivity} canAddActivity={canAddActivity} />;
   const list = byDay[toKey(cursor)] || [];
   return (
     <Card className="p-5">
@@ -374,34 +398,38 @@ export function DayView({ cursor, byDay, variant = "supervisor", presentation = 
   );
 }
 
-function SupervisorDayView({ cursor, byDay, loading, incomplete, onOpenEvent }) {
+function SupervisorDayView({ cursor, byDay, loading, incomplete, incompleteMessage, onRetry, filtersActive, onClearFilters, onOpenEvent, onAddActivity, canAddActivity }) {
   const key = toDateKey(cursor);
   const list = byDay[key] || [];
-  const previewCount = list.filter((event) => event.preview).length;
+  const count = list.length || (!loading && !incomplete)
+    ? `${list.length} ${list.length === 1 ? "activity" : "activities"}${incomplete || loading ? " loaded" : ""}`
+    : loading ? "Loading..." : "Not verified";
   return (
-    <section className="supervisor-panel flex flex-col h-full" aria-label="Selected date activities">
-      <div className="border-b border-brand-border px-4 py-3 shrink-0">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-caption text-brand-gray">Selected date</p>
-            <h2 className="mt-0.5 break-words text-section font-semibold text-brand-ink">{cursor.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</h2>
-          </div>
-          <p className="shrink-0 text-caption font-medium text-brand-ink">
-            {!list.length && (incomplete || loading) ? "Awaiting complete source data"
-              : `${list.length} ${list.length === 1 ? "activity" : "activities"}`}
-          </p>
+    <section className="supervisor-panel schedule-day-panel" aria-label="Selected date activities">
+      <header className="schedule-day-header border-b border-brand-border">
+        <div className="schedule-day-heading min-w-0">
+          <h2 className="break-words text-base font-semibold leading-6 text-brand-ink">
+            <time dateTime={key}>{cursor.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</time>
+          </h2>
+          <p className="mt-0.5 text-caption text-brand-gray">{cursor.toLocaleDateString("en-US", { weekday: "long" })}</p>
         </div>
-        {previewCount > 0 && <p className="mt-1.5 text-caption text-brand-gray">Includes {previewCount} preview sample follow-up{previewCount === 1 ? "" : "s"} (not saved).</p>}
-      </div>
-      <div className="flex-1 overflow-y-auto min-h-0">
-        {list.length ? <ScheduleRowList events={list} onOpenEvent={onOpenEvent} />
-          : <ActivityEmpty loading={loading} incomplete={incomplete} title="No activities for this day" />}
+        <p className="schedule-day-count text-caption tabular-nums text-brand-gray">{count}</p>
+        {canAddActivity && <button type="button" onClick={onAddActivity} className="supervisor-button schedule-add-action"><Plus className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />Add Activity</button>}
+      </header>
+      {(loading || incomplete) && <ActivityEmpty loading={loading} incomplete={incomplete} incompleteMessage={incompleteMessage} onRetry={onRetry} />}
+      <div className="schedule-day-body" aria-busy={loading}>
+        {list.length ? <ScheduleRowList events={list} onOpenEvent={onOpenEvent} /> : !loading && !incomplete && <ActivityEmpty
+          title={filtersActive ? "No matching activities" : "Nothing scheduled"}
+          description={filtersActive ? "Try adjusting or clearing your calendar filters." : "Activities added for this date will appear here."}
+          onAction={filtersActive ? onClearFilters : undefined}
+          actionLabel="Clear filters"
+        />}
       </div>
     </section>
   );
 }
 
-export function AgendaView({ events, selectedDay, loading = false, incomplete = false, onSelectDay, onOpenEvent }) {
+export function AgendaView({ events, selectedDay, loading = false, incomplete = false, onRetry = undefined, onSelectDay, onOpenEvent }) {
   const selectedKey = toDateKey(selectedDay);
   const index = events.findIndex((event) => event.date >= selectedKey);
   const initialPage = Math.floor(Math.max(0, index) / AGENDA_PAGE_SIZE);
@@ -417,8 +445,9 @@ export function AgendaView({ events, selectedDay, loading = false, incomplete = 
     <section className="supervisor-panel p-4" aria-label="Monthly activity agenda">
       <div className="supervisor-section-heading">
         <h2>Agenda</h2>
-        <p>{!events.length && (incomplete || loading) ? "Awaiting complete source data" : `${events.length} ${incomplete || loading ? "loaded " : ""}activities`} / Up to {AGENDA_PAGE_SIZE} per page</p>
+        <p>{!events.length && (incomplete || loading) ? loading ? "Loading..." : "Not verified" : `${events.length} ${incomplete || loading ? "loaded " : ""}activities`} / Up to {AGENDA_PAGE_SIZE} per page</p>
       </div>
+      {(loading || incomplete) && <ActivityEmpty loading={loading} incomplete={incomplete} onRetry={onRetry} />}
       {visible.length ? <div className="space-y-5">
         {[...days].map(([date, list]) => (
           <section key={date} aria-label={`Activities on ${date}`}>
@@ -428,7 +457,7 @@ export function AgendaView({ events, selectedDay, loading = false, incomplete = 
             <ScheduleRowList events={list} onOpenEvent={onOpenEvent} />
           </section>
         ))}
-      </div> : <ActivityEmpty loading={loading} incomplete={incomplete} title="No activities in this month" />}
+      </div> : !loading && !incomplete && <ActivityEmpty title="No activities in this month" description="No activities match this month and the current filters." />}
       <ActivityPagination page={page} total={events.length} pageSize={AGENDA_PAGE_SIZE} onChange={(next) => setPagination({ events, selectedKey, page: next })} />
     </section>
   );
@@ -452,6 +481,30 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
   if (presentation === "supervisor") {
     const service = schedule.type === "health-service";
     const date = parseCalendarDate(schedule.date);
+    if (schedule.type === "calendar-activity") {
+      return (
+        <dialog ref={dialogRef} aria-labelledby="supervisor-activity-title" onCancel={(event) => { event.preventDefault(); onClose(); }} className="supervisor-modal m-auto max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/50 sm:p-5">
+          <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+            <div className="min-w-0">
+              <p className="text-caption text-brand-gray">{schedule.activityType} · Personal activity</p>
+              <h2 id="supervisor-activity-title" className="mt-0.5 break-words text-section font-semibold">{schedule.label}</h2>
+            </div>
+            <button type="button" onClick={onClose} className="supervisor-button is-icon" aria-label="Close activity details"><X className="h-4 w-4" aria-hidden="true" /></button>
+          </div>
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+            <div><dt className="text-caption text-brand-gray">Date</dt><dd className="mt-0.5 text-ui">{date?.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) || "Date not specified"}</dd></div>
+            <div><dt className="text-caption text-brand-gray">Time</dt><dd className="mt-0.5 text-ui">{activityTime(schedule)}</dd></div>
+            {schedule.residentId && <div><dt className="text-caption text-brand-gray">Linked resident</dt><dd className="mt-0.5 break-words text-ui">{schedule.residentName || schedule.residentId}</dd></div>}
+          </dl>
+          <div className="mt-4 border-t border-brand-border pt-3">
+            <p className="text-caption text-brand-gray">Notes / Description</p>
+            <p className="mt-1 whitespace-pre-wrap break-words text-ui">{schedule.notes || "No notes recorded."}</p>
+          </div>
+          {error && <p role="alert" className="mt-4 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
+          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-brand-border pt-3">{actions}<button type="button" onClick={onClose} className="supervisor-button">Close</button></div>
+        </dialog>
+      );
+    }
     const details = [
       ["Resident", schedule.residentName],
       ["Resident ID", schedule.residentId || "Not recorded"],

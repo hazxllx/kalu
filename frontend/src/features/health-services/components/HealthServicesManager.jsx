@@ -843,6 +843,7 @@ export default function HealthServicesManager({ subtitle }) {
         crumbs={isSupervisor ? ["Health Operations", "Health Programs"] : ["Clinical Care", "Health Services"]}
         title={isSupervisor ? "Health Programs" : "Health Services"}
         subtitle={subtitle || (isSupervisor ? "Programs and services available to your barangay." : "Catalog of health services and their assigned personnel.")}
+        dense={isSupervisor}
         action={canCreate ? (
           <button
             onClick={openCreate}

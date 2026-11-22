@@ -5,6 +5,8 @@ import authorize from '../middleware/authorize.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { getRecentActivities } from '../controllers/recentActivities.controller.js';
+import { getBarangayBoundaries } from '../controllers/barangayBoundaries.controller.js';
 import {
   getEarlyWarning,
   getCommunityMap,
@@ -27,6 +29,11 @@ import {
  * municipality-wide figures by manipulating query parameters.
  */
 const router = Router();
+
+router.get('/barangay-boundaries', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), resolveBarangayScope, asyncHandler(getBarangayBoundaries));
+
+// Latest five privacy-safe monitoring events within the caller's stored scope.
+router.get('/recent-activities', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), resolveBarangayScope, asyncHandler(getRecentActivities));
 
 // GET /api/analytics/early-warning — Aggregate early-warning alerts and risk spikes within the caller's barangay/municipality scope.
 router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), resolveBarangayScope, asyncHandler(getEarlyWarning));

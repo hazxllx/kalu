@@ -1,25 +1,11 @@
-/**
- * Blood-Pressure Configuration & Classification Service (`services/bpConfig.service.js`).
- *
- * Fits into KALUSAGAP's backend pipeline (`bpConfig.routes -> authenticate -> authorize -> bpConfig.controller -> bpConfig.service -> repository / public.bp_threshold_settings`),
- * acting as the single authoritative resolver and admin editor for BP screening cut-offs.
- *
- * Resolution order:
- *   1. `public.bp_threshold_settings` (when migration is applied and populated), otherwise
- *   2. Documented clinical screening defaults in `config/bpThresholds.js`.
- *
- * Writes are restricted to `admin`, validated against overlapping or contradictory
- * systolic/diastolic cut-offs (`validateThresholdPayload`), and recorded in
- * `public.health_audit_logs`. Classification is screening guidance rather than a
- * clinical diagnosis, and the backend always recomputes BP categories server-side.
- */
+// Keep the existing settings API, but report/enforce the same fixed reference
+// categories as clinical entry. Stored legacy settings never override them.
 import repository from '../repositories/index.js';
 import ApiError from '../utils/apiError.js';
 import {
   DEFAULT_BP_THRESHOLDS,
   BP_CATEGORIES,
   classifyBloodPressure as classify,
-  resolveThresholds,
   validateThresholdPayload,
 } from '../config/bpThresholds.js';
 
@@ -40,10 +26,8 @@ const assertAdmin = (user) => {
 };
 
 /**
- * Resolve active BP screening thresholds, custom category labels, and defaults.
- *
- * Falls back gracefully to `DEFAULT_BP_THRESHOLDS` whenever `public.bp_threshold_settings`
- * is unconfigured or unreachable so clinical vitals classification never breaks.
+ * Report the effective shared BP thresholds and labels. Legacy settings are
+ * retained in storage, but cannot override the clinical reference categories.
  *
  * @param {Object} [options] - Service options
  * @param {Object} [options.repo=repository] - Injectable data repository
@@ -53,8 +37,8 @@ export const getBpConfig = async ({ repo = repository } = {}) => {
   const row = typeof repo.getBpThresholdSettings === 'function'
     ? await safe(() => repo.getBpThresholdSettings(), null)
     : null;
-  const thresholds = resolveThresholds(row);
-  const labels = (row && row.labels && typeof row.labels === 'object') ? row.labels : {};
+  const thresholds = { ...DEFAULT_BP_THRESHOLDS };
+  const labels = {};
   const categories = Object.values(BP_CATEGORIES).map((c) => ({
     code: c.code,
     label: (typeof labels[c.code] === 'string' && labels[c.code].trim()) ? labels[c.code].trim() : c.label,
@@ -66,24 +50,22 @@ export const getBpConfig = async ({ repo = repository } = {}) => {
     labels,
     categories,
     defaults: { ...DEFAULT_BP_THRESHOLDS },
-    source: row ? 'configured' : 'default',
+    source: 'default',
     updatedAt: row?.updatedAt || null,
   };
 };
 
 /**
- * Classify a systolic/diastolic blood-pressure reading against the active configuration.
+ * Classify a systolic/diastolic reading with the shared clinical rules and symptoms.
  *
  * @param {Object} reading - Blood-pressure reading (`{ systolic, diastolic }`)
  * @param {Object} [options] - Service options
- * @param {Object} [options.repo=repository] - Injectable data repository
+ * @param {Object} [options.context] - Current complaint, findings and boolean indicators
  * @returns {Promise<Object>} Resolved BP category, label, severity, and emergency flag
  */
-export const classifyWithConfig = async (reading, { repo = repository } = {}) => {
-  const row = typeof repo.getBpThresholdSettings === 'function'
-    ? await safe(() => repo.getBpThresholdSettings(), null)
-    : null;
-  return classify(reading, row, row?.labels || null);
+export const classifyWithConfig = async (reading, { context = {} } = {}) => {
+  // Stored legacy settings must not make the server disagree with the badge.
+  return classify(reading, context);
 };
 
 /** Best-effort audit logger recording before/after threshold snapshots in `health_audit_logs`. */
@@ -120,8 +102,12 @@ export const updateThresholds = async ({ user, payload = {}, repo = repository }
   }
   const { errors, thresholds } = validateThresholdPayload(payload);
   if (errors.length) throw ApiError.unprocessable('Please correct the blood-pressure thresholds.', errors);
+  if (Object.entries(DEFAULT_BP_THRESHOLDS).some(([key, value]) => thresholds[key] !== value)
+    || (payload.labels && Object.entries(payload.labels).some(([code, label]) => label && label !== BP_CATEGORIES[code]?.label))) {
+    throw ApiError.unprocessable('Clinical blood-pressure categories must use the shared reference thresholds and labels.');
+  }
   const before = await safe(() => repo.getBpThresholdSettings?.(), null);
-  const labels = payload.labels && typeof payload.labels === 'object' ? payload.labels : (before?.labels || {});
+  const labels = {};
   const saved = await repo.saveBpThresholdSettings({ ...thresholds, labels, updatedBy: user?.id || null });
   await audit({ user, action: 'BP_THRESHOLDS_UPDATED', previous: before, next: saved });
   return getBpConfig({ repo });

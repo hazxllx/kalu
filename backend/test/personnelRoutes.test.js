@@ -198,6 +198,24 @@ test('list and summary pass exact personnel and approval filters before reposito
   });
 });
 
+test('summary preserves search, role, geographic, status and lifecycle filters', async () => {
+  const expected = {
+    q: 'Nurse', role: 'phn', status: 'disabled', municipalityId: MUNICIPALITY,
+    barangayId: BARANGAY, lifecycleState: 'awaiting_setup', personnelOnly: true,
+    approvalStatus: 'approved',
+  };
+  await harness({ repo: {
+    getAccountSummary: async (filters) => {
+      assert.deepEqual(filters, expected);
+      return { total: 1, disabled: 1 };
+    },
+  } }, async ({ api }) => {
+    const result = await api(`/users/summary?${new URLSearchParams(expected)}`);
+    assert.equal(result.status, 200);
+    assert.equal(result.json.data.total, 1);
+  });
+});
+
 test('historical PHN and HS review hierarchy remains separate from admin users authority', async () => {
   const request = { id: REQUEST, auth_user_id: TARGET, role: 'health_supervisor', municipality_id: MUNICIPALITY, barangay_id: BARANGAY, status: 'pending' };
   const repo = { reviewPersonnelAccountRequest: async ({ actorId }) => { assert.equal(actorId, ACTOR); return { ...request, status: 'approved', decided_by: ACTOR, profileStatus: 'disabled' }; } };
@@ -225,21 +243,29 @@ test('temporary password change validates own-account input and delegates only t
   const calls = [];
   await harness({ ownerId: TARGET, repo: {
     getPersonnelSetupAccount: async (id) => { calls.push(['account', id]); return profile({ mustChangePassword: true }); },
-    completeTemporaryPasswordChange: async (id) => { calls.push(['complete', id]); return profile({ mustChangePassword: false, setupRequired: false, status: 'active' }); },
-  } }, async ({ api, client }) => withMethods(client.auth.admin, {
-    updateUserById: async (id, input) => { calls.push(['password', id, input]); return { data: { user: { id } }, error: null }; },
-  }, async () => {
+    beginPersonnelTemporaryPasswordChange: async ({ id, passwordDigest }) => {
+      assert.match(passwordDigest, /^[a-f0-9]{64}$/); calls.push(['claim', id]); return OPERATION;
+    },
+    updatePersonnelOwnPassword: async ({ accessToken, password }) => {
+      calls.push(['password', accessToken, { password }]); return { data: { user: { id: TARGET } }, error: null };
+    },
+    completeClaimedTemporaryPasswordChange: async ({ id, claimId }) => {
+      assert.equal(claimId, OPERATION); calls.push(['complete', id]);
+      return profile({ mustChangePassword: false, setupRequired: false, status: 'active' });
+    },
+  } }, async ({ api }) => {
     assert.equal((await api('/auth/personnel/temporary-password-change', { method: 'POST', body: { password: 'weak' } })).status, 400);
     const result = await api('/auth/personnel/temporary-password-change', { method: 'POST', body: { password: PASSWORD } });
     assert.equal(result.status, 200);
     assert.deepEqual(result.json.data, { passwordChanged: true, active: true, approvalStatus: 'approved', activationRequested: true });
     assert.deepEqual(calls, [
       ['account', TARGET],
-      ['password', TARGET, { password: PASSWORD }],
+      ['claim', TARGET],
+      ['password', 'verified-token', { password: PASSWORD }],
       ['complete', TARGET],
     ]);
     assert.doesNotMatch(JSON.stringify(result.json), /OwnerChosen9/);
-  }));
+  });
 });
 
 test('password setup rejects client ids/roles and weak passwords without updating anyone', async () => {
@@ -257,15 +283,17 @@ test('password setup SQL failure after saved password returns accurate HTTP 200 
   await harness({ ownerId: TARGET, status: 'disabled', repo: {
     getPersonnelSetupAccount: async () => profile(),
     completePersonnelAccountSetup: async (id) => { calls.push(['complete', id]); throw new Error('RPC transport failure'); },
-  } }, async ({ api, client }) => withMethods(client.auth.admin, {
-    updateUserById: async (id, input) => { calls.push(['password', id]); assert.deepEqual(input, { password: PASSWORD }); return { data: { user: { id } }, error: null }; },
-  }, async () => {
+    updatePersonnelOwnPassword: async ({ accessToken, password }) => {
+      assert.equal(accessToken, 'verified-token'); assert.equal(password, PASSWORD);
+      calls.push(['password', TARGET]); return { data: { user: { id: TARGET } }, error: null };
+    },
+  } }, async ({ api }) => {
     const result = await api('/auth/personnel/password-setup', { method: 'POST', body: { password: PASSWORD } });
     assert.equal(result.status, 200);
     assert.equal(result.json.data.passwordSaved, true); assert.equal(result.json.data.setupComplete, false); assert.equal(result.json.data.active, false);
     assert.deepEqual(calls, [['password', TARGET], ['complete', TARGET]]);
     assert.doesNotMatch(JSON.stringify(result.json), /OwnerChosen9|RPC transport/);
-  }));
+  });
 });
 
 test('password setup attempts are rate limited independently of ordinary authenticated routes', async () => {

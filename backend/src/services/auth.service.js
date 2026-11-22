@@ -6,6 +6,11 @@ import { personnelPasswordSetupValidator } from '../validators/auth.validators.j
 import { AUTH_SERVICE_UNAVAILABLE_CODE, AUTH_SERVICE_UNAVAILABLE_MESSAGE, isAuthServiceUnavailable } from '../../../shared/authConnectivity.js';
 import env from '../config/env.js';
 import { sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service.js';
+import {
+  digestInvitationRecoverySecret,
+  digestInvitationRecoveryPassword,
+  digestTemporaryPasswordChange,
+} from '../utils/personnelInvitationRecovery.js';
 
 /**
  * Authentication & Personnel Credential Lifecycle Service (`services/auth.service.js`).
@@ -213,6 +218,13 @@ export const requestPasswordReset = async ({ email } = {}) => {
     return { accepted: true };
   }
 
+  let personnelAccount = null;
+  if (['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(profile.role)) {
+    try { personnelAccount = await repository.getPersonnelSetupAccount(profile.id); }
+    catch { throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.'); }
+    if (personnelAccount?.mustChangePassword === true) return { accepted: true };
+  }
+
   let actionType = 'recovery';
   let isInitialPersonnelSetup = false;
   if (!authUser.email_confirmed_at) {
@@ -223,12 +235,7 @@ export const requestPasswordReset = async ({ email } = {}) => {
     if (!['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(profile.role)) {
       return { accepted: true };
     }
-    let account;
-    try {
-      account = await repository.getPersonnelSetupAccount(profile.id);
-    } catch {
-      throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
-    }
+    const account = personnelAccount;
     if (account?.setupRequired !== true || account.approvalStatus !== 'approved' || account.suspendedAt) {
       return { accepted: true };
     }
@@ -305,6 +312,21 @@ const setupStatus = (account) => ({
   passwordChangedAt: account?.passwordChangedAt ?? null,
 });
 
+const waitForCredentialCutoff = async (account) => {
+  const cutoff = Number(account?.credentialValidAfter);
+  if (!Number.isFinite(cutoff) || cutoff <= 0) return;
+  const delay = Math.min(1000, Math.max(0, cutoff * 1000 - Date.now()));
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+};
+
+const accessTokenClaims = (accessToken) => {
+  try {
+    const payload = accessToken.split('.')[1];
+    if (!payload) return null;
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch { return null; }
+};
+
 /**
  * Load the personnel lifecycle row for `owner.id`, rejecting half-provisioned
  * `personnel_managed` accounts (`lifecycleVersion === null`) with `503`.
@@ -326,7 +348,15 @@ const loadSetupAccount = async (owner) => {
  */
 export const getPersonnelSetupStatus = async ({ accessToken } = {}) => {
   const owner = await verifySetupOwner(accessToken);
-  return setupStatus(await loadSetupAccount(owner));
+  const account = await loadSetupAccount(owner);
+  if (Number(account?.credentialValidAfter) > 0) {
+    const claims = accessTokenClaims(accessToken);
+    if (claims?.sub !== owner.id || !Number.isSafeInteger(claims.iat)
+      || claims.iat < Number(account.credentialValidAfter)) {
+      throw ApiError.unauthorized('This personnel session is no longer current. Sign in again.');
+    }
+  }
+  return setupStatus(account);
 };
 
 /**
@@ -343,10 +373,29 @@ export const getPersonnelSetupStatus = async ({ accessToken } = {}) => {
  * @param {string} [options.password] - New permanent password (validated via `personnelPasswordSetupValidator`)
  * @returns {Promise<Object>} Setup completion status payload
  */
-export const setupPersonnelPassword = async ({ accessToken, password } = {}) => {
-  const validation = personnelPasswordSetupValidator({ password });
+export const setupPersonnelPassword = async ({ accessToken, password, recoverySecret } = {}) => {
+  const validation = personnelPasswordSetupValidator({ password, ...(recoverySecret === undefined ? {} : { recoverySecret }) });
   if (validation.error) throw ApiError.badRequest('Validation failed', validation.error);
-  const owner = await verifySetupOwner(accessToken);
+  let owner;
+  let tokenDigest = null;
+  try {
+    owner = await verifySetupOwner(accessToken);
+  } catch (error) {
+    if (error.statusCode !== 401 || !recoverySecret) throw error;
+    try { tokenDigest = digestInvitationRecoverySecret(recoverySecret); }
+    catch { throw ApiError.forbidden('The invitation recovery proof is invalid or expired.'); }
+    let accountId;
+    try { accountId = await repository.getPersonnelInvitationRecoveryOwner(tokenDigest); }
+    catch { throw new ApiError(503, 'Invitation recovery could not be verified.'); }
+    if (!accountId) throw ApiError.forbidden('The invitation recovery proof is invalid, expired, or already used.');
+    let recoveryUser;
+    try { recoveryUser = await getServiceClient().auth.admin.getUserById(accountId); }
+    catch { throw new ApiError(503, 'The invitation recovery account could not be verified.'); }
+    owner = recoveryUser?.data?.user;
+    if (recoveryUser?.error || owner?.id !== accountId || !owner.email_confirmed_at) {
+      throw ApiError.forbidden('The invitation recovery proof is invalid, expired, or already used.');
+    }
+  }
   const account = await loadSetupAccount(owner);
   if (!account || account.lifecycleVersion === null || !account.setupRequired) {
     throw ApiError.conflict('This account does not require personnel password setup.');
@@ -355,18 +404,62 @@ export const setupPersonnelPassword = async ({ accessToken, password } = {}) => 
   if (account.approvalStatus !== 'approved' || account.suspendedAt) {
     throw ApiError.forbidden('Password setup requires an approved account that is not suspended.');
   }
+  if (typeof owner.email !== 'string' || owner.email.trim().toLowerCase() !== account.email?.trim().toLowerCase()) {
+    throw ApiError.forbidden('The verified Auth identity does not match the personnel account.');
+  }
+  let recovery = null;
+  if (account.mustChangePassword) {
+    if (!recoverySecret) throw ApiError.forbidden('A valid administrator invitation is required to replace an expired temporary password.');
+    if (!tokenDigest) {
+      try { tokenDigest = digestInvitationRecoverySecret(recoverySecret); }
+      catch { throw ApiError.forbidden('The invitation recovery proof is invalid or expired.'); }
+    }
+    let passwordDigest;
+    try {
+      passwordDigest = digestInvitationRecoveryPassword(owner.id, tokenDigest, validation.value.password, env.supabaseServiceRoleKey);
+    } catch {
+      throw new ApiError(503, 'Invitation recovery is temporarily unavailable. Contact an administrator to retry.');
+    }
+    try {
+      recovery = await repository.beginPersonnelInvitationRecovery({ id: owner.id, tokenDigest, passwordDigest });
+    } catch {
+      throw new ApiError(503, 'Invitation recovery could not be verified. Request a fresh invitation and retry.');
+    }
+    if (!recovery) throw ApiError.forbidden('The invitation recovery proof is invalid, expired, or already used. Request a new invitation.');
+  } else if (recoverySecret !== undefined) {
+    throw ApiError.forbidden('The invitation recovery proof does not match an outstanding password setup.');
+  }
   let result;
   try {
-    result = await getServiceClient().auth.admin.updateUserById(owner.id, { password: validation.value.password });
+    result = recovery
+      ? await getServiceClient().auth.admin.updateUserById(owner.id, { password: validation.value.password })
+      : await repository.updatePersonnelOwnPassword({ accessToken, password: validation.value.password });
   } catch {
     throw new ApiError(503, 'The password change could not be confirmed. Please retry without signing out.');
   }
   if (result.error || result.data?.user?.id !== owner.id) {
+    const authErrorStatus = Number(result.error?.status ?? result.error?.statusCode);
+    if (recovery && authErrorStatus >= 400 && authErrorStatus < 500) {
+      try {
+        await repository.releasePersonnelInvitationRecovery({
+          id: owner.id,
+          tokenDigest: digestInvitationRecoverySecret(recoverySecret),
+          claimId: recovery,
+        });
+      } catch { /* Preserve the original Auth error if the cleanup RPC is unavailable. */ }
+    }
     throw new ApiError(503, 'The password change could not be confirmed. Please retry without signing out.');
   }
   try {
-    const completed = await repository.completePersonnelAccountSetup(owner.id);
+    const completed = recovery
+      ? await repository.completePersonnelInvitationRecovery({
+        id: owner.id,
+        tokenDigest: digestInvitationRecoverySecret(recoverySecret),
+        claimId: recovery,
+      })
+      : await repository.completePersonnelAccountSetup(owner.id);
     if (!completed || completed.setupRequired || completed.lifecycleVersion === null) throw new Error('Setup was not confirmed');
+    await waitForCredentialCutoff(completed);
     return { passwordSaved: true, setupComplete: true, ...setupStatus(completed) };
   } catch {
     // Auth succeeded before SQL. Never report a password failure or active
@@ -385,8 +478,8 @@ export const setupPersonnelPassword = async ({ accessToken, password } = {}) => 
  * Replace an administrator-assigned temporary password with a permanent password
  * for an approved, unsuspended staff account before `temporaryPasswordExpiresAt`.
  *
- * Updates Supabase Auth via `auth.admin.updateUserById` and clears `mustChangePassword`
- * via `repository.completeTemporaryPasswordChange`, throwing `503` if confirmation fails.
+ * Updates Supabase Auth as the verified caller and clears `mustChangePassword`
+ * via a claim-bound completion, throwing `503` if confirmation fails.
  *
  * @param {Object} [options] - Password rotation payload
  * @param {string} [options.accessToken] - Caller's Bearer access token
@@ -401,32 +494,52 @@ export const changeTemporaryPersonnelPassword = async ({ accessToken, password }
   if (!account || account.lifecycleVersion === null || !account.mustChangePassword) {
     throw ApiError.conflict('This account does not require a temporary-password change.');
   }
-  if (account.temporaryPasswordExpiresAt && Date.parse(account.temporaryPasswordExpiresAt) <= Date.now()) {
-    throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.');
-  }
   if (account.approvalStatus !== 'approved' || account.suspendedAt) {
     throw ApiError.forbidden('A permanent password can be created only after approval and while the account is not suspended.');
   }
 
+  let passwordDigest;
+  try { passwordDigest = digestTemporaryPasswordChange(owner.id, validation.value.password, env.supabaseServiceRoleKey); }
+  catch { throw new ApiError(503, 'Temporary password protection is not configured.'); }
+  let claimId;
+  try { claimId = await repository.beginPersonnelTemporaryPasswordChange({ id: owner.id, passwordDigest }); }
+  catch { throw new ApiError(503, 'The temporary-password change could not be authorized. Retry or contact your administrator.'); }
+  if (!claimId) {
+    if (account.temporaryPasswordExpiresAt && Date.parse(account.temporaryPasswordExpiresAt) <= Date.now()) {
+      throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.');
+    }
+    throw ApiError.conflict('Another password change or administrator invitation is already being processed.');
+  }
+
   let result;
   try {
-    result = await getServiceClient().auth.admin.updateUserById(owner.id, { password: validation.value.password });
+    result = await repository.updatePersonnelOwnPassword({ accessToken, password: validation.value.password });
   } catch {
     throw new ApiError(503, 'The password change could not be confirmed. Please retry.');
   }
   if (result.error || result.data?.user?.id !== owner.id) {
+    const authErrorStatus = Number(result.error?.status ?? result.error?.statusCode);
+    if (authErrorStatus >= 400 && authErrorStatus < 500) {
+      try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId }); }
+      catch { /* Preserve the Auth error if cleanup is unavailable. */ }
+    }
     throw new ApiError(503, 'The password change could not be confirmed. Please retry.');
   }
 
   let completed;
   try {
-    completed = await repository.completeTemporaryPasswordChange(owner.id);
+    completed = await repository.completeClaimedTemporaryPasswordChange({ id: owner.id, claimId });
   } catch {
+    try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId }); }
+    catch { /* A confirmed Auth update can safely hand recovery to a fresh invitation. */ }
     throw new ApiError(503, 'Your password was saved, but the password-change requirement could not be confirmed. Please retry.');
   }
   if (!completed || completed.mustChangePassword) {
+    try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId }); }
+    catch { /* A confirmed Auth update can safely hand recovery to a fresh invitation. */ }
     throw new ApiError(503, 'Your password was saved, but the password-change requirement could not be confirmed. Please retry.');
   }
+  await waitForCredentialCutoff(completed);
   return {
     passwordChanged: true,
     active: completed.status === 'active',

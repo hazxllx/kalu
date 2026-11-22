@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom";
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "framer-motion";
 import { ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, Download, MapPin, Send, Stethoscope, UserRound } from "lucide-react";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
 import TablePagination from "@/components/tables/TablePagination";
@@ -13,24 +12,22 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import useAuthorizedData from "@/hooks/useAuthorizedData";
 import { referralsApi, followUpsApi, residentsApi, consultationsApi, healthServicesApi } from "@/services/api";
-import { fetchEarlyWarningData, fetchCommunityMap } from "@/services/api/earlyWarningApi";
-import { authorizedViewsApi } from "@/services/api/authorizedViewsApi";
+import { fetchEarlyWarningData, fetchCommunityMap, fetchRecentBarangayActivities, fetchBarangayBoundaries } from "@/services/api/earlyWarningApi";
 import { buildBarangayHealthOverview } from "@/services/api/monitoringApi";
 import { getSupervisorScope } from "@/lib/supervisorScope";
 import { loadServerRows } from "@/lib/serverRows";
 import { toLocalISODate } from "@/lib/dateUtils";
 import { manilaDateKey, fromKey, formatTime } from "@/features/follow-ups/lib/scheduleDates";
 import CommunityHealthMap from "@/features/analytics/components/CommunityHealthMap";
-import TopHealthTrends from "@/features/dashboards/components/TopHealthTrends";
 import HealthSupervisorPageHeader from "@/features/dashboards/components/HealthSupervisorPageHeader";
-import { buildTopHealthTrends } from "@/features/dashboards/components/healthTrendsUtils";
+import RecentBarangayUpdates from "@/features/dashboards/components/RecentBarangayUpdates";
 import { mapFollowUpEvent, mapHealthServiceEvent } from "@/features/dashboards/components/scheduleCalendarUtils";
 import { downloadCsv } from "@/features/health-records/lib/programFormExport";
 import {
   requireDashboardRows, recordsForBarangay, isOpenFollowUp, isOverdueFollowUp,
   buildMonitoringPriorities, enrichMonitoringCases, matchesMonitoringFilter,
   upcomingActivities, requireSupervisorMap, riskDistributionRows, dashboardGreeting,
-  previousFourMonths, openedCaseSeries, highRiskCaseSeries, followUpPerformance, monitoringCasesCsv,
+  monitoringCasesCsv,
 } from "@/features/dashboards/components/supervisorDashboardData";
 
 const BASE = "/app/health_supervisor";
@@ -39,7 +36,6 @@ const FILTERS = [
   { id: "all", label: "All" }, { id: "high-risk", label: "High Risk" },
   { id: "overdue", label: "Overdue" }, { id: "pending-referral", label: "Pending Referrals" },
 ];
-const RISK_COLORS = { "Low Risk": "#367B59", "Moderate Risk": "#B18A32", "High Risk": "#B3202C", Unassessed: "#CBD5E1" };
 const OPEN_REFERRAL_STATUSES = new Set(["Pending", "Accepted", "In Progress"]);
 const dateOnly = (value) => String(value || "").slice(0, 10);
 const reportingHighRisk = (overview) => {
@@ -98,10 +94,6 @@ export default function HealthSupervisorDashboard() {
   const monthOptions = (year) => Array.from({ length: 12 }, (_, month) => month).filter((month) => new Date(year, month, 1) >= firstMonth && new Date(year, month, 1) <= new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
   const periodLabel = new Date(selectedPeriod.year, selectedPeriod.month, 1).toLocaleDateString("en-PH", { month: "long", year: "numeric" });
   const periodRange = useMemo(() => ({ from: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month, 1)), to: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month + 1, 0)) }), [selectedPeriod]);
-  const previousRange = useMemo(() => ({ from: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month - 1, 1)), to: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month, 0)) }), [selectedPeriod]);
-  const trendMonths = useMemo(() => previousFourMonths(selectedPeriod.year, selectedPeriod.month), [selectedPeriod]);
-  const trendRange = useMemo(() => ({ from: `${trendMonths[0].key}-01`, to: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month, 0)) }), [trendMonths, selectedPeriod]);
-  const trendLabel = `${dateLabel(trendRange.from, { day: undefined })} - ${dateLabel(trendRange.to, { day: undefined, year: "numeric" })}`;
   const upcomingRange = useMemo(() => { const end = fromKey(today); end.setDate(end.getDate() + 30); return { from: today, to: toLocalISODate(end) }; }, [today]);
 
   const loadOverview = useCallback(async () => {
@@ -114,28 +106,23 @@ export default function HealthSupervisorDashboard() {
   const overview = useAuthorizedData(loadOverview);
   const loadCurrentCases = useCallback(async () => !assignedBarangay || !canAnalytics ? null : requireSupervisorMap(await fetchCommunityMap({ barangay: assignedBarangay }), assignedBarangay), [assignedBarangay, canAnalytics]);
   const currentCases = useAuthorizedData(loadCurrentCases);
+  const loadRecentUpdates = useCallback(async () => !assignedBarangay || !canAnalytics ? null : fetchRecentBarangayActivities(), [assignedBarangay, canAnalytics]);
+  const recentUpdates = useAuthorizedData(loadRecentUpdates);
+  const loadBoundaries = useCallback(async () => !assignedBarangay || !canAnalytics ? null : fetchBarangayBoundaries(), [assignedBarangay, canAnalytics]);
+  const boundaries = useAuthorizedData(loadBoundaries);
   const loadPeriodMap = useCallback(async () => !assignedBarangay || !canAnalytics ? null : requireSupervisorMap(await fetchCommunityMap({ barangay: assignedBarangay, ...periodRange }), assignedBarangay), [assignedBarangay, canAnalytics, periodRange]);
   const periodMap = useAuthorizedData(loadPeriodMap);
-  const loadPreviousMap = useCallback(async () => !assignedBarangay || !canAnalytics ? null : requireSupervisorMap(await fetchCommunityMap({ barangay: assignedBarangay, ...previousRange }), assignedBarangay), [assignedBarangay, canAnalytics, previousRange]);
-  const previousMap = useAuthorizedData(loadPreviousMap);
   const loadReferrals = useCallback(async ({ ownerId }) => !assignedBarangay || !canReferrals ? null : recordsForBarangay(requireDashboardRows(await referralsApi.list(undefined, { ownerId }), "referrals"), assignedBarangay), [assignedBarangay, canReferrals]);
   const referrals = useAuthorizedData(loadReferrals);
   const loadFollowUps = useCallback(async () => !assignedBarangay || !canFollowUps ? null : recordsForBarangay(requireDashboardRows(await followUpsApi.list(), "follow-ups"), assignedBarangay), [assignedBarangay, canFollowUps]);
   const followUps = useAuthorizedData(loadFollowUps);
   const loadResidents = useCallback(async ({ ownerId }) => !assignedBarangay || !canResidents ? null : recordsForBarangay(await loadServerRows((params) => residentsApi.list({ ...params, barangay: assignedBarangay }, { ownerId })), assignedBarangay), [assignedBarangay, canResidents]);
   const residents = useAuthorizedData(loadResidents);
-  // Opening-time trends require all authorized records, not an encounter-date subset.
+  // Attention cases include all open authorized records, regardless of encounter date.
   const loadConsultations = useCallback(async ({ ownerId }) => !assignedBarangay || !canConsultations ? null : recordsForBarangay(await loadServerRows((params) => consultationsApi.list(params, { ownerId }), 500), assignedBarangay), [assignedBarangay, canConsultations]);
   const consultations = useAuthorizedData(loadConsultations);
   const loadServices = useCallback(async () => !assignedBarangay || !canServices ? null : recordsForBarangay(requireDashboardRows(await healthServicesApi.listAttendance(upcomingRange), "health-service schedule"), assignedBarangay), [assignedBarangay, canServices, upcomingRange]);
   const services = useAuthorizedData(loadServices);
-  const loadHighRiskTrend = useCallback(async ({ ownerId }) => {
-    if (!assignedBarangay || !canAnalytics) return null;
-    const years = [...new Set(trendMonths.map((month) => month.year))];
-    const data = await Promise.all(years.map((year) => authorizedViewsApi.communityTrends({ barangay: assignedBarangay, riskLevel: "High", year, ...trendRange }, { ownerId })));
-    return highRiskCaseSeries(data, trendMonths, assignedBarangay);
-  }, [assignedBarangay, canAnalytics, trendMonths, trendRange]);
-  const highRiskTrend = useAuthorizedData(loadHighRiskTrend);
 
   const cases = useMemo(() => {
     const data = { residents: residents.data || [], referrals: referrals.data || [], followUps: followUps.data || [], consultations: consultations.data || [], barangay: assignedBarangay, today };
@@ -154,28 +141,39 @@ export default function HealthSupervisorDashboard() {
     try { setExportError(""); downloadCsv(`KALUSAGAP-attention-${String(assignedBarangay).replace(/[^a-z0-9]+/gi, "-")}-${today}.csv`, monitoringCasesCsv(filteredCases)); }
     catch (error) { setExportError(error?.message || "The monitoring records could not be exported."); }
   };
-  const openedTrend = useMemo(() => {
-    if (!consultations.data) return { data: null, error: "" };
-    try { return { data: openedCaseSeries(consultations.data, trendMonths), error: "" }; }
-    catch (error) { return { data: null, error: error.message }; }
-  }, [consultations.data, trendMonths]);
-  const caseTrend = useMemo(() => trendMonths.map((month, index) => ({ ...month, opened: openedTrend.data?.[index]?.opened ?? null, highRisk: highRiskTrend.data?.[index]?.highRisk ?? null })), [trendMonths, openedTrend.data, highRiskTrend.data]);
-  const hasTrend = caseTrend.some((row) => row.opened > 0 || row.highRisk > 0);
-  const trendErrors = [...(consultations.error || openedTrend.error ? [{ label: "Cases opened", message: consultations.error || openedTrend.error, retry: consultations.refresh }] : []), ...(highRiskTrend.error ? [{ label: "High-risk findings", message: highRiskTrend.error, retry: highRiskTrend.refresh }] : [])];
-  const mapOptions = [{ value: "highRiskResidents", label: "High-risk residents" }, { value: "activeCases", label: "Active health cases" }, { value: "caseCount", label: "Recorded cases" }, ...(periodMap.data?.conditionTotals || []).filter((row) => row.value > 0).map((row) => ({ value: `condition:${row.name}`, label: row.name }))];
-  const condition = mapMetric.startsWith("condition:") ? mapMetric.slice(10) : null;
-  useEffect(() => {
-    if (condition && !periodMap.loading && periodMap.data && !periodMap.data.conditionTotals.some((row) => row.name === condition && row.value > 0)) setMapMetric("caseCount");
-  }, [condition, periodMap.loading, periodMap.data]);
   const mapSource = mapMetric === "highRiskResidents" ? currentCases : periodMap;
-  const mapContext = mapMetric === "highRiskResidents" ? "Latest recorded resident risk" : periodLabel;
+  const mapConditionFilter = mapMetric === "commonConditions"
+    ? (periodMap.data?.conditionTotals || []).filter((row) => row.value > 0).map((row) => row.name)
+    : null;
+  const mapPendingByBarangay = useMemo(() => {
+    const counts = new Map();
+    (followUps.data || []).filter(isOpenFollowUp).forEach((row) => {
+      const name = String(row.resident?.barangay || row.residentBarangay || row.barangay || "").trim().toLowerCase();
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    return counts;
+  }, [followUps.data]);
+  const mapBarangays = (mapSource.data?.barangays || []).map((row) => ({
+    ...row,
+    pendingFollowUps: canFollowUps && Array.isArray(followUps.data) ? mapPendingByBarangay.get(String(row.name).trim().toLowerCase()) || 0 : null,
+  }));
+  const mapOptions = [
+    { value: "caseCount", label: "Recorded Cases" },
+    { value: "highRiskResidents", label: "High-Risk Residents" },
+    { value: "pendingFollowUps", label: "Pending Follow-ups", disabled: !canFollowUps },
+    { value: "commonConditions", label: "Common Conditions" },
+  ];
+  const mapMetricLoading = mapSource.loading || (mapMetric === "pendingFollowUps" && followUps.loading);
+  const mapMetricError = mapMetric === "pendingFollowUps" && followUps.error ? followUps.error : mapSource.error;
+  const mapMetricRetry = mapMetric === "pendingFollowUps" && followUps.error ? followUps.refresh : mapSource.refresh;
+  const mapDisplayMetric = mapMetric === "commonConditions" ? "caseCount" : mapMetric;
+  const mapMetricLabel = mapMetric === "commonConditions"
+    ? "Common Conditions"
+    : mapOptions.find((option) => option.value === mapMetric)?.label || "Recorded Cases";
+  const mapContext = mapMetric === "highRiskResidents" ? "Latest recorded resident risk" : mapMetric === "pendingFollowUps" ? "Current pending follow-ups" : periodLabel;
   const scheduleErrors = [...(canFollowUps && followUps.error ? [{ label: "Follow-ups", message: followUps.error, retry: followUps.refresh }] : []), ...(canServices && services.error ? [{ label: "Health services", message: services.error, retry: services.refresh }] : [])];
   const activities = useMemo(() => upcomingActivities([...(followUps.data || []).filter(isOpenFollowUp).map(mapFollowUpEvent), ...(services.data || []).map(mapHealthServiceEvent)].filter(Boolean), upcomingRange.from, upcomingRange.to), [followUps.data, services.data, upcomingRange]);
   const people = new Map((residents.data || []).map((row) => [row.id, row]));
-  const conditions = useMemo(() => buildTopHealthTrends(periodMap.data?.barangays || [], previousMap.loading || previousMap.error ? null : previousMap.data?.barangays || null, { limit: 3 }), [periodMap.data, previousMap.data, previousMap.loading, previousMap.error]);
-  const riskRows = riskDistributionRows(overview.data?.riskDistribution);
-  const riskTotal = riskRows?.reduce((sum, row) => sum + row.value, 0) || 0;
-  const performance = followUpPerformance(followUps.data, periodRange, today);
   const metricValue = (allowed, source, value) => !allowed ? "No access" : source.loading ? "Loading" : source.error ? null : value ?? null;
   const overdueFollowUpsInPeriod = followUps.data?.filter((row) => {
     const scheduled = dateOnly(row.scheduled_date || row.scheduledDate);
@@ -219,7 +217,8 @@ export default function HealthSupervisorDashboard() {
         {[{ label: "Consults", Icon: Stethoscope, href: `${BASE}/consultations`, allowed: canConsultations }, { label: "Follow-ups", Icon: CalendarClock, href: `${BASE}/followups`, allowed: canFollowUps }, { label: "Referrals", Icon: Send, href: `${BASE}/referrals`, allowed: canOpenReferrals }].filter((action) => action.allowed).map(({ label, Icon, href }) => <Link className="hs-shortcut" to={href} key={label}><span><Icon aria-hidden="true" /></span>{label}</Link>)}
       </div></motion.section>
 
-      <div className="hs-main-grid">
+      <div className="hs-content-grid">
+        <div className="hs-content-column">
         <motion.section className="hs-panel hs-attention-panel" aria-labelledby="attention-heading" variants={intro}>
           <header className="hs-panel-header"><div className="hs-title-group"><h2 id="attention-heading">Cases Requiring Attention</h2></div><div className="hs-panel-actions">
             <button type="button" className="hs-button" onClick={exportCases} disabled={!canExport || !filteredCases.length || prioritiesLoading || priorityErrors.length > 0} title={!canExport ? "Export permission is required" : "Export all records matching the selected filter"}><Download aria-hidden="true" />Export</button>
@@ -249,21 +248,6 @@ export default function HealthSupervisorDashboard() {
           )}
         </motion.section>
 
-        <div className="hs-main-sidebar">
-          <motion.section className="hs-panel hs-map-panel" aria-labelledby="map-heading" variants={intro}>
-            <header className="hs-panel-header"><div><h2 id="map-heading">Community Health Map</h2></div><select className="hs-control hs-metric-select" aria-label="Community map metric" value={mapMetric} onChange={(event) => setMapMetric(event.target.value)}>{mapOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></header>
-            <div className="hs-map-content">{canAnalytics ? <CommunityHealthMap variant="dashboard" height={260} barangays={mapSource.data?.barangays || []} center={mapSource.data?.center || null} loading={mapSource.loading} error={mapSource.error} onRetry={mapSource.refresh} showCountLabels showNewCases={false} periodLabel={mapContext} displayMetric={condition ? "caseCount" : mapMetric} metricLabel={mapOptions.find((option) => option.value === mapMetric)?.label || condition || "Recorded cases"} visibleConditions={condition ? [condition] : null} selectedName={selectedMapName} onSelect={(row) => setSelectedMapName(row.name)} detailsHref={`${BASE}/trends`} /> : <EmptyState compact title="Map access unavailable" description="Analytics permission is required." />}</div>
-            <footer className="hs-panel-footer">{canAnalytics ? <Link to={`${BASE}/trends`}>Open health trends<ArrowUpRight aria-hidden="true" /></Link> : <span>Health trends requires analytics access</span>}</footer>
-          </motion.section>
-          <motion.section className="hs-panel hs-trends-panel" aria-labelledby="case-trends-heading" variants={intro}>
-            <header className="hs-panel-header"><div><h2 id="case-trends-heading">Case Trends</h2><p>{trendLabel}</p></div>{canReports && <Link to={`${BASE}/reports`} className="hs-text-link">Reports<ArrowUpRight aria-hidden="true" /></Link>}</header>
-            <SourceErrors errors={trendErrors} />
-            {(canConsultations && consultations.loading) || (canAnalytics && highRiskTrend.loading) ? <p className="hs-loading" role="status">Loading four-month case trends...</p> : hasTrend ? <><div className="hs-line-chart" role="img" aria-label="Case records opened and high-risk case findings over the previous four completed months"><ResponsiveContainer width="100%" height={148}><LineChart data={caseTrend} margin={{ top: 8, right: 9, left: -12, bottom: 0 }}><CartesianGrid vertical={false} stroke="#DDE5EF" strokeDasharray="2 4" /><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#667991" }} tickMargin={8} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#667991" }} width={36} tickCount={3} /><Tooltip contentStyle={{ fontSize: 11, borderRadius: 3, border: "1px solid #D6DEE8", boxShadow: "0 2px 8px #102E5010" }} labelFormatter={(_label, payload) => payload[0]?.payload?.key || _label} />{openedTrend.data && <Line type="monotone" dataKey="opened" name="Cases opened" stroke="#124C80" strokeWidth={1.8} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={!reducedMotion} animationDuration={420} />}{highRiskTrend.data && <Line type="monotone" dataKey="highRisk" name="High-risk findings" stroke="#B28A31" strokeWidth={1.8} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={!reducedMotion} animationDuration={420} />}</LineChart></ResponsiveContainer></div><div className="hs-chart-legend">{openedTrend.data && <span><i style={{ background: "#124C80" }} />Cases opened</span>}{highRiskTrend.data && <span><i style={{ background: "#B28A31" }} />High-risk findings</span>}</div><p className="hs-chart-note">Opened: record creation dates. High-risk: recorded cases under current assessment rules.</p></> : <EmptyState compact title={trendErrors.length ? "Available trend data has no recorded cases" : !canAnalytics && !canConsultations ? "Trend access unavailable" : "No case activity in these months"} description="Historical values are shown only when authorized records are available." />}
-          </motion.section>
-        </div>
-      </div>
-
-      <div className="hs-bottom-grid">
         <motion.section className="hs-panel hs-upcoming-panel" aria-labelledby="upcoming-heading" variants={intro}>
           <header className="hs-panel-header"><div><h2 id="upcoming-heading">Upcoming Activities</h2><p>Next scheduled services and follow-ups</p></div>{(canFollowUps || canServices) && <Link to={`${BASE}/followup-calendar`} className="hs-text-link">View Schedule<ArrowUpRight aria-hidden="true" /></Link>}</header>
           <SourceErrors errors={scheduleErrors} />
@@ -274,16 +258,18 @@ export default function HealthSupervisorDashboard() {
           })}</ul> : <EmptyState compact title={scheduleErrors.length ? "No activities in the available sources" : !canFollowUps && !canServices ? "Schedule access unavailable" : "No upcoming activities"} description="The next 30 days of scheduled follow-ups and services appear here." />}
           <footer className="hs-panel-footer"><span>Next 30 days | Philippine time</span></footer>
         </motion.section>
+        </div>
 
-        <motion.section className="hs-panel hs-insights-panel" aria-labelledby="insights-heading" variants={intro}>
-          <header className="hs-panel-header"><div><h2 id="insights-heading">Community Health Insights</h2><p>{periodLabel}</p></div>{canReports && <Link to={`${BASE}/reports`} className="hs-text-link">Reports<ArrowUpRight aria-hidden="true" /></Link>}</header>
-          <div className="hs-insight-section"><h3>Common Conditions</h3>{canAnalytics ? <><TopHealthTrends compact trends={conditions} loading={periodMap.loading} error={periodMap.error} onRetry={periodMap.refresh} /><p className="hs-insight-note">Classified complaint records, not confirmed diagnoses.{previousMap.error ? " Previous comparison unavailable." : conditions.some((row) => row.direction) ? " Compared with the preceding month." : " No reliable preceding-period comparison."}</p>{previousMap.error && <button className="hs-inline-retry" type="button" onClick={previousMap.refresh}>Retry comparison</button>}</> : <p className="hs-muted">Analytics access is required.</p>}</div>
-          <div className="hs-insight-section"><h3>Resident Risk Distribution</h3>{overview.loading && canAnalytics ? <p className="hs-muted" role="status">Loading assessments...</p> : !riskRows ? <p className="hs-muted">Risk distribution unavailable.</p> : <><div className="hs-risk-bar" role="img" aria-label={riskRows.map((row) => `${row.name}: ${row.value}`).join(", ")}>{riskRows.filter((row) => row.value > 0).map((row) => <motion.span key={row.name} initial={{ width: 0 }} animate={{ width: `${riskTotal ? row.value / riskTotal * 100 : 0}%` }} transition={{ duration: reducedMotion ? 0 : 0.35 }} style={{ backgroundColor: RISK_COLORS[row.name] }} />)}</div><dl className="hs-risk-legend">{riskRows.map((row) => <div key={row.name}><dt><i style={{ background: RISK_COLORS[row.name] }} />{row.name === "Moderate Risk" ? "Medium" : row.name.replace(" Risk", "")}</dt><dd>{row.value.toLocaleString()}</dd></div>)}</dl></>}</div>
-          <div className="hs-insight-section hs-followup-performance"><div className="hs-followup-heading"><h3>Follow-up Performance</h3><strong>{followUps.loading ? "Loading" : performance?.percentage != null ? `${performance.percentage}%` : "--"}</strong></div>{performance ? <><dl><div><dt>Completed</dt><dd>{performance.completed}</dd></div><div><dt>Pending</dt><dd>{performance.pending}</dd></div><div><dt>Overdue</dt><dd className="hs-urgent">{performance.overdue}</dd></div></dl><div className="hs-followup-bar" role="img" aria-label={`${performance.completed} completed, ${performance.pending} pending, ${performance.overdue} overdue, ${performance.other} other outcomes`}>
-            {[{ key: "completed", color: "#367B59" }, { key: "pending", color: "#B18A32" }, { key: "overdue", color: "#B3202C" }, { key: "other", color: "#D5DEE9" }].map((part) => <motion.span key={part.key} initial={{ width: 0 }} animate={{ width: `${performance.scheduled ? performance[part.key] / performance.scheduled * 100 : 0}%` }} transition={{ duration: reducedMotion ? 0 : 0.35 }} style={{ backgroundColor: part.color }} />)}
-          </div><p className="hs-insight-note">{performance.scheduled ? `${performance.scheduled} scheduled in this period; current outcomes. Grey includes missed/cancelled records.` : "No scheduled follow-ups in this period; a completion rate cannot be calculated."}</p></> : <p className="hs-muted">{followUps.error ? "Follow-up performance unavailable." : !canFollowUps ? "Follow-up access is required." : "Loading scheduled outcomes..."}</p>}{followUps.error && <button type="button" className="hs-inline-retry" onClick={followUps.refresh}>Retry follow-up data</button>}</div>
-        </motion.section>
+        <div className="hs-content-column">
+          <motion.section className="hs-panel hs-map-panel" aria-labelledby="map-heading" variants={intro}>
+            <header className="hs-panel-header"><div><h2 id="map-heading">Community Health Map</h2></div><label className="hs-map-layer-control"><span>Map layer</span><select className="hs-control hs-metric-select" aria-label="Community map layer" value={mapMetric} onChange={(event) => setMapMetric(event.target.value)}>{mapOptions.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}</select></label></header>
+            <div className="hs-map-content">{canAnalytics ? <CommunityHealthMap variant="dashboard" height={260} barangays={mapBarangays} center={mapSource.data?.center || null} loading={mapMetricLoading} error={mapMetricError} onRetry={mapMetricRetry} showCountLabels showNewCases={false} periodLabel={mapContext} displayMetric={mapDisplayMetric} metricLabel={mapMetricLabel} visibleConditions={mapConditionFilter} selectedName={selectedMapName} onSelect={(row) => setSelectedMapName(row.name)} boundaryLayer={boundaries.data} boundaryError={boundaries.error || boundaries.data?.unavailable?.length ? "Verified barangay boundaries are unavailable for this assignment." : ""} detailsHref={`${BASE}/trends`} /> : <EmptyState compact title="Map access unavailable" description="Analytics permission is required." />}</div>
+            <footer className="hs-panel-footer">{canAnalytics ? <Link to={`${BASE}/trends`}>Open health trends<ArrowUpRight aria-hidden="true" /></Link> : <span>Health trends requires analytics access</span>}</footer>
+          </motion.section>
+          <RecentBarangayUpdates source={recentUpdates} allowed={canAnalytics} can={can} />
+        </div>
       </div>
+
     </>}
   </motion.div></MotionConfig>;
 }

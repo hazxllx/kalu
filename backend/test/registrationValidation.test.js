@@ -31,13 +31,13 @@ test('resident registration validator trims names and accepts valid personal inf
   assert.equal(result.value.resident.lastName, "O'Neil");
 });
 
-test('resident registration validator canonicalizes formatted PH mobiles', () => {
-  const result = registerResidentValidator({ resident: { ...VALID_RESIDENT, cellphoneNo: '+63 912-345-6789' } });
+test('resident registration validator accepts only canonical 09 mobiles', () => {
+  const result = registerResidentValidator({ resident: { ...VALID_RESIDENT, cellphoneNo: '09123456789' } });
 
   assert.equal(result.error, undefined);
   assert.equal(result.value.resident.cellphoneNo, '09123456789');
-  assert.equal(normalizeRegistrationMobile('(0912) 345.6789'), '09123456789');
-  for (const cellphoneNo of ['639123456789', '08123456789', '09123', '0912ABC6789']) {
+  assert.equal(normalizeRegistrationMobile('09123456789'), '09123456789');
+  for (const cellphoneNo of ['+63 912-345-6789', '(0912) 345.6789', '639123456789', '08123456789', '09123', '0912ABC6789']) {
     assert.ok(registerResidentValidator({ resident: { ...VALID_RESIDENT, cellphoneNo } }).error.cellphoneNo);
   }
 });

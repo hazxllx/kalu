@@ -36,12 +36,12 @@ export const STATUS_DOTS = {
   Rejected: "bg-brand-danger",
 };
 
-export default function ScheduleStatusBadge({ value }) {
-  const tone = STATUS_TONES[value] || STATUS_TONES.Scheduled;
+export default function ScheduleStatusBadge({ value, compact = false }) {
+  const tone = STATUS_TONES[value] || (compact ? "bg-brand-bg text-brand-gray" : STATUS_TONES.Scheduled);
   const dot = STATUS_DOTS[value] || STATUS_DOTS.Scheduled;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${tone}`}>
-      <span className={`h-2 w-2 rounded-full ${dot}`} /> {value}
+    <span className={`inline-flex items-center font-medium ${compact ? "shrink-0 rounded px-1.5 py-0.5 text-caption" : "gap-1.5 rounded-full px-2.5 py-1 text-xs"} ${tone}`}>
+      {!compact && <span className={`h-2 w-2 rounded-full ${dot}`} />} {value}
     </span>
   );
 }

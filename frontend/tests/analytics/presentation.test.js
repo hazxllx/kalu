@@ -6,6 +6,7 @@ import { transformWithEsbuild } from 'vite';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as risk from '../../src/lib/riskLevel.js';
+import * as legend from '../../src/features/analytics/lib/communityMapLegend.js';
 
 const require = createRequire(import.meta.url);
 // Compile the actual JSX so assertions exercise rendered labels and styles.
@@ -82,13 +83,14 @@ test('map shades the displayed metric and reports its count, legend and selected
   const wrapper = ({ children }) => React.createElement('div', null, children);
   const marker = ({ children, pathOptions }) => React.createElement('div', { 'data-color': pathOptions.fillColor }, children);
   const { default: Map } = await loadComponent('features/analytics/components/CommunityHealthMap.jsx', {
-    'react-leaflet': { MapContainer: wrapper, CircleMarker: marker, GeoJSON: () => null, Popup: wrapper, Tooltip: wrapper, ZoomControl: () => null, useMap: () => ({}) },
+    'react-leaflet': { MapContainer: wrapper, CircleMarker: marker, GeoJSON: () => null, Pane: wrapper, Popup: wrapper, Tooltip: wrapper, ZoomControl: () => null, useMap: () => ({}) },
     'framer-motion': { useReducedMotion: () => true },
     '@maplibre/maplibre-gl-leaflet': {},
     'maplibre-gl': { setWorkerUrl: () => {} },
     'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url': '',
     'leaflet/dist/leaflet.css': {}, 'maplibre-gl/dist/maplibre-gl.css': {},
     '@/features/analytics/lib/purokGeometry': { validPurokGeoJson: () => null },
+    '@/features/analytics/lib/communityMapLegend': legend,
   });
   const barangays = [
     { id: 'a', name: 'Synthetic A', hasCoordinates: true, latitude: 13, longitude: 123, caseCount: 100, activeCases: 2, highRiskResidents: 999, reportingHighRiskResidents: 3, conditions: [{ name: 'Test', value: 100 }], intensity: 1 },
@@ -107,6 +109,21 @@ test('map shades the displayed metric and reports its count, legend and selected
   assert.doesNotMatch(html, /<dd>100<\/dd>/);
   assert.match(html, /<dt>High-risk residents<\/dt><dd>3<\/dd>/);
   assert.doesNotMatch(html, /<dd>999<\/dd>/);
+
+  const dashboardHtml = renderToStaticMarkup(React.createElement(Map, {
+    variant: 'dashboard', height: 260, displayMetric: 'highRiskResidents', metricLabel: 'High-Risk Residents',
+    periodLabel: 'Latest recorded resident risk', showCountLabels: true, selectedName: 'Fixture Barangay',
+    barangays: [{ id: 'dashboard-a', name: 'Fixture Barangay', hasCoordinates: true, latitude: 13, longitude: 123,
+      caseCount: 11, highRiskResidents: 4, pendingFollowUps: 2, conditions: [{ name: 'Fever', value: 5 }] }],
+  }));
+  assert.match(dashboardHtml, /class="hs-map-legend"[^>]*role="group"/);
+  assert.match(dashboardHtml, />High-risk residents<\/span>/);
+  assert.doesNotMatch(dashboardHtml, /No records|Lower|Moderate|Higher/);
+  assert.match(dashboardHtml, /Fixture Barangay/);
+  assert.match(dashboardHtml, /data-color="#B3202C"/);
+  assert.match(dashboardHtml, /<dt>Recorded cases<\/dt><dd>11<\/dd>/);
+  assert.match(dashboardHtml, /<dt>High-risk residents<\/dt><dd>4<\/dd>/);
+  assert.match(dashboardHtml, /<dt>Pending follow-ups<\/dt><dd>2<\/dd>/);
 });
 
 test('health trend requests share the selected reporting range and captions', async () => {

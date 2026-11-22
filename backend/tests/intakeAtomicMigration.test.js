@@ -4,6 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { mapVisitToPatient } from '../../frontend/src/lib/phnWorkflowMap.js';
+import { classifyBloodPressure } from '../../shared/bloodPressure.js';
 
 const ACTOR = '11111111-1111-4111-8111-111111111111';
 const MUNI = '22222222-2222-4222-8222-222222222222';
@@ -51,6 +52,7 @@ test('atomic triage RPC is scoped, idempotent, and rolls back patient creation o
   const visit = {
     id: 'SUB-1', visit_date: '2026-11-19T09:00:00Z', chief_complaint: 'Checkup', facility_id: FACILITY,
     bp: '120/80', height_cm: 170, weight_kg: 65, bmi: 22.5, blood_sugar: 100,
+    bp_classification: classifyBloodPressure('120/80'),
     triage_snapshot: { triageWarnings: [] },
   };
   const call = async (key = KEY, fingerprint = hash, p = resident, v = visit) => {
@@ -67,6 +69,8 @@ test('atomic triage RPC is scoped, idempotent, and rolls back patient creation o
   assert.equal(snapshot.recordedByName, 'Test Worker');
   assert.equal(snapshot.vitals.bloodSugar, 100);
   assert.equal(snapshot.vitals.bmi, 22.5);
+  assert.deepEqual(first.rows[0].result.visit.bp_classification, visit.bp_classification);
+  assert.deepEqual(snapshot.bloodPressureClassification, visit.bp_classification);
   assert.equal(snapshot.submittedAt, first.rows[0].result.visit.submitted_at);
   assert.equal((await call()).rows[0].result.deduplicated, true);
   await assert.rejects(call(KEY, 'b'.repeat(64)), { code: '23505' });
@@ -108,4 +112,26 @@ test('atomic triage RPC is scoped, idempotent, and rolls back patient creation o
   assert.equal(display.triage.bloodSugar, 100);
   assert.equal(display.triage.personnel, 'Test Worker');
   assert.equal(display.triage.id, 'SUB-REF-DRAFT');
+
+  // The same atomic path must persist emergency context supplied by the server.
+  const emergencyBp = classifyBloodPressure('185/125', { chiefComplaint: 'Chest pain' });
+  const emergency = (await call('ffffffff-ffff-4fff-8fff-ffffffffffff', hash, null,
+    { ...visit, id: 'SUB-EMERGENCY', resident_id: 'RES-1', bp: '185/125', chief_complaint: 'Chest pain', bp_classification: emergencyBp })).rows[0].result.visit;
+  assert.equal(emergency.bp_classification.emergency, true);
+  assert.equal(emergency.bp_classification.urgency, 'immediate');
+  assert.deepEqual(emergency.triage_snapshot.bloodPressureClassification, emergencyBp);
+
+  for (const bp of ['120/', '120/201', '80/120', '301/80', '120/80bad']) {
+    await assert.rejects(db.query(`insert into public.visits(id,resident_id,recorded_by_id,recorded_by_role,facility_id,status,visit_date,bp)
+      values('SUB-INVALID','RES-1',$1,'rhu_personnel',$2,'draft',now(),$3)`, [ACTOR, FACILITY, bp]), { code: '23514' });
+  }
+  // Model an old invalid row: applying the new migration must not rewrite it.
+  await db.exec(`alter table public.visits disable trigger validate_visit_bp_measurement;
+    insert into public.visits(id,resident_id,recorded_by_id,recorded_by_role,facility_id,status,visit_date,bp,bp_classification)
+      values('SUB-HISTORICAL','RES-1','${ACTOR}','rhu_personnel','${FACILITY}','draft',now(),'old reading','{"code":"low","label":"Historical label"}');
+    alter table public.visits enable trigger validate_visit_bp_measurement;`);
+  await db.exec(await readFile(new URL('20261120210000_bp_classification_integrity.sql', directory), 'utf8'));
+  await db.exec("update public.visits set findings='Historical note preserved' where id='SUB-HISTORICAL'");
+  const old = (await db.query("select bp,bp_classification from public.visits where id='SUB-HISTORICAL'")).rows[0];
+  assert.deepEqual(old, { bp: 'old reading', bp_classification: { code: 'low', label: 'Historical label' } });
 });

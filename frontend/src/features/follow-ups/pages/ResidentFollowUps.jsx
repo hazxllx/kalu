@@ -13,7 +13,7 @@ import {
   summarizeResidentFollowUps,
 } from "../lib/residentFollowUpPresentation";
 import {
-  CalendarDays, CheckCircle2, Clock, MapPin, User, AlertCircle, Ban, X,
+  CheckCircle2, Ban, X,
 } from "lucide-react";
 
 /**
@@ -105,8 +105,15 @@ export default function ResidentFollowUps() {
     setLoadError(null);
     return residentFollowUpsApi
       .list()
-      .then((result) => { setRows(result?.rows || []); setReferrals(result?.referrals || []); setRequests(result?.scheduleRequests || []); })
-      .catch((err) => setLoadError(err?.message || "Unable to load your follow-ups. Please try again."))
+      .then((result) => {
+        if (!Array.isArray(result?.rows) || !Array.isArray(result?.referrals) || !Array.isArray(result?.scheduleRequests)) {
+          throw new Error("Follow-up records could not be read.");
+        }
+        setRows(result.rows.filter(Boolean));
+        setReferrals(result.referrals.filter(Boolean));
+        setRequests(result.scheduleRequests.filter(Boolean));
+      })
+      .catch(() => setLoadError("We couldn't load your follow-ups. Check your connection and try again."))
       .finally(() => setLoading(false));
   }, []);
 
@@ -217,19 +224,16 @@ export default function ResidentFollowUps() {
 
         {loading ? (
           <div className="py-12 text-center">
-            <CalendarDays className="w-10 h-10 text-brand-gray/50 mx-auto mb-3 animate-pulse" />
             <p className="text-sm text-brand-gray">Loading your follow-ups…</p>
           </div>
         ) : loadError ? (
           <div className="py-12 text-center">
-            <AlertCircle className="w-10 h-10 text-brand-danger mx-auto mb-3" />
             <p className="text-sm font-medium text-brand-ink">{loadError}</p>
             <button onClick={load} className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">Try Again</button>
           </div>
         ) : sorted.length === 0 ? (
           <>
             <div className="text-center py-12">
-              <CalendarDays className="w-10 h-10 text-brand-gray/50 mx-auto mb-3" />
               <p className="text-sm text-brand-gray">{rows.length ? "No follow-ups match this date range." : "No follow-ups scheduled yet."}</p>
               {!rows.length && <p className="mt-1 text-xs text-brand-gray">When your health team schedules a follow-up, it will appear here.</p>}
             </div>
@@ -252,21 +256,16 @@ export default function ResidentFollowUps() {
                   className="min-w-0 break-words rounded-lg border border-brand-border bg-white p-4 transition-colors hover:border-brand-blue/30 [overflow-wrap:anywhere]"
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-brand-blue/10 bg-brand-blue/5">
-                        <CalendarDays className="h-4 w-4 text-brand-blue" aria-hidden="true" />
-                      </div>
-                      <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1">
                         <button onClick={() => setSelected(f.id)} className="text-left font-display text-base font-semibold leading-snug text-brand-ink hover:text-brand-blue">
                             {f.purpose || "Follow-up"}
                         </button>
                         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-brand-gray">
-                          <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-brand-blue/70" />{fmtDate(f.scheduledDate)}</span>
-                          {f.scheduledTime && <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-brand-blue/70" />{formatTime(f.scheduledTime)}</span>}
-                          {f.location && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-brand-blue/70" />{f.location}</span>}
-                          {f.assignedProvider && <span className="inline-flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-brand-blue/70" />{f.assignedProvider}</span>}
+                          <span>{fmtDate(f.scheduledDate)}</span>
+                          {f.scheduledTime && <span>{formatTime(f.scheduledTime)}</span>}
+                          {f.location && <span>{f.location}</span>}
+                          {f.assignedProvider && <span>{f.assignedProvider}</span>}
                         </div>
-                      </div>
                     </div>
                     <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
                       <ScheduleStatusBadge value={presentation.statusLabel} />
@@ -351,7 +350,7 @@ export default function ResidentFollowUps() {
 
       {/* Can't-attend modal — reason required */}
       {rejectTarget && (() => {
-        return <RejectModal schedule={rejectTarget} busy={busy} onClose={() => setRejectTarget(null)} onSubmit={(reason) => requestScheduleChange({ targetType: rejectTarget.targetType || "follow_up", targetId: rejectTarget.targetId || rejectTarget.id, requestType: "cancellation", reason })} />;
+      return <RejectModal schedule={rejectTarget} busy={busy} onClose={() => setRejectTarget(null)} onSubmit={(reason) => requestScheduleChange({ targetType: rejectTarget.targetType || "follow_up", targetId: rejectTarget.targetId || rejectTarget.id, requestType: "cancellation", reason })} />;
       })()}
       {rescheduleTarget && <RescheduleModal
         value={scheduleForm}
@@ -381,7 +380,7 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
     onSubmit(reason.trim());
   };
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Can't Attend">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Request Cancellation">
       <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto break-words">
         <div className="p-6">
           <div className="mb-1 flex items-start justify-between gap-3">

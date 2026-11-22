@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
 import test, { beforeEach, afterEach } from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
 import { db, setOfflineOwnerResolver } from '../../src/services/offline/db.js';
 import { resetCachedKey } from '../../src/services/offline/crypto.js';
 import { getOperation, requeueOperation } from '../../src/services/offline/outbox.js';
@@ -28,6 +29,7 @@ const DATA = { residentId: 'RES-TEST', consultationDate: '2026-11-05', consultat
 const offline = () => false;
 const online = () => true;
 const recordFor = (data, id = 'SUB-TEST') => ({ ...data, id, resident: { id: data.residentId, name: 'Test Resident' },
+  vitals: { bp: data.bloodPressure }, bloodPressureClassification: classifyBloodPressure(data.bloodPressure),
   createdAt: '2026-11-06T02:00:00.000Z', updatedAt: '2026-11-06T02:00:00.000Z', consultationEffectsCompletedAt: '2026-11-06T02:00:00.000Z', status: 'completed' });
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -166,6 +168,10 @@ test('null, malformed or mismatched 2xx responses never mark clinical work synce
     (data) => ({ consultation: { ...recordFor(data), status: 'made-up' } }),
     (data) => ({ consultation: { ...recordFor(data), consultationEffectsCompletedAt: null } }),
     (data) => ({ consultation: { ...recordFor(data), diagnosis: 'Unconfirmed clinical change' } }),
+    (data) => ({ consultation: { ...recordFor(data), vitals: { bp: '150/95' } } }),
+    (data) => ({ consultation: { ...recordFor(data), vitals: {} } }),
+    (data) => ({ consultation: { ...recordFor(data), bloodPressureClassification: null } }),
+    (data) => ({ consultation: { ...recordFor(data), bloodPressureClassification: classifyBloodPressure('150/95') } }),
   ];
   for (const response of cases) {
     const queued = await saveConsultationOffline({ ownerId: OWNER, payload: DATA, create: async () => null, online: offline });

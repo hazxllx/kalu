@@ -106,15 +106,16 @@ test("attention export preserves all filtered records and safely escapes spreads
   assert.ok(csv.includes('"followup-7"'));
 });
 
-test("dashboard composition retains the exact major order and specified desktop proportions", async () => {
+test("dashboard preserves its operational grid without the community overview", async () => {
   const source = await readFile(new URL('../../src/features/dashboards/pages/HealthSupervisorDashboard.jsx', import.meta.url), 'utf8');
   const css = await readFile(new URL('../../src/styles/index.css', import.meta.url), 'utf8');
-  const positions = ['<HealthSupervisorPageHeader', 'className="hs-quick-actions"', 'className="hs-main-grid"', 'className="hs-statistics"', 'className="hs-bottom-grid"'].map((key) => source.indexOf(key));
+  const positions = ['<HealthSupervisorPageHeader', 'className="hs-statistics"', 'className="hs-quick-actions"', 'className="hs-content-grid"', 'className="hs-panel hs-map-panel"', '<RecentBarangayUpdates'].map((key) => source.indexOf(key));
   assert.ok(positions.every((position) => position >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
-  assert.match(css, /\.hs-main-grid\s*\{[^}]*minmax\(0, 13fr\) minmax\(0, 7fr\)/);
-  assert.match(css, /\.hs-statistics-strip\s*\{[^}]*repeat\(5, minmax\(0, 1fr\)\)/);
-  assert.match(css, /\.hs-bottom-grid\s*\{[^}]*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.hs-content-grid\s*\{[^}]*minmax\(0, 13fr\) minmax\(0, 7fr\)/);
+  assert.doesNotMatch(source, /Community Health Overview|Case Trends|Resident Risk Distribution|hs-overview|recharts|loadHighRiskTrend/);
+  assert.doesNotMatch(css, /\.hs-overview|\.hs-condition-bars|\.hs-risk-donut/);
+  assert.match(source, /variant="dashboard" height=\{260\}/);
   assert.match(source, /monitoringCasesCsv\(filteredCases\)/);
   assert.doesNotMatch(source, /<ScheduleCalendar|<MonthView|<CalendarViews/);
 });

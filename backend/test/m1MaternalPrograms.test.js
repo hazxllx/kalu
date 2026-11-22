@@ -58,6 +58,60 @@ test('prenatal returns the complete section B catalog with unchanged names and s
   assert.deepEqual(result.period, { type: 'monthly', year: 2026, month: 6, quarter: null });
 });
 
+test('prenatal program reconciles encounter-based pregnancy, delivery and postpartum records', async () => {
+  const pregnancyId = 'pregnancy-1';
+  const resident = { id: 'resident-canonical', birth_date: '2000-01-01', sex: 'Female' };
+  const db = database({
+    maternal_records: [],
+    maternal_pregnancies: [{
+      id: pregnancyId,
+      resident_id: resident.id,
+      barangay_id: 'b1',
+      municipality_id: 'm1',
+      status: 'delivered',
+      lmp_date: '2025-09-01',
+      edd_date: '2026-06-08',
+      created_at: '2026-01-01T00:00:00Z',
+      resident,
+    }],
+    pregnancy_encounters: [
+      { pregnancy_id: pregnancyId, encounter_type: 'prenatal', encounter_date: '2026-04-01' },
+      { pregnancy_id: pregnancyId, encounter_type: 'prenatal', encounter_date: '2026-05-01' },
+    ],
+    prenatal_services: [
+      { pregnancy_id: pregnancyId, service_type: 'iron_folic', service_name: 'Iron and folic acid', status: 'completed', date_provided: '2026-06-10' },
+    ],
+    delivery_records: [{
+      pregnancy_id: pregnancyId,
+      resident_id: resident.id,
+      barangay_id: 'b1',
+      municipality_id: 'm1',
+      delivery_date: '2026-06-15',
+      delivery_outcome: 'live_birth',
+      type_of_delivery: 'cesarean',
+      place_of_delivery: 'public_facility',
+      birth_attendant: 'midwife',
+      birth_weight_kg: 3.2,
+    }],
+    postpartum_encounters: [
+      { pregnancy_id: pregnancyId, encounter_date: '2026-06-16', scheduled_milestone: '24h', iron_folic_given: true, vitamin_a_given: false },
+      { pregnancy_id: pregnancyId, encounter_date: '2026-06-18', scheduled_milestone: '3d', iron_folic_given: false, vitamin_a_given: true },
+    ],
+  });
+
+  const result = await program(db);
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].pregnancy_id, pregnancyId);
+  assert.equal(result.indicators.B1_5.total, 1);
+  assert.equal(result.indicators.B2_18.total, 1);
+  assert.equal(result.indicators.B2_19.total, 1);
+  assert.equal(result.indicators.B2_21c.total, 1);
+  assert.equal(result.indicators.B2_23.total, 1);
+  assert.equal(result.indicators.B2_26b.total, 1);
+  assert.equal(result.indicators.B3_28.total, 1);
+  assert.equal(result.indicators.B3_30.total, 1);
+});
+
 test('maternal program uses service dates and includes both month boundaries without timezone conversion', async () => {
   const db = database({ maternal_records: [
     maternal('before', { delivery_date: '2026-05-31' }),

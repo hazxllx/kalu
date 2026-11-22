@@ -488,7 +488,7 @@ export const fileRepository = {
    * and free-text query, sorted newest-updated first.
    */
   listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null,
-    municipalityId = null, barangayId = null, barangay = null, limit = 100, offset = 0 } = {}) => {
+    municipalityId = null, barangayId = null, barangay = null, orderBy = 'updatedAt', limit = 100, offset = 0 } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     let rows = store.visits.map((v) => attachResidentToVisit(clone(v), residentsById));
 
@@ -511,8 +511,20 @@ export const fileRepository = {
       );
     }
 
-    rows.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(b.id).localeCompare(String(a.id)));
+    const clinicalDate = (v) => `${v.consultationDetails?.consultationDate || String(v.visitDate || '').slice(0, 10)}T${v.consultationDetails?.consultationTime || String(v.visitDate || '').slice(11, 19)}`;
+    rows.sort((a, b) => (orderBy === 'clinicalDate'
+      ? clinicalDate(b).localeCompare(clinicalDate(a))
+      : String(b.updatedAt).localeCompare(String(a.updatedAt))) || String(b.id).localeCompare(String(a.id)));
     return { rows: rows.slice(offset, offset + limit), total: rows.length };
+  },
+
+  listVisitHistoryLinks: async (visitIds, referralIds = []) => {
+    store.ensureLoaded();
+    return {
+      followUps: clone((store.data.followUps || []).filter((row) => visitIds.includes(row.consultation_id))),
+      referrals: clone(store.referrals.filter((row) => visitIds.includes(row.treatment_visit_id || row.visitId) || referralIds.includes(row.id)))
+        .map((row) => ({ ...row, resident_id: row.resident_id || row.residentId, treatment_visit_id: row.treatment_visit_id || row.visitId })),
+    };
   },
 
   /** Target Client List (TCL) stub for the file driver (TCL entries live in Supabase `tcl_entries`). */

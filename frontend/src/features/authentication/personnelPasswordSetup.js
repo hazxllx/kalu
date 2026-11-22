@@ -49,13 +49,15 @@ export function personnelSetupOutcome(result) {
   return { title: "Password Setup Complete", message: "Your password has been saved, but your account is not active. An administrator must review its approval or activation before you can sign in." };
 }
 
-export async function saveResetPassword({ session, password, setupStatus, passwordPreviouslySaved = false, auth, personnelSetup, activateResident }) {
-  if (!session?.user?.id || !session.access_token) throw new Error("Your password-reset session is missing or expired.");
+export async function saveResetPassword({ session, password, setupStatus, passwordPreviouslySaved = false, recoverySecret = null, auth, personnelSetup, activateResident }) {
+  if (!session?.user?.id || (!session.access_token && !recoverySecret)) throw new Error("Your password-reset session is missing or expired.");
   if (setupStatus?.setupRequired === true) {
     if (personnelSetupBlocked(setupStatus)) throw new Error("Account setup is on hold until an administrator reviews approval or suspension.");
     const passwordError = personnelPasswordError(password);
     if (passwordError) throw new Error(passwordError);
-    const result = await personnelSetup(password, session.access_token);
+    const result = setupStatus.mustChangePassword === true
+      ? await personnelSetup(password, session.access_token, recoverySecret)
+      : await personnelSetup(password, session.access_token);
     return personnelSetupOutcome(result);
   }
   if (setupStatus?.setupRequired !== false) throw new Error("Password-setup requirements have not been verified. Try checking your link again.");

@@ -32,9 +32,8 @@ const REVIEW_OPEN_STATUSES = new Set(['pending', 'under_review']);
 // either awaiting review OR has been returned to them for corrections. This is
 // also the resident's "active request" shown by the UI.
 const BLOCKING_STATUSES = new Set(['pending', 'under_review', 'resubmission_required']);
-// Documents attach while the request is a draft, open, or returned for
-// resubmission (i.e. any pre-approval, resident-editable state).
-const EDITABLE_STATUSES = new Set(['draft', 'pending', 'under_review', 'resubmission_required']);
+// Submitted evidence stays fixed throughout review; corrections explicitly reopen it.
+const EDITABLE_STATUSES = new Set(['draft', 'resubmission_required']);
 // Statuses a resident may (re)submit from: a fresh draft or a request the
 // reviewer returned for corrections. Both move to 'pending' on submit.
 const SUBMITTABLE_STATUSES = new Set(['draft', 'resubmission_required']);
@@ -280,7 +279,7 @@ export const startTransfer = async ({ user, toBarangayId, reason = '' }) => {
 
 /**
  * Attach a supporting document or an existing health record to the resident's
- * own draft/open request. The file is validated (type + size) and stored in the
+ * own draft/returned request. The file is validated (type + size) and stored in the
  * private bucket. The supporting proof-of-address is a single slot (replaced on
  * re-upload); existing health records are supplementary and may be uploaded in
  * any number (an exact duplicate re-upload is ignored). Uploading a health
@@ -318,23 +317,30 @@ export const uploadDocument = async ({ user, requestId, file, documentType }) =>
   }
   if (replace) {
     // The supporting proof-of-address is a single slot.
-    await deleteDocument(replace.storagePath);
     await repository.deleteDocument(replace.id);
+    await deleteDocument(replace.storagePath);
     await audit(request.id, user.id, 'transfer_document_replaced', { documentType });
   }
 
   const documentId = randomUUID();
   const stored = await uploadTransferDocument({ file, transferRequestId: request.id, documentId });
-  const document = await repository.insertDocument({
-    transferRequestId: request.id,
-    documentType,
-    fileName: documentMeta.fileName,
-    storagePath: stored.storagePath,
-    mimeType: documentMeta.mimeType,
-    sizeBytes: documentMeta.sizeBytes,
-    verificationStatus: 'pending',
-    uploadedById: user.id,
-  });
+  let document;
+  try {
+    document = await repository.insertDocument({
+      transferRequestId: request.id,
+      documentType,
+      fileName: documentMeta.fileName,
+      storagePath: stored.storagePath,
+      mimeType: documentMeta.mimeType,
+      sizeBytes: documentMeta.sizeBytes,
+      verificationStatus: 'pending',
+      uploadedById: user.id,
+    });
+  } catch (error) {
+    // A concurrent submission can close editing while the object is uploading.
+    await deleteDocument(stored.storagePath).catch(() => {});
+    throw error;
+  }
   await audit(request.id, user.id, 'transfer_document_uploaded', { documentType });
   return {
     id: document.id,
@@ -356,8 +362,8 @@ export const removeDocument = async ({ user, requestId, documentId }) => {
   const docs = await repository.listDocumentsByTransferRequest(request.id);
   const doc = docs.find((item) => item.id === documentId);
   if (!doc) throw ApiError.notFound('Document not found.');
-  await deleteDocument(doc.storagePath);
   await repository.deleteDocument(doc.id);
+  await deleteDocument(doc.storagePath);
   await audit(request.id, user.id, 'transfer_document_removed', { documentId });
   return { id: documentId, removed: true };
 };
@@ -380,9 +386,9 @@ export const residencyStatusFrom = (status) => {
 };
 
 /** The resident's current/latest transfer request with its documents (read-only). */
-export const getMine = async ({ user }) => {
+export const getMine = async ({ user, requestId = null }) => {
   assertSelf(user);
-  const request = await latestRequest(user);
+  const request = requestId ? await ownRequest(user, requestId) : await latestRequest(user);
   if (!request) return null;
   const resident = await repository.getResidentByAuthUserId(user.id);
   const { byId } = await barangayIndex(resident?.municipalityId);
@@ -688,14 +694,8 @@ export const approve = async ({ user, requestId }) => {
     fromBarangayId: field(request, 'from_barangay_id', 'fromBarangayId'),
     toBarangayId: field(request, 'to_barangay_id', 'toBarangayId'),
   });
-  await notifyResident({
-    recipientAuthUserId: resident.authUserId,
-    category: 'information',
-    title: 'Residency transfer approved',
-    message: 'Your residency transfer request has been approved. Your current barangay has been updated and your existing health record remains associated with your account.',
-    relatedType: 'transfer_request',
-    relatedId: requestId,
-  });
+  // The approval trigger creates the resident notification in the same database
+  // transaction as the residency change. An API retry must never create another.
   return { id: result.id, status: result.status };
 };
 

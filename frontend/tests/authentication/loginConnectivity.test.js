@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { productionFrontendEnvironment } from '../../vite.config.js';
 import { AUTH_NETWORK_FAILURE_MESSAGE, authFailureMessage } from '../../../shared/authConnectivity.js';
 
 test('the existing login uses Supabase Auth with an accurate network-outage message', async () => {
@@ -18,10 +19,37 @@ test('the current login form and design remain in place with no role picker or h
   assert.match(source, /id="login-email"/);
   assert.match(source, /id="login-password"/);
   assert.doesNotMatch(source, /mock|hardcodedPassword|service_role/);
+  assert.doesNotMatch(source, /Sign-in is unavailable|Supabase project URL|anon\/publishable key|redeploy/);
 });
 
 test('build-time validation prevents a service-role credential from being shipped to the browser', async () => {
   const source = await readFile(new URL('../../vite.config.js', import.meta.url), 'utf8');
   assert.match(source, /publicSupabaseConfigurationError\(env\.VITE_SUPABASE_URL, env\.VITE_SUPABASE_ANON_KEY\)/);
   assert.match(source, /throw new Error\(`Frontend authentication configuration is invalid/);
+});
+
+test('production builds can use the existing public Supabase settings without exposing server secrets', () => {
+  const env = productionFrontendEnvironment({
+    SUPABASE_URL: 'https://existing-project.supabase.co',
+    SUPABASE_ANON_KEY: 'public-anon-key',
+    SUPABASE_SERVICE_ROLE_KEY: 'server-only-key',
+    VITE_API_URL: 'https://api.example.test',
+  });
+
+  assert.equal(env.VITE_SUPABASE_URL, 'https://existing-project.supabase.co');
+  assert.equal(env.VITE_SUPABASE_ANON_KEY, 'public-anon-key');
+  assert.equal(Object.hasOwn(env, 'SUPABASE_SERVICE_ROLE_KEY'), false);
+  assert.equal(Object.hasOwn(env, 'VITE_SUPABASE_SERVICE_ROLE_KEY'), false);
+});
+
+test('explicit Vite Supabase settings take precedence over backend-style aliases', () => {
+  const env = productionFrontendEnvironment({
+    SUPABASE_URL: 'https://backend-project.supabase.co',
+    SUPABASE_ANON_KEY: 'backend-anon-key',
+    VITE_SUPABASE_URL: 'https://frontend-project.supabase.co',
+    VITE_SUPABASE_ANON_KEY: 'frontend-anon-key',
+  });
+
+  assert.equal(env.VITE_SUPABASE_URL, 'https://frontend-project.supabase.co');
+  assert.equal(env.VITE_SUPABASE_ANON_KEY, 'frontend-anon-key');
 });

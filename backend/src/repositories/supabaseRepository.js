@@ -17,7 +17,7 @@
  *    and additive-column/RPC fallbacks keep core workflows running if optional
  *    migrations have not yet been applied.
  */
-import { createAuthClient, getServiceClient } from '../config/supabase.js';
+import { createAuthClient, getServiceClient, updateOwnPassword } from '../config/supabase.js';
 import { randomBytes } from 'node:crypto';
 import env from '../config/env.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
@@ -776,7 +776,7 @@ const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
 const PROFILE_ADMIN_COLUMNS =
   'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
 const PERSONNEL_ACCOUNT_COLUMNS =
-  'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_assigned_by,temporary_password_assigned_at,temporary_password_expires_at,password_changed_at,suspended_at,suspension_reason,decision_reason,version';
+  'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_assigned_by,temporary_password_assigned_at,temporary_password_expires_at,password_changed_at,suspended_at,suspension_reason,decision_reason,credential_valid_after,version';
 const PERSONNEL_NOTIFICATION_COLUMNS =
   'id,account_id,event_type,actor_id,reason,status,attempts,next_attempt_at,last_error_code,provider_message_id,created_at,sent_at';
 const PROFILE_ADMIN_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
@@ -814,7 +814,8 @@ const applyAccountFilters = (query, {
   q, role, status, municipalityId, barangayId, personnelOnly, approvalStatus, lifecycleState,
 } = {}) => {
   if (personnelOnly) query = query.in('role', ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']);
-  if (role) query = query.eq('role', role);
+  if (role === 'resident') query = query.in('role', ['resident', 'resident-limited']);
+  else if (role) query = query.eq('role', role);
   if (status) query = query.eq('status', status);
   if (municipalityId) query = query.eq('municipality_id', municipalityId);
   if (barangayId) query = query.eq('barangay_id', barangayId);
@@ -927,6 +928,11 @@ export const profileToAdminUser = (row) => {
   createdAt: row.created_at ?? null,
   updatedAt: row.updated_at ?? null,
   };
+};
+
+const profileToCompletedSetup = (row) => {
+  const account = Array.isArray(row?.personnel_account) ? row.personnel_account[0] : row?.personnel_account;
+  return row?.id ? { ...profileToAdminUser(row), credentialValidAfter: Number(account?.credential_valid_after) || 0 } : null;
 };
 
 /**
@@ -1892,8 +1898,8 @@ export const supabaseRepository = {
    * Activate / deactivate the resident's account as a side effect of the
    * verification decision. `profiles.status` is what controls route access
    * (`pending_verification` -> resident-limited), so approval must set it to
-   * `active`. Service-role only; the profile guard trigger allows this because
-   * auth.uid() is null for service-role writes.
+     * `active`. An administrator's explicit disable must survive verification
+     * and registration callbacks. Service-role only.
    */
   async setProfileStatus(profileId, status) {
     if (!profileId) return null;
@@ -1902,6 +1908,8 @@ export const supabaseRepository = {
       .from(TABLES.profiles)
       .update({ status })
       .eq('id', profileId)
+      .in('role', ['resident', 'resident-limited'])
+      .neq('status', 'disabled')
       .select('id, status')
       .maybeSingle();
     throwOnError(error, 'Could not update the resident account status');
@@ -2217,26 +2225,19 @@ export const supabaseRepository = {
 
   async getPersonnelSetupAccount(id) {
     const { data, error } = await getServiceClient().from(TABLES.profiles)
-      .select(`id,role,status,personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS})`)
+      .select(`id,email,role,status,personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS})`)
       .eq('id', id).maybeSingle();
     throwAccountError(error, 'The personnel setup service is unavailable. Please try again shortly.');
-    return data?.id ? profileToAdminUser(data) : null;
+    if (!data?.id) return null;
+    const lifecycle = Array.isArray(data.personnel_account) ? data.personnel_account[0] : data.personnel_account;
+    return { ...profileToAdminUser(data), credentialValidAfter: Number(lifecycle?.credential_valid_after) || 0 };
   },
 
   async completePersonnelAccountSetup(id) {
     const { data, error } = await getServiceClient().rpc('complete_personnel_account_setup', { p_target_id: id });
     throwAccountError(error, 'Your password was saved, but account setup could not be confirmed.');
     const row = Array.isArray(data) ? data[0] : data;
-    return row?.id ? profileToAdminUser(row) : null;
-  },
-
-  async completeTemporaryPasswordChange(id) {
-    const { data, error } = await getServiceClient().rpc('complete_temporary_personnel_password_change', {
-      p_target_id: id,
-    });
-    throwAccountError(error, 'The password-change requirement could not be cleared.');
-    const row = Array.isArray(data) ? data[0] : data;
-    return row?.id ? profileToAdminUser(row) : null;
+    return profileToCompletedSetup(row);
   },
 
   async getPersonnelAccountHistory({ id, requestId = null }) {
@@ -2495,14 +2496,14 @@ export const supabaseRepository = {
   },
 
   async listVisits({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null,
-    municipalityId = null, barangayId = null, barangay = null, facilityId = null, limit = 100, offset = 0 } = {}) {
+    municipalityId = null, barangayId = null, barangay = null, facilityId = null, orderBy = 'updatedAt', limit = 100, offset = 0 } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.visits)
       .select(`*, resident:residents${municipalityId || barangayId || barangay ? '!inner' : ''}(${SELECT_RESIDENT})`, { count: 'exact' })
-      .order('updated_at', { ascending: false })
-      .order('id', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order(orderBy === 'clinicalDate' ? 'consultation_date' : 'updated_at', { ascending: false, nullsFirst: false });
+    if (orderBy === 'clinicalDate') query = query.order('visit_date', { ascending: false, nullsFirst: false });
+    query = query.order('id', { ascending: false }).range(offset, offset + limit - 1);
     if (statuses && statuses.length) query = query.in('status', statuses);
     if (submittedById) query = query.eq('recorded_by_id', submittedById);
     if (residentId) query = query.eq('resident_id', residentId);
@@ -2526,6 +2527,94 @@ export const supabaseRepository = {
     throwOnError(error, 'Could not list submissions');
     const rows = (data || []).map((row) => ({ ...visitFromRow(row), resident: residentFromRow(row.resident) }));
     return { rows, total: count ?? rows.length };
+  },
+
+  async beginPersonnelInvitationRecovery({ id, tokenDigest, passwordDigest }) {
+    const { data, error } = await getServiceClient().rpc('begin_personnel_invitation_recovery', {
+      p_target_id: id, p_token_digest: tokenDigest, p_password_digest: passwordDigest,
+    });
+    throwAccountError(error, 'Invitation recovery could not be verified. Request a fresh invitation and retry.');
+    return typeof data === 'string' ? data : null;
+  },
+
+  async getPersonnelInvitationRecoveryOwner(tokenDigest) {
+    const { data, error } = await getServiceClient().rpc('get_personnel_invitation_recovery_owner', {
+      p_token_digest: tokenDigest,
+    });
+    throwAccountError(error, 'Invitation recovery could not be verified.');
+    return typeof data === 'string' ? data : null;
+  },
+
+  async beginPersonnelTemporaryPasswordChange({ id, passwordDigest }) {
+    const { data, error } = await getServiceClient().rpc('begin_personnel_temporary_password_change', {
+      p_target_id: id, p_password_digest: passwordDigest,
+    });
+    throwAccountError(error, 'The temporary-password change could not be authorized.');
+    return typeof data === 'string' ? data : null;
+  },
+
+  async updatePersonnelOwnPassword({ accessToken, password }) {
+    return updateOwnPassword(accessToken, password);
+  },
+
+  async releasePersonnelTemporaryPasswordChange({ id, claimId }) {
+    const { data, error } = await getServiceClient().rpc('release_personnel_temporary_password_change', {
+      p_target_id: id, p_claim_id: claimId,
+    });
+    throwAccountError(error, 'The temporary-password change could not be released.');
+    return data === true;
+  },
+
+  async completeClaimedTemporaryPasswordChange({ id, claimId }) {
+    const { data, error } = await getServiceClient().rpc('complete_claimed_temporary_personnel_password_change', {
+      p_target_id: id, p_claim_id: claimId,
+    });
+    throwAccountError(error, 'Your password was saved, but the password-change requirement could not be confirmed.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return profileToCompletedSetup(row);
+  },
+
+  async completePersonnelInvitationRecovery({ id, tokenDigest, claimId }) {
+    const { data, error } = await getServiceClient().rpc('complete_personnel_invitation_recovery', {
+      p_target_id: id, p_token_digest: tokenDigest, p_claim_id: claimId,
+    });
+    throwAccountError(error, 'Your password was saved, but invitation setup could not be confirmed. Retry with the same password.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return profileToCompletedSetup(row);
+  },
+
+  async releasePersonnelInvitationRecovery({ id, tokenDigest, claimId }) {
+    const { data, error } = await getServiceClient().rpc('release_personnel_invitation_recovery', {
+      p_target_id: id, p_token_digest: tokenDigest, p_claim_id: claimId,
+    });
+    throwAccountError(error, 'Invitation recovery could not be released.');
+    return data === true;
+  },
+
+  async listVisitHistoryLinks(visitIds, referralIds = []) {
+    const supabase = getServiceClient();
+    const referralColumns = 'id,resident_id,treatment_visit_id,reason,destination_facility,referral_date,scheduled_at,status,schedule_response_status,resolution_notes';
+    const readLinked = async (table, columns, field, ids) => {
+      const result = new Map();
+      for (let index = 0; index < ids.length; index += 100) {
+        for (let offset = 0; ; offset += 200) {
+          const { data, error } = await supabase.from(table).select(columns).in(field, ids.slice(index, index + 100))
+            .order('id').range(offset, offset + 199);
+          throwOnError(error, 'Could not load linked treatment history');
+          for (const row of data || []) result.set(row.id, row);
+          if (!data || data.length < 200) break;
+        }
+      }
+      return [...result.values()];
+    };
+    const [followUps, referrals, incomingReferrals] = await Promise.all([
+      readLinked('follow_ups', 'id,resident_id,consultation_id,purpose,scheduled_date,scheduled_time,location,assigned_provider,status,schedule_response_status,notes,completed_at', 'consultation_id', visitIds),
+      readLinked('health_referrals', referralColumns, 'treatment_visit_id', visitIds),
+      readLinked('health_referrals', referralColumns, 'id', referralIds),
+    ]);
+    followUps.sort((a, b) => String(b.scheduled_date).localeCompare(String(a.scheduled_date)));
+    return { followUps, referrals: [...new Map([...referrals, ...incomingReferrals].map((row) => [row.id, row])).values()]
+      .sort((a, b) => String(b.referral_date).localeCompare(String(a.referral_date))) };
   },
 
   async listTclEntries({ limit = 5000, offset = 0 } = {}) {

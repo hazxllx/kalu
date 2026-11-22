@@ -14,6 +14,7 @@ export const residentsApi = {
   list: (params, options = {}) => api.get('/residents', { ...options, params }),
   directoryFilters: (options = {}) => api.get('/residents/directory-filters', options),
   get: (id, options = {}) => api.get(`/residents/${id}`, options),
+  healthHistory: (id, options = {}) => api.get(`/residents/${encodeURIComponent(id)}/health-history`, { ...options, cache: 'no-store' }),
   create: (payload, options) => api.post('/residents', payload, options),
   update: (id, payload, options) => api.put(`/residents/${id}`, payload, options),
   remove: (id) => api.delete(`/residents/${id}`),

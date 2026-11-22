@@ -18,6 +18,7 @@ const visits = Array.from({ length: 10 }, (_, i) => ({
   scheduled_time: '09:00', priority: i === 0 ? 'High' : 'Low', status: i === 8 ? 'Completed' : 'Scheduled',
 }));
 const modules = {
+  '@/features/health-records/components/LabResultsPanel': 'export default function LabResultsPanel() { return null; }',
   '@/context/AuthContext': `export const useAuth = () => ({ user: { id: 'test-phn', name: 'Test PHN', role: 'phn' } });`,
   '@/components/common/Card': `import React from 'react'; export const Card = ({ children, className = '', ...props }) => <section className={className} {...props}>{children}</section>;`,
   '@/services/api/phnWorkflow': `export const phnWorkflowApi = { listConsultationHealthServices: async () => [] };`,

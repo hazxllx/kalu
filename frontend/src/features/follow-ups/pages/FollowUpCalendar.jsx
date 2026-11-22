@@ -6,7 +6,7 @@ import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { healthServicesApi } from "@/services/api";
+import { calendarActivitiesApi, healthServicesApi } from "@/services/api";
 import {
   createFollowUpOffline,
   listFollowUpsOffline,
@@ -20,18 +20,37 @@ import {
   parseCalendarDate, readCalendarRows, stepCalendarDate, toDateKey,
 } from "@/features/dashboards/components/scheduleCalendarUtils";
 import { DayView, MonthView, ScheduleDetailModal } from "../components/ScheduleCalendarViews";
-import { SHOW_PREVIEW_DEMO, buildPreviewScheduleEvents } from "../lib/scheduleCalendarPreview";
 import { dayLabel, isPastSameDaySchedule, manilaDateKey, monthLabel, weekLabel } from "../lib/scheduleDates";
 import { followUpActionAvailability } from "../lib/followUpActions";
-import { Ban, CheckCircle2, ChevronLeft, ChevronRight, Clock, Pencil, Plus, X } from "lucide-react";
+import { Ban, CheckCircle2, ChevronLeft, ChevronRight, Clock, Pencil, X } from "lucide-react";
 
 const FOLLOW_UP_STATUSES = ["Pending", "Scheduled", "Today", "Upcoming", "Ongoing", "Completed", "Missed", "Cancelled"];
 const VIEWS = ["month", "week", "day", "agenda"];
 const mobileCalendar = () => window.matchMedia("(max-width: 767px)").matches;
 const initialDate = (params) => parseCalendarDate(params.get("date")) || parseCalendarDate(manilaDateKey());
 const sourceState = () => ({ range: "", rows: [], loading: true, error: "", source: "" });
+const CALENDAR_ACTIVITY_TYPES = ["Reminder", "Follow-up", "Meeting", "Field Visit", "Health Activity", "Other"];
 
 const inputCls = (error) => `supervisor-input mt-1 w-full ${error ? "!border-brand-danger" : ""}`;
+const mapCalendarActivity = (row, residents = [], assignedBarangay = "") => {
+  const resident = residents.find((candidate) => String(candidate.id) === String(row.resident_id));
+  return {
+    id: row.id,
+    type: "calendar-activity",
+    typeLabel: "Personal activity",
+    activityType: row.activity_type,
+    label: row.title,
+    date: row.activity_date,
+    time: row.activity_time ? String(row.activity_time).slice(0, 5) : "",
+    notes: row.notes || "",
+    residentId: row.resident_id || "",
+    residentName: resident?.name || "",
+    residentBarangay: assignedBarangay,
+    status: "Scheduled",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
 
 function Field({ label, required = false, error = "", children }) {
   return (
@@ -138,6 +157,99 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
   );
 }
 
+function ActivityFormModal({ initial, date, residents, residentsLoading, residentsError, onRetryResidents, saving, error, onClose, onSave }) {
+  const [form, setForm] = useState(() => ({
+    title: initial?.label || "",
+    activityType: initial?.activityType || "Reminder",
+    date: initial?.date || date,
+    time: initial?.time || "",
+    notes: initial?.notes || "",
+    residentId: initial?.residentId || "",
+  }));
+  const dialogRef = useRef(null);
+  const [errors, setErrors] = useState(/** @type {Record<string, string>} */ ({}));
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    dialog?.querySelector("input")?.focus();
+    return () => dialog?.close();
+  }, []);
+
+  const set = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: "" }));
+  };
+  const submit = (event) => {
+    event.preventDefault();
+    if (saving) return;
+    const next = /** @type {Record<string, string>} */ ({});
+    if (!form.title.trim()) next.title = "Activity title is required.";
+    if (!CALENDAR_ACTIVITY_TYPES.includes(form.activityType)) next.activityType = "Select a valid activity type.";
+    if (!parseCalendarDate(form.date)) next.date = "Select a valid date.";
+    setErrors(next);
+    if (!Object.keys(next).length) onSave(form);
+  };
+
+  return (
+    <dialog ref={dialogRef} aria-labelledby="calendar-activity-form-title" aria-describedby="calendar-activity-form-description" onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }} className="supervisor-modal schedule-activity-modal m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%_-_2rem)] max-w-lg overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/40 sm:p-5">
+      <form onSubmit={submit} noValidate className="supervisor-form">
+        <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+          <div>
+            <h2 id="calendar-activity-form-title" className="text-base font-semibold">{initial ? "Edit activity" : "Add Activity"}</h2>
+            <p id="calendar-activity-form-description" className="mt-1 text-caption text-brand-gray">A personal calendar activity, visible only to you.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} className="supervisor-button is-icon is-quiet" aria-label="Close activity form"><X className="h-4 w-4" aria-hidden="true" /></button>
+        </div>
+        {error && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
+        <div className="space-y-4">
+          <fieldset className="min-w-0">
+            <legend className="mb-2 text-ui font-semibold text-brand-ink">Activity details</legend>
+            <div className="space-y-3">
+              <Field label="Activity title" required error={errors.title}>
+                <input required maxLength={120} value={form.title} onChange={(event) => set("title", event.target.value)} aria-invalid={Boolean(errors.title)} className={inputCls(errors.title)} />
+              </Field>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Activity type" required error={errors.activityType}>
+                  <select value={form.activityType} onChange={(event) => set("activityType", event.target.value)} aria-invalid={Boolean(errors.activityType)} className={inputCls(errors.activityType)}>
+                    {CALENDAR_ACTIVITY_TYPES.map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                </Field>
+                <Field label="Linked resident (optional)">
+                  <select value={form.residentId} disabled={residentsLoading || Boolean(residentsError)} onChange={(event) => set("residentId", event.target.value)} className={inputCls()}>
+                    <option value="">{residentsLoading ? "Loading residents..." : residentsError ? "Resident list unavailable" : "No linked resident"}</option>
+                    {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.name || "Name not recorded"} / {resident.id}</option>)}
+                  </select>
+                </Field>
+              </div>
+              {residentsError && <div className="flex items-center justify-between gap-2 text-caption text-brand-gray"><span>{residentsError}</span><button type="button" onClick={onRetryResidents} disabled={saving || residentsLoading} className="supervisor-button is-quiet schedule-inline-action">Retry</button></div>}
+            </div>
+          </fieldset>
+          <fieldset className="min-w-0">
+            <legend className="mb-2 text-ui font-semibold text-brand-ink">Schedule &amp; notes</legend>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Date" required error={errors.date}>
+                  <input required type="date" value={form.date} onChange={(event) => set("date", event.target.value)} aria-invalid={Boolean(errors.date)} className={inputCls(errors.date)} />
+                </Field>
+                <Field label="Time (optional)">
+                  <input type="time" value={form.time} onChange={(event) => set("time", event.target.value)} className={inputCls()} />
+                </Field>
+              </div>
+              <Field label="Notes / description">
+                <textarea rows={3} maxLength={2000} value={form.notes} onChange={(event) => set("notes", event.target.value)} className={`${inputCls()} !h-auto resize-y py-2`} />
+              </Field>
+            </div>
+          </fieldset>
+        </div>
+        <div className="mt-4 flex justify-end gap-2 border-t border-brand-border pt-3">
+          <button type="button" onClick={onClose} disabled={saving} className="supervisor-button">Cancel</button>
+          <button type="submit" disabled={saving} className="supervisor-button is-primary">{saving ? "Saving..." : "Save Activity"}</button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
 export default function FollowUpCalendar() {
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -145,11 +257,12 @@ export default function FollowUpCalendar() {
   const assignedBarangay = scope?.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
   const viewFollowUps = can("followups.view");
   const viewServices = can("services.view");
-  const access = [viewFollowUps, viewServices, can("followups.create"), can("followups.edit"), can("followups.complete")];
+  const viewActivities = user?.role === "health_supervisor";
+  const access = [viewFollowUps, viewServices, viewActivities, can("followups.create"), can("followups.edit"), can("followups.complete")];
   let error = "";
   if (user?.role !== "health_supervisor") error = "Only Health Supervisors can access this schedule calendar.";
   else if (!assignedBarangay) error = "A valid barangay assignment is required. Calendar data is not loaded until your account assignment is available.";
-  else if (!viewFollowUps && !viewServices) error = "Your account does not have permission to view follow-ups or health-service attendance.";
+  else if (!viewFollowUps && !viewServices && !viewActivities) error = "Your account does not have permission to view calendar activities.";
   if (error) return <>
     <PageHeader dense crumbs={["Monitoring & Reports", "Schedule Calendar"]} title="Schedule Calendar" subtitle="Follow-ups and health-service attendance for your assigned barangay." />
     <Card><ErrorState compact title="Calendar unavailable" message={error} /></Card>
@@ -167,6 +280,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   const canCreate = canViewFollowUps && can("followups.create");
   const canEdit = canViewFollowUps && can("followups.edit");
   const canComplete = canViewFollowUps && can("followups.complete");
+  const canManageActivities = user.role === "health_supervisor";
   const [params] = useSearchParams();
   const requestedDate = params.get("date");
   const requestedView = params.get("view");
@@ -182,16 +296,21 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   const [providerFilter, setProviderFilter] = useState("all");
   const [followUps, setFollowUps] = useState(sourceState);
   const [services, setServices] = useState(sourceState);
+  const [calendarActivities, setCalendarActivities] = useState(sourceState);
   const [followUpRefresh, setFollowUpRefresh] = useState(0);
   const [serviceRefresh, setServiceRefresh] = useState(0);
+  const [activityRefresh, setActivityRefresh] = useState(0);
   const [linkRefresh, setLinkRefresh] = useState(0);
   const [linkState, setLinkState] = useState({ loading: false, error: "" });
   const [selected, setSelected] = useState(null);
   const [formTarget, setFormTarget] = useState(null);
+  const [activityTarget, setActivityTarget] = useState(null);
   const [residents, setResidents] = useState({ rows: [], loading: false, error: "" });
   const [residentRefresh, setResidentRefresh] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [activitySaving, setActivitySaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [activityError, setActivityError] = useState("");
   const [detailError, setDetailError] = useState("");
   const [toast, setToast] = useState(null);
   const active = useRef(true);
@@ -203,6 +322,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   const today = parseCalendarDate(manilaDateKey());
   const followUpState = followUps.range === rangeKey ? followUps : sourceState();
   const serviceState = services.range === rangeKey ? services : sourceState();
+  const activityState = calendarActivities.range === rangeKey ? calendarActivities : sourceState();
 
   useEffect(() => {
     active.current = true;
@@ -230,7 +350,8 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
     const request = ++followUpRequest.current;
     const valid = () => current && request === followUpRequest.current;
     if (!canViewFollowUps) return () => { current = false; };
-    setFollowUps({ ...sourceState(), range: rangeKey });
+    // Keep this range's retrieved rows visible while a source is refreshed.
+    setFollowUps((state) => state.range === rangeKey ? { ...state, loading: true } : { ...sourceState(), range: rangeKey });
     let origin = { source: "cache", error: "" };
     listFollowUpsOffline({ ownerId: user.id, params: { from: range.from, to: range.to }, onSource: (state) => { origin = state; } })
       .then((response) => {
@@ -242,7 +363,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
           ? rows.find((row) => String(row.id) === String(event.id)) || null : event);
       })
       .catch((error) => {
-        if (valid()) setFollowUps({ range: rangeKey, rows: [], loading: false, error: error?.message || "Unable to load follow-ups.", source: "" });
+        if (valid()) setFollowUps((state) => ({ ...state, loading: false, error: error?.message || "Unable to load follow-ups." }));
       });
     return () => { current = false; };
   }, [assignedBarangay, canViewFollowUps, followUpRefresh, lastSyncedAt, range.from, range.to, rangeKey, user.id]);
@@ -250,7 +371,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   useEffect(() => {
     let current = true;
     if (!canViewServices) return () => { current = false; };
-    setServices({ ...sourceState(), range: rangeKey });
+    setServices((state) => state.range === rangeKey ? { ...state, loading: true } : { ...sourceState(), range: rangeKey });
     healthServicesApi.listAttendance({ from: range.from, to: range.to })
       .then((response) => {
         const rows = readCalendarRows(response, "Health-service attendance").map(mapHealthServiceEvent)
@@ -261,14 +382,30 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
           ? rows.find((row) => String(row.id) === String(event.id)) || null : event);
       })
       .catch((error) => {
-        if (current) setServices({ range: rangeKey, rows: [], loading: false, error: error?.message || "Unable to load health-service attendance.", source: "" });
+        if (current) setServices((state) => ({ ...state, loading: false, error: error?.message || "Unable to load health-service attendance." }));
       });
     return () => { current = false; };
   }, [assignedBarangay, canViewServices, lastSyncedAt, range.from, range.to, rangeKey, serviceRefresh]);
 
   useEffect(() => {
     let current = true;
-    if (formTarget !== "new" || !canCreate) return () => { current = false; };
+    if (!canManageActivities) return () => { current = false; };
+    setCalendarActivities((state) => state.range === rangeKey ? { ...state, loading: true } : { ...sourceState(), range: rangeKey });
+    calendarActivitiesApi.list({ from: range.from, to: range.to })
+      .then((response) => {
+        const rows = readCalendarRows(response, "Personal calendar activities");
+        if (current) setCalendarActivities({ range: rangeKey, rows, loading: false, error: "", source: "server" });
+      })
+      .catch((error) => {
+        if (current) setCalendarActivities((state) => ({ ...state, loading: false, error: error?.message || "Unable to load personal calendar activities." }));
+      });
+    return () => { current = false; };
+  }, [activityRefresh, canManageActivities, range.from, range.to, rangeKey]);
+
+  useEffect(() => {
+    let current = true;
+    const needsResidentList = formTarget === "new" || activityTarget === "new" || activityTarget?.type === "calendar-activity";
+    if (!needsResidentList || (!canCreate && !canManageActivities)) return () => { current = false; };
     setResidents({ rows: [], loading: true, error: "" });
     listFollowUpResidentsOffline({ ownerId: user.id, params: { limit: 200 } })
       .then((response) => {
@@ -283,7 +420,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
         if (current) setResidents({ rows: [], loading: false, error: error?.message || "Unable to load authorized residents." });
       });
     return () => { current = false; };
-  }, [assignedBarangay, canCreate, formTarget, residentRefresh, user.id]);
+  }, [activityTarget, assignedBarangay, canCreate, canManageActivities, formTarget, residentRefresh, user.id]);
 
   useEffect(() => {
     let current = true;
@@ -322,6 +459,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
       if (document.visibilityState !== "visible") return;
       setFollowUpRefresh((value) => value + 1);
       setServiceRefresh((value) => value + 1);
+      setActivityRefresh((value) => value + 1);
     };
     window.addEventListener("focus", refresh);
     window.addEventListener("online", refresh);
@@ -340,59 +478,23 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   }, [toast]);
 
   const events = useMemo(() => {
-    const realEvents = [
+    return [
       ...(canViewFollowUps && followUps.range === rangeKey ? followUps.rows : []),
       ...(canViewServices && services.range === rangeKey ? services.rows : []),
+      ...(canManageActivities && activityState.range === rangeKey
+        ? activityState.rows.map((row) => mapCalendarActivity(row, residents.rows, assignedBarangay))
+        : []),
     ];
-    
-    // Add 20 realistic sample activities for demonstration
-    // Nov 14 has 10 activities to demonstrate busy day handling
-    const sampleActivities = [
-      // Single activities on different days
-      { id: "sample-1", type: "follow-up", residentName: "Maria Santos", residentId: "RES-001", residentBarangay: "San Isidro", date: "2026-11-10", scheduledDate: "2026-11-10", time: "08:00", scheduledTime: "08:00", label: "Prenatal follow-up", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      { id: "sample-2", type: "follow-up", residentName: "Juan Dela Cruz", residentId: "RES-002", residentBarangay: "San Isidro", date: "2026-11-11", scheduledDate: "2026-11-11", time: "08:30", scheduledTime: "08:30", label: "Blood pressure monitoring", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
-      { id: "sample-3", type: "follow-up", residentName: "Ana Reyes", residentId: "RES-003", residentBarangay: "San Isidro", date: "2026-11-12", scheduledDate: "2026-11-12", time: "09:00", scheduledTime: "09:00", label: "Diabetes monitoring", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      { id: "sample-4", type: "follow-up", residentName: "Jose Garcia", residentId: "RES-004", residentBarangay: "San Isidro", date: "2026-11-13", scheduledDate: "2026-11-13", time: "09:30", scheduledTime: "09:30", label: "Tuberculosis follow-up", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      
-      // 10 activities on November 14 - busy clinic day
-      { id: "sample-busy-1", type: "follow-up", residentName: "Angela Mendoza", residentId: "RES-005", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "07:30", scheduledTime: "07:30", label: "Post-consultation follow-up", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      { id: "sample-busy-2", type: "follow-up", residentName: "Carlo Bautista", residentId: "RES-006", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "08:00", scheduledTime: "08:00", label: "Child health monitoring", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
-      { id: "sample-busy-3", type: "follow-up", residentName: "Sofia Ramirez", residentId: "RES-007", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "08:30", scheduledTime: "08:30", label: "Immunization follow-up", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
-      { id: "sample-busy-4", type: "follow-up", residentName: "Mark Villanueva", residentId: "RES-008", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "09:00", scheduledTime: "09:00", label: "Maternal health check", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      { id: "sample-busy-5", type: "follow-up", residentName: "Patricia Flores", residentId: "RES-009", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "09:30", scheduledTime: "09:30", label: "Nutrition monitoring", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Completed", priority: "Medium", isSample: true },
-      { id: "sample-busy-6", type: "follow-up", residentName: "Daniel Cruz", residentId: "RES-010", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "10:00", scheduledTime: "10:00", label: "General health assessment", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Low", isSample: true },
-      { id: "sample-busy-7", type: "follow-up", residentName: "Rosa Villanueva", residentId: "RES-011", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "10:30", scheduledTime: "10:30", label: "Hypertension monitoring", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      { id: "sample-busy-8", type: "follow-up", residentName: "Miguel Santos", residentId: "RES-012", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "11:00", scheduledTime: "11:00", label: "Wound care follow-up", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      { id: "sample-busy-9", type: "follow-up", residentName: "Elena Rosales", residentId: "RES-013", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "11:30", scheduledTime: "11:30", label: "Respiratory assessment", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
-      { id: "sample-busy-10", type: "follow-up", residentName: "Francisco Reyes", residentId: "RES-014", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "12:00", scheduledTime: "12:00", label: "Post-operative check", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      
-      // More activities on other days
-      { id: "sample-11", type: "follow-up", residentName: "Grace Fernandez", residentId: "RES-015", residentBarangay: "San Isidro", date: "2026-11-16", scheduledDate: "2026-11-16", time: "10:00", scheduledTime: "10:00", label: "Antenatal care", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Completed", priority: "Medium", isSample: true },
-      { id: "sample-12", type: "follow-up", residentName: "Robert Castillo", residentId: "RES-016", residentBarangay: "San Isidro", date: "2026-11-18", scheduledDate: "2026-11-18", time: "08:00", scheduledTime: "08:00", label: "Diabetes assessment", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
-      { id: "sample-13", type: "follow-up", residentName: "Maria Garcia", residentId: "RES-017", residentBarangay: "San Isidro", date: "2026-11-20", scheduledDate: "2026-11-20", time: "08:30", scheduledTime: "08:30", label: "Immunization completion", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
-      { id: "sample-14", type: "follow-up", residentName: "Anthony Diaz", residentId: "RES-018", residentBarangay: "San Isidro", date: "2026-11-23", scheduledDate: "2026-11-23", time: "09:00", scheduledTime: "09:00", label: "Post-natal check", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
-      { id: "sample-15", type: "follow-up", residentName: "Carmen Lopez", residentId: "RES-019", residentBarangay: "San Isidro", date: "2026-11-25", scheduledDate: "2026-11-25", time: "09:30", scheduledTime: "09:30", label: "Nutrition counseling", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
-    ];
-    
-    return [...realEvents, ...sampleActivities];
-  }, [canViewFollowUps, canViewServices, followUps.range, followUps.rows, rangeKey, services.range, services.rows]);
-  // Isolated UI preview records (never persisted, never in backend results).
-  // Kept separate from `events` so source counts and the data summary stay real;
-  // merged in only for calendar display so a busy date can be demonstrated.
-  const previewEvents = useMemo(
-    () => SHOW_PREVIEW_DEMO ? buildPreviewScheduleEvents() : [],
-    []
-  );
+  }, [activityState.range, activityState.rows, assignedBarangay, canManageActivities, canViewFollowUps, canViewServices, followUps.range, followUps.rows, rangeKey, residents.rows, services.range, services.rows]);
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    // Only include real events, never preview events in production
     return events.filter((event) => {
       if (!isCalendarEventInBarangay(event, assignedBarangay)) return false;
       if (categoryFilter.startsWith("type:") && event.type !== categoryFilter.slice(5)) return false;
       if (categoryFilter.startsWith("category:") && (event.type !== "health-service" || event.category !== categoryFilter.slice(9))) return false;
       if (statusFilter !== "all" && formatCalendarStatus(event.status) !== statusFilter) return false;
       if (providerFilter !== "all" && event.provider !== providerFilter) return false;
-      return !query || [event.id, event.residentName, event.residentId, event.label, event.category, event.provider]
+      return !query || [event.id, event.residentName, event.residentId, event.label, event.category, event.provider, event.activityType, event.notes]
         .some((value) => String(value || "").toLowerCase().includes(query));
     });
   }, [assignedBarangay, categoryFilter, events, providerFilter, search, statusFilter]);
@@ -409,17 +511,79 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   const providers = [...new Set(events.filter((event) => event.type === "follow-up").map((event) => event.provider).filter(Boolean))].sort();
   const locations = [...new Set(events.filter((event) => event.type === "follow-up").map((event) => event.location).filter(Boolean))].sort();
   const providerOptions = [...new Set([...providers, ...(providerFilter !== "all" ? [providerFilter] : [])])].sort();
-  const sources = [canViewFollowUps && followUpState, canViewServices && serviceState].filter(Boolean);
+  const sources = [canViewFollowUps && followUpState, canViewServices && serviceState, canManageActivities && activityState].filter(Boolean);
   const loading = sources.some((source) => source.loading);
   const incomplete = sources.some((source) => Boolean(source.error) || source.source === "cache");
   const filtersActive = Boolean(search || categoryFilter !== "all" || statusFilter !== "all" || providerFilter !== "all");
   const period = currentView === "month" || currentView === "agenda" ? monthLabel(cursor) : currentView === "week" ? weekLabel(cursor) : dayLabel(cursor);
   const selectedEvent = selected && isCalendarEventInBarangay(selected, assignedBarangay) &&
-    (selected.type === "follow-up" ? canViewFollowUps : canViewServices) ? selected : null;
+    (selected.type === "follow-up" ? canViewFollowUps
+      : selected.type === "health-service" ? canViewServices
+        : canManageActivities) ? selected : null;
   const selectedActions = followUpActionAvailability({ ...selectedEvent, scheduled_date: selectedEvent?.date, scheduled_time: selectedEvent?.time }, { canEdit, canComplete });
   const showToast = (message, error = false) => { if (active.current) setToast({ message, error }); };
   const selectDate = (date) => { setCursor(date); setSelectedDay(date); };
   const clearFilters = () => { setSearch(""); setCategoryFilter("all"); setStatusFilter("all"); setProviderFilter("all"); };
+  const retrySources = () => {
+    if (canViewFollowUps && (followUpState.error || followUpState.source === "cache")) setFollowUpRefresh((value) => value + 1);
+    if (canViewServices && serviceState.error) setServiceRefresh((value) => value + 1);
+    if (canManageActivities && activityState.error) setActivityRefresh((value) => value + 1);
+  };
+  const handleSaveActivity = async (form) => {
+    setActivityError("");
+    if (!canManageActivities) {
+      setActivityError("Only a Health Supervisor can manage personal calendar activities.");
+      return;
+    }
+    if (activitySaving) return;
+    setActivitySaving(true);
+    try {
+      const payload = {
+        title: form.title.trim(),
+        activityType: form.activityType,
+        date: form.date,
+        time: form.time || null,
+        notes: form.notes.trim() || null,
+        residentId: form.residentId || null,
+      };
+      const result = activityTarget?.type === "calendar-activity"
+        ? await calendarActivitiesApi.update(activityTarget.id, payload)
+        : await calendarActivitiesApi.create(payload);
+      const row = result?.record;
+      readCalendarRows(row ? [row] : [], "Saved personal activity");
+      const date = parseCalendarDate(row.activity_date);
+      if (!date) throw new Error("The saved activity did not include a valid date. Refresh the calendar to verify it.");
+      selectDate(date);
+      setActivityTarget(null);
+      setSelected(null);
+      setActivityRefresh((value) => value + 1);
+      showToast(activityTarget?.type === "calendar-activity" ? "Activity updated." : "Activity saved.");
+    } catch (error) {
+      if (active.current) setActivityError(error?.message || "Could not save the activity.");
+    } finally {
+      if (active.current) setActivitySaving(false);
+    }
+  };
+
+  const handleDeleteActivity = async (event) => {
+    if (!window.confirm(`Delete "${event.label}"? This cannot be undone.`)) return;
+    setDetailError("");
+    setActivitySaving(true);
+    try {
+      await calendarActivitiesApi.remove(event.id);
+      setCalendarActivities((state) => ({
+        ...state,
+        rows: state.rows.filter((row) => String(row.id) !== String(event.id)),
+      }));
+      setSelected(null);
+      setActivityRefresh((value) => value + 1);
+      showToast("Activity deleted.");
+    } catch (error) {
+      if (active.current) setDetailError(error?.message || "Could not delete the activity.");
+    } finally {
+      if (active.current) setActivitySaving(false);
+    }
+  };
 
   const persistFollowUp = async ({ target, record, permission, message, resident = null }) => {
     if (busy.current) throw new Error("A follow-up change is already being saved.");
@@ -505,36 +669,31 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
     if (event) { setDetailError(""); setSelected(event); }
   };
 
-  // Get day activities for display
-  const selectedDayActivities = byDay[toDateKey(selectedDay)] || [];
-
   return (
-    <div className="supervisor-module min-w-0">
+    <div className="supervisor-module supervisor-calendar min-w-0">
       <PageHeader dense crumbs={["Monitoring & Reports", "Schedule Calendar"]} title="Schedule Calendar"
-        subtitle={`${assignedBarangay} / Follow-ups and health-service attendance for your assigned barangay.`}
-        action={canCreate ? <button type="button" onClick={() => { setFormError(""); setFormTarget("new"); }} className="supervisor-button is-primary"><Plus className="h-4 w-4" aria-hidden="true" />Add schedule</button> : null} />
+        subtitle={`${assignedBarangay} / Follow-ups, health-service attendance, and personal activities.`} />
 
       {requestedDate && !parseCalendarDate(requestedDate) && <p role="alert" className="mb-3 text-ui text-brand-danger">The linked date is invalid. Showing today's calendar instead.</p>}
       {linkState.loading && <p role="status" className="mb-3 text-ui text-brand-gray">Opening the authorized follow-up...</p>}
-       {linkState.error && <Card className="mb-3"><ErrorState compact title="Requested follow-up" message={linkState.error} onRetry={canViewFollowUps ? () => setLinkRefresh((value) => value + 1) : undefined} /></Card>}
+      {linkState.error && <Card className="mb-3"><ErrorState compact title="Requested follow-up" message={linkState.error} onRetry={canViewFollowUps ? () => setLinkRefresh((value) => value + 1) : undefined} /></Card>}
        
-       {/* Calendar Header with Navigation */}
-      <div className="mb-4 rounded-lg border border-brand-border bg-white p-4 shadow-sm">
+      <div className="supervisor-panel mb-3 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-brand-ink">{monthLabel(cursor)}</h2>
-            <p className="mt-0.5 text-sm text-brand-gray">Select a date to view activities</p>
+            <h2 className="text-section font-semibold text-brand-ink">{monthLabel(cursor)}</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, "month", -1))} aria-label="Previous month" className="supervisor-button is-icon"><ChevronLeft className="h-4 w-4" aria-hidden="true" /></button>
-            <button type="button" onClick={() => selectDate(parseCalendarDate(manilaDateKey()))} className="supervisor-button">Today</button>
-            <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, "month", 1))} aria-label="Next month" className="supervisor-button is-icon"><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
+            {canCreate && <button type="button" onClick={() => { setFormError(""); setFormTarget("new"); }} className="supervisor-button is-quiet schedule-inline-action">Schedule follow-up</button>}
+            <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, "month", -1))} aria-label="Previous month" className="supervisor-button is-icon schedule-nav-action"><ChevronLeft className="h-4 w-4" aria-hidden="true" /></button>
+            <button type="button" onClick={() => selectDate(parseCalendarDate(manilaDateKey()))} className="supervisor-button schedule-nav-action">Today</button>
+            <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, "month", 1))} aria-label="Next month" className="supervisor-button is-icon schedule-nav-action"><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
           </div>
         </div>
       </div>
 
       {/* Filters Section */}
-      <section className="mb-4 rounded-lg border border-brand-border bg-white p-4 shadow-sm" aria-label="Calendar filters">
+      <section className="supervisor-panel mb-3 p-3" aria-label="Calendar filters">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <label className="min-w-0 text-caption text-brand-gray">
             Search activities
@@ -546,6 +705,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
               <option value="all">All activities</option>
               {canViewFollowUps && <option value="type:follow-up">Follow-ups</option>}
               {canViewServices && <option value="type:health-service">Health services</option>}
+              {canManageActivities && <option value="type:calendar-activity">Personal activities</option>}
               {categories.length > 0 && <optgroup label="Health-service categories">{categories.map((category) => <option key={category} value={`category:${category}`}>{category}</option>)}</optgroup>}
             </select>
           </label>
@@ -571,20 +731,18 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
         {filtersActive && <div className="mt-3"><button type="button" onClick={clearFilters} className="supervisor-button is-quiet"><X className="h-4 w-4" aria-hidden="true" />Clear filters</button></div>}
       </section>
 
-      {/* Two-Column Layout: Calendar + Activity Panel */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)] auto-rows-max lg:auto-rows-fr">
-        {/* Left: Calendar Grid */}
-        <div className="rounded-lg border border-brand-border bg-white shadow-sm overflow-hidden">
-          <MonthView presentation="supervisor" cursor={cursor} today={today} selectedDay={selectedDay} byDay={byDay} onOpenEvent={openEvent} onSelectDay={selectDate} />
-        </div>
-
-        {/* Right: Selected Date Activities */}
-        <div className="rounded-lg border border-brand-border bg-white shadow-sm overflow-hidden flex flex-col h-full">
-          <DayView presentation="supervisor" cursor={selectedDay} byDay={byDay} loading={loading} incomplete={incomplete} onOpenEvent={openEvent} />
-        </div>
+      <div className="schedule-calendar-layout">
+        <MonthView presentation="supervisor" cursor={cursor} today={today} selectedDay={selectedDay} byDay={byDay} onOpenEvent={openEvent} onSelectDay={selectDate} />
+        <DayView presentation="supervisor" cursor={selectedDay} byDay={byDay} loading={loading} incomplete={incomplete} onOpenEvent={openEvent}
+          incompleteMessage={sources.some((source) => Boolean(source.error)) ? "Some activities could not be loaded." : "Showing saved activities. Retry to verify this date."}
+          onRetry={retrySources} filtersActive={filtersActive} onClearFilters={clearFilters}
+          canAddActivity={canManageActivities} onAddActivity={() => { setActivityError(""); setActivityTarget("new"); }} />
       </div>
 
-      {selectedEvent && <ScheduleDetailModal presentation="supervisor" schedule={selectedEvent} error={detailError} onClose={() => setSelected(null)} actions={selectedEvent.type === "follow-up" ? <>
+      {selectedEvent && <ScheduleDetailModal presentation="supervisor" schedule={selectedEvent} error={detailError} onClose={() => setSelected(null)} actions={selectedEvent.type === "calendar-activity" ? <>
+        <button type="button" disabled={activitySaving} onClick={() => { setActivityError(""); setActivityTarget(selectedEvent); setSelected(null); }} className="supervisor-button is-primary"><Pencil className="h-4 w-4" aria-hidden="true" />Edit</button>
+        <button type="button" disabled={activitySaving} onClick={() => handleDeleteActivity(selectedEvent)} className="supervisor-button">Delete</button>
+      </> : selectedEvent.type === "follow-up" ? <>
         {selectedActions.complete && <button type="button" disabled={saving} onClick={() => patchSchedule(selectedEvent, "Completed", "Follow-up marked completed.")} className="supervisor-button"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />Complete</button>}
         {selectedActions.missed && <button type="button" disabled={saving} onClick={() => patchSchedule(selectedEvent, "Missed", "Follow-up marked missed.")} className="supervisor-button"><Clock className="h-4 w-4" aria-hidden="true" />Mark missed</button>}
         {selectedActions.cancel && <button type="button" disabled={saving} onClick={() => patchSchedule(selectedEvent, "Cancelled", "Follow-up cancelled.")} className="supervisor-button"><Ban className="h-4 w-4" aria-hidden="true" />Cancel follow-up</button>}
@@ -592,6 +750,10 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
       </> : <Link to="/app/health_supervisor/services" className="supervisor-button">Open health services</Link>} />}
 
       {formTarget && <ScheduleFormModal initial={formTarget === "new" ? null : formTarget} date={toDateKey(selectedDay)} residents={residents.rows} residentsLoading={residents.loading} residentsError={residents.error} onRetryResidents={() => setResidentRefresh((value) => value + 1)} providers={providers} locations={locations} canComplete={canComplete} saving={saving} error={formError} onClose={() => { if (!saving) setFormTarget(null); }} onSave={handleSave} />}
+      {activityTarget && <ActivityFormModal initial={activityTarget === "new" ? null : activityTarget} date={toDateKey(selectedDay)}
+        residents={residents.rows} residentsLoading={residents.loading} residentsError={residents.error}
+        onRetryResidents={() => setResidentRefresh((value) => value + 1)} saving={activitySaving} error={activityError}
+        onClose={() => { if (!activitySaving) setActivityTarget(null); }} onSave={handleSaveActivity} />}
       {toast && <div role={toast.error ? "alert" : "status"} className="supervisor-panel fixed inset-x-4 bottom-4 z-[80] flex max-w-xl items-start gap-2 p-3 text-ui text-brand-ink shadow-sm sm:left-auto"><span>{toast.message}</span><button type="button" className="supervisor-button is-icon" onClick={() => setToast(null)} aria-label="Dismiss notification"><X className="h-4 w-4" aria-hidden="true" /></button></div>}
     </div>
   );

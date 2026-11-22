@@ -35,6 +35,7 @@ export { reportsApi } from './reportsApi';
 export { healthServicesApi } from './healthServicesApi';
 export { appointmentsApi } from './appointmentsApi';
 export { visitPlansApi } from './visitPlansApi';
+export { calendarActivitiesApi } from './calendarActivitiesApi';
 export { rolesApi } from './rolesApi';
 export { householdRiskApi } from './householdRiskApi';
 export { riskConfigApi } from './riskConfigApi';

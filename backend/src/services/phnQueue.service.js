@@ -29,11 +29,23 @@ import * as canonicalReferrals from './referrals.service.js';
 import { getServiceClient } from '../config/supabase.js';
 import { getRiskConfig } from './riskConfig.service.js';
 import { assessVitals } from '../utils/residentRisk.js';
+import { buildEncounterAssessment, validateClinicalIndicators, encounterBloodPressureContext } from './clinicalAssessment.service.js';
+import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
+import env from '../config/env.js';
 
 /** Preserve the configured score while distinguishing missing inputs from a negative finding. */
 export const assessPhnVisitRisk = (visit, config) => {
   const risk = assessVitals(visit?.vitals, config);
-  return { ...visit, riskLevel: risk.level, riskScore: risk.score,
+  const clinical = visit?.consultationDetails?.clinicalAssessment;
+  if (clinical?.reviewStatus === 'approved'
+    || clinical?.reasons?.some((reason) => ['bp_emergency', 'bp_severe'].includes(reason.ruleId))) {
+    return { ...visit, clinicalAssessment: clinical, riskLevel: clinical.level === 'Medium' ? 'Moderate' : clinical.level,
+      riskScore: null, riskFactors: clinical.reasons, riskAssessedAt: clinical.assessedAt,
+      riskAssessmentStatus: clinical.status, missingMeasurements: [],
+      riskReason: [...clinical.reasons.map((reason) => (reason.field || reason.ruleId).replaceAll('_', ' ')),
+        ...clinical.followUpRequirements.map((requirement) => requirement.replaceAll('_', ' '))].join('; ') };
+  }
+  return { ...visit, clinicalAssessment: clinical || null, riskLevel: risk.level, riskScore: risk.score,
     riskFactors: risk.factors, riskAssessedAt: risk.level === null ? null : visit.visitDate || visit.createdAt || null,
     riskAssessmentStatus: risk.status, missingMeasurements: risk.missingMeasurements, riskReason: risk.reason };
 };
@@ -169,6 +181,9 @@ export const normalizePhnVisit = (visit = {}) => {
     : undefined;
 
   const patch = {};
+  if (visit.consultationDetails?.clinicalIndicators !== undefined) {
+    patch.consultationDetails = { clinicalIndicators: validateClinicalIndicators(visit.consultationDetails.clinicalIndicators) };
+  }
   if (visit.visitDate !== undefined) patch.visitDate = visit.visitDate || null;
   if (visit.chiefComplaint !== undefined) patch.chiefComplaint = pickText(visit.chiefComplaint);
   if (visit.clinicalHistory !== undefined) patch.clinicalHistory = pickText(visit.clinicalHistory);
@@ -328,6 +343,16 @@ export const updateSubmissionForPhn = async ({
   }
   // The database status/clinical update is one statement. A competing completion
   // cannot be overwritten after the initial read.
+  const encounter = { ...submission, ...normalized, vitals,
+    consultationDetails: { ...submission.consultationDetails, ...normalized.consultationDetails,
+       ...(normalized.findings !== undefined ? { findings: normalized.findings } : {}) } };
+  normalized.bpClassification = classifyBloodPressure(vitals.bp, encounterBloodPressureContext({
+    chiefComplaint: encounter.chiefComplaint,
+    findings: encounter.findings,
+    clinicalIndicators: encounter.consultationDetails?.clinicalIndicators,
+  }));
+  normalized.consultationDetails = await buildEncounterAssessment({ visit: encounter, resident: submission.resident, user,
+    supabase: supabase || (env.isSupabaseConfigured && repo.driver === 'supabase' ? getServiceClient() : null), previous: submission.consultationDetails });
   const updated = await repo.updateVisit(id, normalized, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: PHN_EDITABLE_STATUSES });
   if (!updated) throw ApiError.conflict('The consultation changed while saving. Reload its saved record before continuing.');
   return updated;
@@ -396,7 +421,10 @@ export const completeSubmission = async ({ id, user, patch, repo = repository, s
   }
 
   const now = new Date().toISOString();
+  const consultationDetails = await buildEncounterAssessment({ visit: submission, resident: submission.resident, user,
+    supabase: supabase || (env.isSupabaseConfigured && repo.driver === 'supabase' ? getServiceClient() : null), previous: submission.consultationDetails });
   const updated = await repo.updateVisit(id, {
+    consultationDetails,
     status: SUBMISSION_STATUS.COMPLETED,
     receivedAt: submission.receivedAt || now,
     reviewedAt: submission.reviewedAt || now,

@@ -88,6 +88,12 @@ router.post(
 router.patch('/me', authorize(FEATURE_ROLES.residentSelf), asyncHandler(residentsController.updateMyProfile));
 router.get('/me/health-records', authorize(FEATURE_ROLES.residentSelf), asyncHandler(residentsController.getMyHealthRecords));
 
+router.get(
+  '/:id/health-history',
+  authorize(['health_supervisor', 'phn', 'mho'], { permission: 'consultation.history.view' }),
+  asyncHandler(residentsController.getStaffHealthHistory),
+);
+
 // GET /:id : Reads full demographic profile, verification state, and computed risk summary for resident `:id`.
 router.get(
   '/:id',

@@ -117,8 +117,6 @@ The system serves residents, barangay health workers (BHW), Rural Health Unit (R
 - Node.js 22 or newer
 - npm
 - Git
-- Docker Desktop running Linux containers (or a compatible local container engine)
-- Supabase CLI compatible with `supabase/config.toml`
 - PostgreSQL `psql` client to load reference geography explicitly
 
 ### Installation
@@ -133,15 +131,15 @@ npm run install:all
 
 Each app uses one ignored `.env` file for local development. Production
 deployments use environment variables configured in Vercel/Render, not local
-`.env` files. On a fresh disposable local stack, run `supabase start`, then
-`npm run local:configure`. The configuration command obtains local keys without
-printing them.
+`.env` files. Native development uses the existing hosted Supabase project or a
+separate non-production hosted project.
 
 **Frontend (`frontend/.env`):**
 ```env
 VITE_API_URL=http://localhost:5000/api
-VITE_SUPABASE_URL=http://127.0.0.1:54321
-VITE_SUPABASE_ANON_KEY=<local-anon-JWT>
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<public-anon-or-publishable-key>
+VITE_SUPABASE_MODE=hosted-development
 VITE_ANALYTICS_ENABLED=false
 ```
 
@@ -151,12 +149,12 @@ PORT=5000
 NODE_ENV=development
 CLIENT_URL=http://localhost:5173
 TRUST_PROXY=loopback
-SUPABASE_URL=http://127.0.0.1:54321
-SUPABASE_ANON_KEY=<local-anon-JWT>
-SUPABASE_SERVICE_ROLE_KEY=<local-service-role-JWT>
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
-SMTP_HOST=127.0.0.1
-SMTP_PORT=54325
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<public-anon-or-publishable-key>
+SUPABASE_SERVICE_ROLE_KEY=<server-only-service-role-key>
+SUPABASE_MODE=hosted-development
+SMTP_HOST=<smtp-host>
+SMTP_PORT=<smtp-port>
 SMTP_USER=
 SMTP_PASSWORD=
 SMTP_FROM=noreply@kalusagap.test
@@ -168,7 +166,7 @@ OTP_PEPPER=<generated-by-local-configure>
 - Set production variables in the hosting platform's environment settings.
 - Never expose `SUPABASE_SERVICE_ROLE_KEY` to the frontend or as a `VITE_` variable. It bypasses RLS and must stay server-side.
 - Use separate credentials for staging and production.
-- To develop without Docker, use a dedicated non-production Supabase project.
+- Use a dedicated non-production Supabase project for isolated test work.
   Set `SUPABASE_MODE=hosted-development` in `backend/.env` and
   `VITE_SUPABASE_MODE=hosted-development` in `frontend/.env`; set the matching
   project URL/keys in each file. The frontend receives only the anon key. The
@@ -187,26 +185,21 @@ Production, Preview, and Development as applicable:
 | Variable | Value |
 | --- | --- |
 | `VITE_API_URL` | The backend API base URL for that environment |
-| `VITE_SUPABASE_URL` | The existing Supabase project's base URL |
-| `VITE_SUPABASE_ANON_KEY` | Its matching public anon or publishable key |
+| `VITE_SUPABASE_URL` or `SUPABASE_URL` | The existing Supabase project's base URL |
+| `VITE_SUPABASE_ANON_KEY` or `SUPABASE_ANON_KEY` | Its matching public anon or publishable key |
 
-Never set a service-role key or other secret in a `VITE_` variable. Vite embeds
-these values at build time, so redeploy after adding or changing them. The
-dashboard configuration is not available to verify from this repository.
+The frontend accepts the `VITE_` names or the corresponding `SUPABASE_` names
+at build time. Only the URL and public anon/publishable key are included in the
+browser bundle; the service-role key is never read by the frontend build. Never
+put a service-role key in a `VITE_` variable. Redeploy after adding or changing
+these settings. The dashboard configuration is not available to verify from
+this repository.
 
 ### Database Setup
 
-```bash
-supabase migration list --local
-# Review pending SQL before explicitly applying to the disposable local DB:
-npm run local:db:migrate
-# Real reference geography/facilities only; no resident records:
-psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/seed.sql
-```
-
-- Initial `supabase start` bootstraps a fresh database using the migration history.
-- The historical chain contains destructive DDL. Use a fresh disposable stack,
-  review pending migrations, and never replay it automatically against populated data.
+Apply and review migrations only through the Supabase project workflow approved
+for the target environment. Do not run destructive migration or reset operations
+against populated production data.
 - Seeding is disabled by default. `seed.sql` supplies canonical reference data;
   do not use `seed-dev.sql` or staging data generators for application setup.
 - Never link the development stack to a hosted project or run remote DB commands.

@@ -30,15 +30,16 @@ test('stage 2 by systolic OR diastolic', () => {
   assert.equal(classifyBloodPressure('150/70').code, 'stage2');
 });
 
-test('crisis range (above 180 OR above 120) and flagged as emergency', () => {
+test('severe range requires emergency symptoms to flag emergency', () => {
   const r = classifyBloodPressure('190/100');
   assert.equal(r.code, 'crisis');
-  assert.equal(r.emergency, true);
+  assert.equal(r.emergency, false);
+  assert.equal(classifyBloodPressure('190/100', { chestPain: true }).emergency, true);
   assert.equal(classifyBloodPressure('160/125').code, 'crisis');
 });
 
-test('low (hypotension) below 90/60, unless a more urgent category applies', () => {
-  assert.equal(classifyBloodPressure('85/55').code, 'low');
+test('values below 120/80 follow the requested Normal category', () => {
+  assert.equal(classifyBloodPressure('85/55').code, 'normal');
   // A valid reading whose diastolic is in the crisis range is crisis, not low.
   assert.equal(classifyBloodPressure('130/125').code, 'crisis');
 });
@@ -60,19 +61,18 @@ test('parseBloodPressure rejects systolic <= diastolic and out-of-range values',
   assert.deepEqual(parseBloodPressure('120/80'), { systolic: 120, diastolic: 80 });
 });
 
-test('admin-configured thresholds override the defaults', () => {
-  // Lower the stage-2 systolic cut-off to 135; a 136/70 reading becomes Stage 2
-  // where the defaults would call it Stage 1.
+test('legacy settings cannot override the shared clinical thresholds', () => {
+  // Old settings cannot cause save-time classification to differ from entry.
   const configured = { ...DEFAULT_BP_THRESHOLDS, stage2SystolicMin: 135 };
   assert.equal(classifyBloodPressure('136/70').code, 'stage1');
-  assert.equal(classifyBloodPressure('136/70', configured).code, 'stage2');
-  assert.equal(classifyBloodPressure('136/70', configured).source, 'configured');
+  assert.equal(classifyBloodPressure('136/70', configured).code, 'stage1');
+  assert.equal(classifyBloodPressure('136/70', configured).source, 'default');
 });
 
-test('configured label overrides are applied', () => {
+test('legacy label overrides cannot change the clinical category', () => {
   const r = classifyBloodPressure('145/95', DEFAULT_BP_THRESHOLDS, { stage2: 'Severe HTN' });
   assert.equal(r.code, 'stage2');
-  assert.equal(r.label, 'Severe HTN');
+  assert.equal(r.label, 'Stage 2 Hypertension');
 });
 
 test('validateThresholdPayload rejects non-increasing systolic cut-offs', () => {

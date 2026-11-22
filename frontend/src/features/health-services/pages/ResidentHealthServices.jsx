@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Clock, MapPin, Stethoscope, CheckCircle2, Loader2, X, ZoomIn, FileText } from "lucide-react";
+import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { CheckCircle2, Loader2, X, ZoomIn, FileText } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
@@ -317,7 +317,7 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
       {services.length === 0 ? (
         <SectionEmpty />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {visibleServices.map((svc) => (
               <ServiceCard
                 key={svc.id}
@@ -381,9 +381,10 @@ function StatusBadge({ status }) {
 function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreviewMemo }) {
   const [pubmatFailed, setPubmatFailed] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const detailsId = useId();
   const schedule = formatWeekdays(service.weekdays);
   const window = formatWindow(service.windowStart, service.windowEnd);
-  const serviceType = service.visitPolicy === "by_notice" ? "By notice" : "Walk-in";
+  const serviceType = service.visitPolicy === "by_notice" ? "By notice" : service.visitPolicy === "walk_in" ? "Walk-in" : "";
   const avail = availabilityLine(service);
   const plan = service.plan || null;
   const status = plan?.status || null;
@@ -413,7 +414,6 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
         />
       ) : (
         <div className="grid h-full place-items-center bg-gradient-to-br from-brand-blue to-brand-dark">
-          <Stethoscope className="h-12 w-12 text-white/55" aria-hidden="true" />
         </div>
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-brand-dark via-brand-dark/50 to-transparent" />
@@ -435,7 +435,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
   );
 
   return (
-    <article className="group flex h-full min-w-0 flex-col overflow-hidden break-words rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40 [overflow-wrap:anywhere]">
+    <article className="group flex min-w-0 flex-col overflow-hidden break-words rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40 [overflow-wrap:anywhere]">
       {service.pubmatUrl && !pubmatFailed ? (
         <button
           type="button"
@@ -450,19 +450,18 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
 
       <div className="flex flex-1 flex-col p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray">{serviceType}</span>
+          {serviceType && <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray">{serviceType}</span>}
           {registerBy && <span className="text-xs font-medium text-brand-gray">Register by {registerBy}</span>}
         </div>
         {service.description && (
           <div className="mt-2">
-            <p className={`text-sm leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
-            {service.description.length > 180 && (
-              <button type="button" aria-expanded={descriptionExpanded} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="mt-1 inline-flex min-h-8 items-center text-xs font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
-                {descriptionExpanded ? "View less" : "View more"}
-              </button>
-            )}
+            <p className={`whitespace-pre-line text-sm leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
           </div>
         )}
+        <button type="button" aria-expanded={descriptionExpanded} aria-controls={detailsId} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="mt-2 inline-flex min-h-8 self-start items-center text-sm font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
+          {descriptionExpanded ? "Show less" : "View details"}
+        </button>
+        <div id={detailsId} hidden={!descriptionExpanded}>
         {service.memo?.url && (
           <button
             type="button"
@@ -470,44 +469,36 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
             className="mt-2 inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
             title={service.memo.filename || "View memorandum"}
           >
-            <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
           </button>
         )}
-        <div className="mt-3 space-y-1.5 text-xs text-brand-gray">
+        <div className="mt-3 space-y-2 text-sm leading-relaxed text-brand-gray">
           {serviceSchedule && (
             <p className="flex items-center gap-1.5">
-              <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
-              <span className="font-medium text-brand-ink">{serviceSchedule}</span>
+              <span><span className="font-medium text-brand-ink">Schedule: </span>{serviceSchedule}</span>
             </p>
           )}
           {registerBy && (
             <p className="flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
-              <span>Register by {registerBy}</span>
+              <span><span className="font-medium text-brand-ink">Registration deadline: </span>{registerBy}</span>
             </p>
           )}
           {schedule && (
             <p className="flex items-center gap-1.5">
-              <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
-              <span>{schedule}</span>
+              <span><span className="font-medium text-brand-ink">Days: </span>{schedule}</span>
             </p>
           )}
           {window && (
             <p className="flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
-              <span>{window}</span>
+              <span><span className="font-medium text-brand-ink">Time: </span>{window}</span>
             </p>
           )}
           {service.facilityName && (
             <p className="flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
-              <span className="min-w-0 break-words">{service.facilityName}</span>
+              <span className="min-w-0 break-words"><span className="font-medium text-brand-ink">Facility: </span>{service.facilityName}</span>
             </p>
           )}
-          {!serviceSchedule && !schedule && !window && (
-            <p className="italic text-slate-400">Schedule to be announced.</p>
-          )}
+        </div>
         </div>
       </div>
       <footer className="mt-auto border-t border-brand-border px-4 py-3">

@@ -10,19 +10,9 @@ That folder is the single source of truth — the Supabase CLI reads it directly
 Migrations are applied in filename (timestamp) order. Do not rename or reorder
 existing files; add a new migration for every change.
 
-For development, use a fresh disposable local Supabase stack:
-
-```bash
-supabase start
-supabase migration list --local
-# Review pending SQL before explicitly applying to the LOCAL database:
-supabase migration up --local
-psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/seed.sql
-```
-
-Local Studio is at `http://127.0.0.1:54323`. Auth and Storage are required in
-addition to PostgreSQL. Initial Supabase startup applies migrations to a fresh
-database. Local configuration is generated with `npm run local:configure`.
+For development, use a dedicated hosted Supabase development project or the
+existing approved project through its native hosting configuration. Auth,
+Storage, PostgreSQL, and RLS remain the same managed services.
 
 Never link development to production. Production settings belong in the hosting
 platform's environment variables. `supabase/config.production.toml` is a local
@@ -42,17 +32,18 @@ renamed or deleted.
 Backend (`backend/.env`) - server only, never in the frontend:
 
 ```
-SUPABASE_URL=http://127.0.0.1:54321
-SUPABASE_ANON_KEY=<local anon JWT>
-SUPABASE_SERVICE_ROLE_KEY=<local service-role JWT>
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<public anon or publishable key>
+SUPABASE_SERVICE_ROLE_KEY=<server-only service-role key>
+SUPABASE_MODE=hosted-development
 ```
 
 Frontend (`frontend/.env`) - public by design, protected by RLS:
 
 ```
-VITE_SUPABASE_URL=http://127.0.0.1:54321
-VITE_SUPABASE_ANON_KEY=<local anon JWT>
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<public anon or publishable key>
+VITE_SUPABASE_MODE=hosted-development
 ```
 
 The service-role key bypasses RLS, so it must stay on the server and never
@@ -72,6 +63,12 @@ appear in a `VITE_` variable.
 - The Express API verifies the Supabase JWT, loads the profile, and enforces the
   role and barangay scope in middleware. It uses the service-role client for
   trusted writes; RLS remains the defense for any direct user-token access.
+- Calendar activity requests use a user-scoped Supabase client so the owner-only
+  table policies apply to API reads and writes as well.
+- `calendar_activities` is private to its creating Health Supervisor: RLS checks
+  the active session, role, owner, and active barangay assignment. Optional
+  resident links must remain within that barangay; linked residents do not gain
+  access to activity notes.
 - Public registration can insert an account application only in the `pending`
   state; reads and decisions are staff-only, so self-approval is not possible.
 - Uploaded documents live in a private storage bucket and are reached only

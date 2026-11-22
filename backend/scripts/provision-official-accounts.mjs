@@ -6,8 +6,9 @@
  *   1. checks whether the Supabase Auth user exists,
  *   2. verifies the intended password via a real anon sign-in,
  *   3. (only with --apply) creates the auth user when missing, resets an
- *      invalid password, confirms the email, and fixes the profile row's
- *      role / status / municipality / barangay so the account can log in.
+ *      invalid password, confirms the email, and provisions the profile.
+ *      Existing personnel retain their Auth credentials, status and assignment;
+ *      only missing lifecycle sidecars are reconciled.
  *
  * Safe by default: without --apply it changes NOTHING and only prints a report.
  * Service-role writes bypass RLS and the profile self-edit guard trigger.
@@ -19,6 +20,7 @@
 import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
 import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
+import { assertOfficialPersonnelIdentity, buildProfilePatch, isPersonnel, newRhuAssignment, reconcileOfficialPersonnel } from './official-personnel.mjs';
 
 assertLocalScriptEnvironment();
 
@@ -108,46 +110,19 @@ async function resolveScopeIds() {
   if (bErr) throw new Error(`barangay lookup failed: ${bErr.message}`);
 
   const barangayByName = new Map(brgys.map((b) => [b.name, b.id]));
-  return { municipalityId: muni.id, barangayByName };
+  const { data: rhu, error: rErr } = await admin.from('facilities').select('id')
+    .eq('municipality_id', muni.id).eq('name', 'RHU').eq('type', 'rhu').maybeSingle();
+  if (rErr) throw new Error(`RHU facility lookup failed: ${rErr.message}`);
+  return { municipalityId: muni.id, barangayByName, rhuFacilityId: rhu?.id };
 }
 
 async function getProfile(id) {
   const { data, error } = await admin
     .from('profiles')
-    .select('id,email,full_name,role,status,municipality_id,barangay_id')
+    .select('id,email,full_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations')
     .eq('id', id).maybeSingle();
   if (error) throw new Error(`profile lookup failed: ${error.message}`);
   return data;
-}
-
-function buildProfilePatch(acct, profile, scope) {
-  const patch = {};
-  if (profile.role !== acct.role) patch.role = acct.role;
-  // Status: for staff, enforce 'active' (required to log in). For residents,
-  // preserve their verification status (pending_verification still logs in as
-  // resident-limited); only re-enable a disabled resident.
-  if (acct.role === 'resident') {
-    if (profile.status === 'disabled') patch.status = 'active';
-  } else if (profile.status !== acct.status) {
-    patch.status = acct.status;
-  }
-  if (!profile.full_name) patch.full_name = acct.fullName;
-
-  if (acct.scope === 'municipality') {
-    if (!profile.municipality_id) patch.municipality_id = scope.municipalityId;
-    if (profile.barangay_id) patch.barangay_id = null; // non-scoped role must not carry a barangay
-  } else if (acct.scope === 'barangay') {
-    if (!profile.municipality_id) patch.municipality_id = scope.municipalityId;
-    if (!profile.barangay_id) {
-      const bId = scope.barangayByName.get(acct.barangay);
-      if (!bId) throw new Error(`barangay '${acct.barangay}' not found in seed data`);
-      patch.barangay_id = bId;
-    }
-  } else if (acct.scope === 'none' && acct.role !== 'resident') {
-    // admin: barangay must be null; municipality optional (admin sees all).
-    if (profile.barangay_id) patch.barangay_id = null;
-  }
-  return patch;
 }
 
 async function main() {
@@ -162,6 +137,11 @@ async function main() {
   for (const acct of ACCOUNTS) {
     const line = { email: acct.email, role: acct.role, actions: [] };
     let user = authUsers.get(acct.email.toLowerCase());
+    let preservePersonnel = false;
+    if (user && isPersonnel(acct.role)) {
+      await assertOfficialPersonnelIdentity(admin, user);
+      preservePersonnel = isPersonnel((await getProfile(user.id))?.role);
+    }
 
     // 1) Ensure auth user exists.
     if (!user) {
@@ -182,7 +162,7 @@ async function main() {
     } else {
       line.exists = true;
       // Confirm email if needed so password sign-in can succeed.
-      if (!user.email_confirmed_at && !user.confirmed_at) {
+      if (!preservePersonnel && !user.email_confirmed_at && !user.confirmed_at) {
         if (APPLY) {
           await admin.auth.admin.updateUserById(user.id, { email_confirm: true });
           line.actions.push('CONFIRMED email');
@@ -196,7 +176,9 @@ async function main() {
     if (user) {
       const check = await verifyPassword(acct.email, acct.password);
       line.passwordValid = check.ok;
-      if (!check.ok) {
+      if (!check.ok && preservePersonnel) {
+        line.actions.push('PRESERVED existing personnel Auth credentials');
+      } else if (!check.ok) {
         line.passwordReason = check.reason;
         if (APPLY) {
           const { error } = await admin.auth.admin.updateUserById(user.id, {
@@ -226,6 +208,7 @@ async function main() {
             insert.municipality_id = scope.municipalityId;
             insert.barangay_id = scope.barangayByName.get(acct.barangay);
           }
+          if (acct.role === 'rhu_personnel') Object.assign(insert, newRhuAssignment(scope));
           const { error } = await admin.from('profiles').insert(insert);
           if (error) throw new Error(`profile insert(${acct.email}) failed: ${error.message}`);
           line.actions.push(`CREATED profile (role=${acct.role}, status=${acct.status})`);
@@ -248,6 +231,12 @@ async function main() {
             line.actions.push(`FIXED profile ${JSON.stringify(patch)}`);
           } else {
             line.actions.push(`WOULD FIX profile ${JSON.stringify(patch)}`);
+          }
+        }
+        if (isPersonnel(acct.role)) {
+          line.actions.push(await reconcileOfficialPersonnel(admin, user.id, APPLY));
+          if (preservePersonnel && profile.role === 'rhu_personnel' && (!profile.facility_id || !profile.rhu_stations?.length)) {
+            line.actions.push('Existing RHU assignment is incomplete; assign facility/stations through admin account management');
           }
         }
       }

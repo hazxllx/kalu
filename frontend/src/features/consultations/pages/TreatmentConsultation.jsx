@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -19,7 +20,7 @@ import { api, consultationsApi, residentsApi, healthServicesApi } from "@/servic
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import DateRangePicker from "@/features/consultations/components/DateRangePicker";
 import { formatLongDate } from "@/lib/dateUtils";
-import { classifyBloodPressure as classifyBp } from "@/features/consultations/utils/bpClassification";
+import { classifyBloodPressure as classifyBp, formatBloodPressureInput, parseBloodPressure } from "@/features/consultations/utils/bpClassification";
 import {
   saveConsultationOffline,
   submitConsultationDraft,
@@ -30,74 +31,93 @@ import {
   listConsultationResidentsOffline,
 } from "@/services/offline/consultationOfflineService";
 import { isNavigatorOnline } from "@/services/offline/connectivity";
+import { listWithOfflineFallback } from "@/services/offline/clinicalOfflineService";
 import { captureOwnerGuard } from "@/services/offline/db";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
+import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
+import ResidentHealthHistory from "@/features/consultations/components/ResidentHealthHistory";
+import { loadServerRows } from "@/lib/serverRows";
+import { consultationRiskLevel } from "@/features/consultations/lib/consultationRisk";
+
+function ConsultationActionMenu({ anchor, onClose, onView, onEdit }) {
+  const menuRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const anchorCell = anchor.parentElement;
+    const gap = 4;
+    const position = () => {
+      const trigger = anchor.getBoundingClientRect();
+      const { clientWidth, clientHeight } = document.documentElement;
+      const viewport = window.visualViewport;
+      const left = (viewport?.offsetLeft ?? 0) + gap;
+      const top = (viewport?.offsetTop ?? 0) + gap;
+      const width = Math.min(viewport?.width ?? clientWidth, clientWidth);
+      const height = Math.min(viewport?.height ?? clientHeight, clientHeight);
+      const right = left + width - 2 * gap;
+      const bottom = top + height - 2 * gap;
+
+      // Keep the original shrink-to-fit width from the Actions cell.
+      menu.style.setProperty("--menu-max-width", `min(${Math.max(0, width - 2 * gap)}px, max(10rem, ${anchorCell.clientWidth}px))`);
+      menu.style.maxHeight = `${Math.max(0, height - 2 * gap)}px`;
+      const { width: menuWidth, height: menuHeight } = menu.getBoundingClientRect();
+      const below = trigger.bottom + gap;
+      const above = trigger.top - gap - menuHeight;
+      const preferredTop = below + menuHeight <= bottom ? below : above;
+      menu.style.left = `${Math.max(left, Math.min(trigger.right - menuWidth, right - menuWidth))}px`;
+      menu.style.top = `${Math.max(top, Math.min(preferredTop, bottom - menuHeight))}px`;
+    };
+
+    const dismissOutside = (event) => {
+      if (!menu.contains(event.target) && !anchor.contains(event.target)) onClose();
+    };
+    const dismissOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      anchor.focus({ preventScroll: true });
+      onClose();
+    };
+
+    position();
+    menu.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
+    const resizeObserver = new ResizeObserver(position);
+    resizeObserver.observe(menu);
+    resizeObserver.observe(anchorCell);
+    const anchorObserver = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) onClose();
+    });
+    anchorObserver.observe(anchor);
+    window.addEventListener("scroll", position, { capture: true, passive: true });
+    window.addEventListener("resize", position);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("scroll", position);
+    viewport?.addEventListener("resize", position);
+    document.addEventListener("pointerdown", dismissOutside, true);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      resizeObserver.disconnect();
+      anchorObserver.disconnect();
+      window.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
+      viewport?.removeEventListener("resize", position);
+      document.removeEventListener("pointerdown", dismissOutside, true);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [anchor, onClose]);
+
+  return createPortal(
+    <div ref={menuRef} role="menu" className="fixed left-0 top-0 z-40 w-max min-w-[min(10rem,var(--menu-max-width))] max-w-[var(--menu-max-width)] overflow-auto rounded-btn border border-brand-border bg-white p-1 text-slate-700 shadow-lg dark:text-slate-300">
+      <button type="button" role="menuitem" onClick={onView} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>
+      {onEdit && <button type="button" role="menuitem" onClick={onEdit} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><FileText className="h-4 w-4 text-brand-gray" /> Edit Consultation</button>}
+    </div>,
+    document.body,
+  );
+}
 
 const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue ${
     error ? "border-brand-danger bg-red-50/40" : "border-brand-border"
   }`;
-
-/**
- * Inline Yes/No segmented control used for the boolean-style consultation
- * fields (Follow-up Required, Referral Required). It replaces the old native
- * <select> while keeping the exact "Yes"/"No" string values the form state,
- * validation and API already expect. The control behaves as an accessible
- * radio group: it exposes an accessible group label, uses roving tabindex so
- * the selected option is reachable by Tab, supports arrow-key navigation, and
- * highlights the active option with the subtle blue KALUSAGAP accent.
- */
-function YesNoToggle({ label, value, onChange, required = false }) {
-  const options = ["Yes", "No"];
-  const handleKeyDown = (e) => {
-    const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
-    if (!keys.includes(e.key)) return;
-    e.preventDefault();
-    const current = options.indexOf(value);
-    const base = current === -1 ? 0 : current;
-    const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
-    const nextIdx = forward
-      ? (base + 1) % options.length
-      : (base - 1 + options.length) % options.length;
-    onChange(options[nextIdx]);
-  };
-  return (
-    <div>
-      <p className="text-xs text-brand-gray mb-1">
-        {label}
-        {required && <span className="text-brand-danger"> *</span>}
-      </p>
-      <div
-        role="radiogroup"
-        aria-label={label}
-        onKeyDown={handleKeyDown}
-        className="inline-flex items-center gap-0.5 rounded-btn border border-brand-border bg-white p-0.5"
-      >
-        {options.map((opt) => {
-          const active = value === opt;
-          return (
-            <button
-              key={opt}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              aria-label={`${label}: ${opt}`}
-              tabIndex={active ? 0 : -1}
-              onClick={() => onChange(opt)}
-              className={`min-w-[3.25rem] rounded-[0.45rem] px-3 py-1 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 ${
-                active
-                  ? "border border-brand-blue bg-brand-light text-brand-blue"
-                  : "border border-transparent text-brand-gray hover:text-brand-ink"
-              }`}
-            >
-              {opt}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 /** A value is a valid, positive measurement, or empty (the field is optional). */
 const isPositiveOrEmpty = (value) => {
@@ -166,12 +186,8 @@ const emptyForm = (now = new Date()) => ({
   medicationPrescribed: "",
   medications: [],
   adviceGiven: "",
-  followUpRequired: "No",
-  nextVisitDate: "",
-  referralRequired: "No",
   serviceId: "",
   serviceName: "",
-  remarks: "",
   followUpId: "",
 });
 
@@ -187,9 +203,6 @@ const emptyForm = (now = new Date()) => ({
  * @property {string} [height]
  * @property {string} [weight]
  * @property {string} [oxygenSaturation]
- * @property {string} [clinicalFindingsDiagnosis]
- * @property {string} [treatmentGiven]
- * @property {string} [nextVisitDate]
  * @property {string} [submit]
  */
 
@@ -244,6 +257,8 @@ const parseVitals = (value) => {
   }
 };
 
+const consultationRisk = (record) => consultationRiskLevel(record) || "Unassessed";
+
 /** Two-letter initials for the resident avatar (local — no external store). */
 const initialsOf = (name) =>
   String(name || "")
@@ -265,6 +280,7 @@ export default function TreatmentConsultation() {
   const canEditConsultation = can("consultation.records.update");
   const isHealthSupervisor = user?.role === "health_supervisor";
   const canViewConsultations = can("consultation.requests.view");
+  const canViewHistory = can("consultation.history.view");
   const focusedId = isHealthSupervisor ? searchParams.get("consultation") : null;
   const [allResidents, setAllResidents] = useState([]);
   const [consultations, setConsultations] = useState([]);
@@ -274,6 +290,9 @@ export default function TreatmentConsultation() {
   // Owner-scoped write-ahead queue. Background reconnect sync uses the same
   // immutable operation as the first online attempt.
   const ownerId = user?.id || null;
+  const historyScopeKey = JSON.stringify([user?.role, user?.municipalityId || user?.municipality_id,
+    user?.barangayId || user?.barangay_id]);
+  const [savedHistory, setSavedHistory] = useState(null);
   const [offlineDrafts, setOfflineDrafts] = useState([]);
   const [draftBusyId, setDraftBusyId] = useState(null);
   const [reviewLocalId, setReviewLocalId] = useState(null);
@@ -285,7 +304,9 @@ export default function TreatmentConsultation() {
   const [mode, setMode] = useState("list"); // "list" | "form"
   const [editingId, setEditingId] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
+  const [editingRisk, setEditingRisk] = useState(null);
   const [openActionMenu, setOpenActionMenu] = useState(null);
+  const recordRequest = useRef(0);
 
   const scope = getSupervisorScope(user);
   const assignedBarangay = scope?.assignedBarangay;
@@ -313,6 +334,10 @@ export default function TreatmentConsultation() {
   }, [allResidents, allowedBarangays]);
 
   const [selectedResident, setSelectedResident] = useState(null);
+  const renderHistory = (resident, revision, consultationId = "") => canViewHistory && ownerId && resident?.id && (
+    <ResidentHealthHistory residentId={resident.id} residentName={resident.name} bloodType={resident.bloodType} ownerId={ownerId}
+      scopeKey={historyScopeKey} revision={revision} consultationId={consultationId} />
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [recordSearch, setRecordSearch] = useState("");
   const [recordDateFrom, setRecordDateFrom] = useState("");
@@ -349,8 +374,11 @@ export default function TreatmentConsultation() {
     [formData.height, formData.weight],
   );
   const bloodPressureCategory = useMemo(
-    () => classifyBp(formData.bloodPressure),
-    [formData.bloodPressure],
+    () => classifyBp(formData.bloodPressure, {
+      chiefComplaint: formData.chiefComplaint,
+      findings: formData.clinicalFindingsDiagnosis,
+    }),
+    [formData.bloodPressure, formData.chiefComplaint, formData.clinicalFindingsDiagnosis],
   );
 
   const load = useCallback(() => {
@@ -368,8 +396,8 @@ export default function TreatmentConsultation() {
     // verified directory). Pending/rejected/unverified residents are excluded
     // server-side; the submission endpoint re-checks eligibility as well.
     return Promise.all([
-      listConsultationResidentsOffline({ ownerId, fetchList: () => residentsApi.list({ limit: 200, verified: true }) }),
-      listConsultationsOffline({ ownerId, fetchList: () => consultationsApi.list() }),
+      listConsultationResidentsOffline({ ownerId, fetchList: () => loadServerRows((params) => residentsApi.list({ ...params, verified: true })) }),
+      listConsultationsOffline({ ownerId, fetchList: () => loadServerRows((params) => consultationsApi.list(params)) }),
     ]).then(([residentRows, consultationRows]) => {
         if (!guard()) return;
         setAllResidents(residentRows);
@@ -386,6 +414,8 @@ export default function TreatmentConsultation() {
   }, [ownerId, isHealthSupervisor, assignedBarangay]);
 
   useEffect(() => {
+    recordRequest.current += 1;
+    setDetailRecord(null);
     setAllResidents([]);
     setConsultations([]);
     setOfflineDrafts([]);
@@ -393,6 +423,7 @@ export default function TreatmentConsultation() {
     setMode("list");
     setEditingId(null);
     setSelectedResident(null);
+    setSavedHistory(null);
     setFormData(emptyForm());
     setSearchQuery("");
     setErrors({});
@@ -400,16 +431,10 @@ export default function TreatmentConsultation() {
     setDraftBusyId(null);
     setToast(null);
     load();
+    return () => { recordRequest.current += 1; };
   }, [load]);
 
-  useEffect(() => {
-    if (!openActionMenu) return undefined;
-    const close = (event) => {
-      if (!event.target.closest("[data-consultation-actions]")) setOpenActionMenu(null);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [openActionMenu]);
+  const closeActionMenu = useCallback(() => setOpenActionMenu(null), []);
 
   // Also refresh queue states after automatic synchronization or a rejection.
   const refreshDrafts = useCallback(() => {
@@ -436,13 +461,16 @@ export default function TreatmentConsultation() {
   // server-enforced scope).
   useEffect(() => {
     let active = true;
+    setHealthServices([]);
     setServicesLoading(true);
     setServicesError("");
-    healthServicesApi
-      .list()
-      .then((res) => {
+    listWithOfflineFallback({
+      ownerId,
+      entity: "consultationHealthService",
+      fetchFn: (params) => healthServicesApi.list(params, { ownerId, dedupeKey: ownerId }),
+    })
+      .then(({ rows }) => {
         if (!active) return;
-        const rows = Array.isArray(res) ? res : res?.rows || res?.records || [];
         setHealthServices(rows.filter((service) => service.active !== false));
       })
       .catch((err) => {
@@ -455,7 +483,7 @@ export default function TreatmentConsultation() {
         if (active) setServicesLoading(false);
       });
     return () => { active = false; };
-  }, []);
+  }, [ownerId]);
 
   const filteredResidents = residentOptions.filter(
     (r) =>
@@ -470,6 +498,7 @@ export default function TreatmentConsultation() {
 
   const startNewConsultation = () => {
     if (!canConductConsultation) return;
+    recordRequest.current += 1;
     setEditingId(null);
     setReviewLocalId(null);
     setSelectedResident(null);
@@ -479,9 +508,31 @@ export default function TreatmentConsultation() {
     setMode("form");
   };
 
-  const openForEdit = (record) => {
-    if (!canEditConsultation) return;
+  const openRecord = async (row, edit = false) => {
+    closeActionMenu();
+    if (!ownerId || (edit && !canEditConsultation)) return;
+    const request = ++recordRequest.current;
+    const guard = captureOwnerGuard(ownerId);
+    setDetailRecord(null);
+    let record;
+    try {
+      record = !edit && !isNavigatorOnline()
+        ? row
+        : (await consultationsApi.get(row.id, { ownerId }))?.consultation;
+      if (!guard() || request !== recordRequest.current) return;
+      if (record?.id !== row.id || !row.resident?.id || record.resident?.id !== row.resident.id) {
+        throw new Error("The server did not return the selected consultation.");
+      }
+    } catch (error) {
+      if (guard() && request === recordRequest.current) showToast(error?.message || "Could not load the consultation.", "error");
+      return;
+    }
+    if (!edit) {
+      setDetailRecord(record);
+      return;
+    }
     setEditingId(record.id);
+    setEditingRisk(consultationRisk(record));
     setReviewLocalId(null);
     setSelectedResident(record.resident || null);
     // Vitals are returned nested under record.vitals (bp/temperature/hr/rr/
@@ -491,7 +542,7 @@ export default function TreatmentConsultation() {
     // Merge findings and diagnosis for the combined field
     const mergedClinicalData = [
       record.findings || "",
-      record.diagnosis || ""
+      record.diagnosis ? `Diagnosis: ${record.diagnosis}` : ""
     ].filter(Boolean).join("\n");
     setFormData({
       consultationDate: record.consultationDate || "",
@@ -509,12 +560,8 @@ export default function TreatmentConsultation() {
       medicationPrescribed: record.medicationPrescribed || "",
       medications: Array.isArray(record.medications) ? record.medications : [],
       adviceGiven: record.adviceGiven || "",
-      followUpRequired: record.followUpRequired || "No",
-      nextVisitDate: record.nextVisitDate || "",
-      referralRequired: record.referralRequired || "No",
       serviceId: record.serviceId || "",
       serviceName: record.serviceName || "",
-      remarks: record.remarks || "",
     });
     setErrors({});
     setSearchQuery("");
@@ -523,6 +570,7 @@ export default function TreatmentConsultation() {
   };
 
   const cancelForm = () => {
+    recordRequest.current += 1;
     setMode("list");
     setEditingId(null);
     setReviewLocalId(null);
@@ -536,13 +584,11 @@ export default function TreatmentConsultation() {
     if (!selectedResident) next.resident = "Please select a resident.";
     if (!formData.consultationDate) next.consultationDate = "Consultation date is required.";
     if (!formData.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
-    if (!formData.clinicalFindingsDiagnosis.trim()) next.clinicalFindingsDiagnosis = "Clinical findings and diagnosis are required.";
-    if (!formData.treatmentGiven.trim()) next.treatmentGiven = "Treatment provided is required.";
+    if (String(formData.bloodPressure ?? "").trim() && !parseBloodPressure(formData.bloodPressure)) {
+      next.bloodPressure = "Enter a complete, valid systolic/diastolic reading (e.g. 120/80).";
+    }
     if (!isPositiveOrEmpty(formData.height)) next.height = "Height must be a number greater than 0.";
     if (!isPositiveOrEmpty(formData.weight)) next.weight = "Weight must be a number greater than 0.";
-    if (formData.followUpRequired === "Yes" && !formData.nextVisitDate) {
-      next.nextVisitDate = "Next visit date is required when a follow-up is needed.";
-    }
     return next;
   };
 
@@ -561,7 +607,6 @@ export default function TreatmentConsultation() {
       followUpId: formData.followUpId || undefined,
     };
     setBusy(true);
-    const needsReferral = !editingId && formData.referralRequired === "Yes";
 
     // Shared, status-appropriate error presentation (never fail silently).
     const showSaveError = (err) => {
@@ -592,7 +637,7 @@ export default function TreatmentConsultation() {
         residentId: selectedResident.id,
         resident: selectedResident.name,
         reason: formData.clinicalFindingsDiagnosis || formData.chiefComplaint || "",
-        riskLevel: "High",
+        riskLevel: consultationRisk(saved),
         findings: formData.clinicalFindingsDiagnosis || "",
         chiefComplaints: formData.chiefComplaint || "",
         clinicalHistory: "",
@@ -607,7 +652,7 @@ export default function TreatmentConsultation() {
         },
         impression: formData.clinicalFindingsDiagnosis || "",
         recommendations: formData.adviceGiven || "",
-        clinicalNotes: formData.remarks || "",
+        clinicalNotes: saved?.remarks || "",
         treatmentVisitId: saved?.id || "",
       };
       cancelForm();
@@ -623,8 +668,16 @@ export default function TreatmentConsultation() {
           throw new Error("The server did not confirm the consultation update. Your entered details were retained.");
         }
         setConsultations((current) => current.map((item) => (item.id === editingId ? saved : item)));
+        void load();
         if (focusedId === editingId) void focusedRecord.refresh();
-        showToast("Consultation updated successfully.");
+        showToast(saved.clinicalAssessment?.referralEvaluationRequired
+          ? "Consultation updated. High risk: referral evaluation is required."
+          : "Consultation updated successfully.");
+        if (saved.clinicalAssessment?.referralEvaluationRequired === true && editingRisk !== "High" && !saved.referrals?.length) {
+          openReferral(saved);
+          return;
+        }
+        setSavedHistory({ resident: selectedResident, ownerId, scopeKey: historyScopeKey, revision: Date.now() });
         cancelForm();
       }).catch(showSaveError).finally(() => { if (guard()) setBusy(false); });
       return;
@@ -640,20 +693,19 @@ export default function TreatmentConsultation() {
       if (!guard()) return;
       if (res.source === "server") {
         const saved = res.record;
-        setConsultations((current) => [saved, ...current]);
-        showToast("Consultation saved successfully.");
-        if (needsReferral) {
+        setConsultations((current) => [saved, ...current.filter((row) => row.id !== saved.id)]);
+        showToast(saved.clinicalAssessment?.referralEvaluationRequired
+          ? "Consultation saved. High risk: referral evaluation is required."
+          : "Consultation saved successfully.");
+        if (saved?.clinicalAssessment?.referralEvaluationRequired === true) {
           openReferral(saved);
           return;
         }
+        setSavedHistory({ resident: selectedResident, ownerId, scopeKey: historyScopeKey, revision: Date.now() });
         cancelForm();
         return;
       }
-      // Saved locally — referral creation needs a server-confirmed visit, so it
-      // is deferred until this draft is submitted online.
-      showToast(needsReferral
-        ? "Saved on this device. It will sync automatically on reconnect. Create the referral separately after server confirmation."
-        : "Saved on this device. Awaiting server confirmation; reconnect retries automatically.", "pending");
+      showToast("Saved on this device. Awaiting server confirmation; reconnect retries automatically.", "pending");
       refreshDrafts();
       cancelForm();
     }).catch(showSaveError).finally(() => { if (guard()) setBusy(false); });
@@ -677,6 +729,8 @@ export default function TreatmentConsultation() {
       if (!guard()) return;
       if (out.source === "server") {
         setConsultations((current) => [out.record, ...current.filter((row) => row.id !== out.record.id)]);
+        const resident = out.record.resident;
+        if (resident?.id) setSavedHistory({ resident, ownerId, scopeKey: historyScopeKey, revision: Date.now() });
         showToast("Consultation saved successfully.");
       } else {
         showToast("Awaiting server confirmation. Clinical information remains queued for automatic retry.", "pending");
@@ -706,7 +760,7 @@ export default function TreatmentConsultation() {
       // Merge findings and diagnosis for the combined field
       const mergedClinicalData = [
         data.findings || data.clinicalFindingsDiagnosis || "",
-        data.diagnosis || ""
+        data.diagnosis ? `Diagnosis: ${data.diagnosis}` : ""
       ].filter(Boolean).join("\n");
       setEditingId(null);
       setReviewLocalId(localId);
@@ -740,7 +794,7 @@ export default function TreatmentConsultation() {
     const query = recordSearch.trim().toLowerCase();
     const filtered = recordRows.filter((record) => {
       const date = String(record.consultationDate || "").slice(0, 10);
-      const risk = record.resident?.riskLevel || record.resident?.risk_level || record.riskLevel || "Not assessed";
+      const risk = consultationRisk(record);
       const searchMatches = !query || [
         record.resident?.name,
         record.resident?.id,
@@ -756,7 +810,7 @@ export default function TreatmentConsultation() {
         record.diagnosis,
       ].filter(Boolean).join(" ").toLowerCase().includes(query);
       const dateMatches = (!recordDateFrom || date >= recordDateFrom) && (!recordDateTo || date <= recordDateTo);
-      const riskMatches = recordRisk === "All" || risk.toLowerCase() === recordRisk.toLowerCase();
+      const riskMatches = recordRisk === "All" || risk === recordRisk;
       const followUpMatches = recordFollowUp === "All"
         || recordFollowUp === "With Follow-up" && record.followUpRequired === "Yes"
         || recordFollowUp === "Without Follow-up" && record.followUpRequired !== "Yes";
@@ -767,7 +821,8 @@ export default function TreatmentConsultation() {
         const comparison = (left.resident?.name || "").localeCompare(right.resident?.name || "", undefined, { sensitivity: "base" });
         return recordSort === "residentAsc" ? comparison : -comparison;
       }
-      const comparison = String(left.consultationDate || "").localeCompare(String(right.consultationDate || ""));
+      const comparison = `${left.consultationDate || ""}T${left.consultationTime || ""}`.localeCompare(`${right.consultationDate || ""}T${right.consultationTime || ""}`)
+        || String(left.id).localeCompare(String(right.id));
       return recordSort === "oldest" ? comparison : -comparison;
     });
   }, [recordRows, recordSearch, recordDateFrom, recordDateTo, recordRisk, recordFollowUp, recordSort]);
@@ -783,6 +838,7 @@ export default function TreatmentConsultation() {
   const displayedRecords = focusedId
     ? focusedRecord.data ? [focusedRecord.data] : []
     : filteredRecordRows.slice((recordPage - 1) * recordPageSize, recordPage * recordPageSize);
+  const actionRow = openActionMenu && displayedRecords.find((row) => row.id === openActionMenu.id);
   useEffect(() => { setRecordPage(1); }, [recordSearch, recordDateFrom, recordDateTo, recordRisk, recordFollowUp, recordSort]);
   useEffect(() => {
     setRecordPage((page) => Math.min(page, Math.max(1, Math.ceil(filteredRecordRows.length / recordPageSize))));
@@ -819,7 +875,7 @@ export default function TreatmentConsultation() {
               <div
                 key={resident.id}
                 onClick={() => {
-                  if (reviewLocalId || editingId) return;
+                   if (busy || reviewLocalId || editingId) return;
                   setSelectedResident(resident);
                   if (errors.resident) setErrors((prev) => ({ ...prev, resident: "" }));
                 }}
@@ -857,6 +913,7 @@ export default function TreatmentConsultation() {
           <h3 className="font-semibold text-brand-ink">
             {reviewLocalId ? "Review Queued Consultation" : editingId ? "Edit Treatment Consultation" : "Treatment Consultation Form"}
           </h3>
+          {editingId && <RiskBadge level={editingRisk} />}
           {!editingId && !reviewLocalId && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-3 py-1 text-xs font-medium text-brand-blue">
               <Plus className="w-3.5 h-3.5" /> New Consultation
@@ -908,6 +965,8 @@ export default function TreatmentConsultation() {
             </div>
           )}
         </div>
+
+        {renderHistory(selectedResident, syncStatus.ownerId === ownerId ? syncStatus.lastSyncedAt : null, editingId)}
 
         {/* Consultation Information */}
         <div className="mb-5">
@@ -995,21 +1054,30 @@ export default function TreatmentConsultation() {
                   inputMode="numeric"
                   placeholder="120/80"
                   value={formData.bloodPressure}
-                  onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })}
+                  onChange={(e) => {
+                    const input = e.currentTarget;
+                    const formatted = formatBloodPressureInput(input.value, input.selectionStart, input.selectionEnd, e.nativeEvent.inputType);
+                    if (formatted) {
+                      input.value = formatted.value;
+                      input.setSelectionRange(formatted.caret, formatted.caret);
+                    }
+                    const bloodPressure = input.value;
+                    setFormData((prev) => ({ ...prev, bloodPressure }));
+                  }}
                   aria-invalid={Boolean(errors.bloodPressure)}
                   className="min-w-0 flex-1 bg-transparent text-sm font-medium text-slate-900 outline-none placeholder:text-slate-400"
                 />
               </div>
               {bloodPressureCategory && (
-                <div className="mt-1 flex min-w-0 items-start">
+                <div className="mt-1 min-w-0">
                   <span
                     className={`inline-flex max-w-full shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight ${bloodPressureCategory.badgeClassName}`}
                     aria-label={`Blood pressure category: ${bloodPressureCategory.category}`}
                   >
                     {bloodPressureCategory.category}
                   </span>
-                  {bloodPressureCategory.code === "crisis" && (
-                    <p className="ml-2 min-w-0 flex-1 text-[11px] leading-4 text-red-800" role="alert" aria-live="assertive">
+                  {bloodPressureCategory.referralEvaluationRequired && (
+                    <p className="mt-1 max-w-full min-w-0 break-words text-[11px] leading-4 text-red-800" role="alert" aria-live="assertive">
                       {bloodPressureCategory.message}
                     </p>
                   )}
@@ -1070,31 +1138,30 @@ export default function TreatmentConsultation() {
           <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Clinical Assessment</h4>
           <div className="space-y-3">
             <div>
-              <p className="text-xs text-brand-gray mb-1">Clinical Findings & Diagnosis <span className="text-brand-danger">*</span></p>
+              <p className="text-xs text-brand-gray mb-1">Clinical Findings &amp; Optional Diagnosis</p>
               <textarea
                 rows={4}
                 value={formData.clinicalFindingsDiagnosis}
                 onChange={(e) => setFormData({ ...formData, clinicalFindingsDiagnosis: e.target.value })}
-                placeholder="Enter clinical findings, symptoms, examination results, and diagnosis or assessment..."
-                className={`${inputCls(errors.clinicalFindingsDiagnosis)} resize-none w-full`}
+                placeholder="Enter clinical findings. If applicable, add a new line starting with Diagnosis:"
+                className={`${inputCls()} resize-none w-full`}
               />
-              {errors.clinicalFindingsDiagnosis && <p className="mt-1 text-xs text-brand-danger">{errors.clinicalFindingsDiagnosis}</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Treatment Provided <span className="text-brand-danger">*</span></p>
+              <p className="text-xs text-brand-gray mb-1">Treatment Provided</p>
               <textarea
                 rows={2}
                 value={formData.treatmentGiven}
                 onChange={(e) => setFormData({ ...formData, treatmentGiven: e.target.value })}
-                className={`${inputCls(errors.treatmentGiven)} resize-none`}
+                className={`${inputCls()} resize-none`}
               />
-              {errors.treatmentGiven && <p className="mt-1 text-xs text-brand-danger">{errors.treatmentGiven}</p>}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
               <MedicineSelector
                 value={formData.medications}
                 onChange={(medications) => setFormData((prev) => ({ ...prev, medications }))}
+                errors={errors}
               />
             </div>
             <div>
@@ -1106,51 +1173,13 @@ export default function TreatmentConsultation() {
                 className={`${inputCls()} resize-none`}
               />
             </div>
-            <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3">
-              <YesNoToggle
-                label="Follow-up Required"
-                value={formData.followUpRequired}
-                onChange={(val) => setFormData({ ...formData, followUpRequired: val })}
-              />
-              <YesNoToggle
-                label="Referral Required"
-                value={formData.referralRequired}
-                onChange={(val) => setFormData({ ...formData, referralRequired: val })}
-              />
-              {formData.referralRequired === "Yes" && (
-                <p role="status" className="sm:col-span-2 rounded-btn border border-brand-blue/20 bg-brand-blue/5 px-3 py-2 text-xs leading-relaxed text-brand-gray dark:bg-brand-blue/10">
-                  Save this consultation first. The referral form will open next with this resident, clinical findings, and vital signs already attached.
-                </p>
-              )}
-              {formData.followUpRequired === "Yes" && (
-                <div className="sm:col-span-2">
-                  <p className="text-xs text-brand-gray mb-1">Next Visit Date <span className="text-brand-danger">*</span></p>
-                  <input
-                    type="date"
-                    value={formData.nextVisitDate}
-                    onChange={(e) => setFormData({ ...formData, nextVisitDate: e.target.value })}
-                    className={inputCls(errors.nextVisitDate)}
-                  />
-                  {errors.nextVisitDate && <p className="mt-1 text-xs text-brand-danger">{errors.nextVisitDate}</p>}
-                </div>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-brand-gray mb-1">Notes / Remarks</p>
-              <textarea
-                rows={2}
-                value={formData.remarks}
-                onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                className={`${inputCls()} resize-none`}
-              />
-            </div>
           </div>
         </div>
 
         </fieldset>
 
         {/* Buttons */}
-        <div className="pt-4 border-t border-brand-border">
+        <div>
           {errors.submit && (
             <div className="mb-3 rounded-btn border border-brand-danger/30 bg-red-50/60 px-3 py-2" role="alert" aria-live="assertive">
               <p className="text-sm text-brand-danger">{errors.submit}</p>
@@ -1284,7 +1313,7 @@ export default function TreatmentConsultation() {
                 <option value="High">High</option>
                 <option value="Moderate">Moderate</option>
                 <option value="Low">Low</option>
-                <option value="Not assessed">Not Assessed</option>
+                <option value="Unassessed">Not Assessed</option>
               </select>
             </div>
 
@@ -1442,8 +1471,7 @@ export default function TreatmentConsultation() {
                   );
                 }
                 if (key === "risk") {
-                  const risk = row.resident?.riskLevel || row.resident?.risk_level || row.riskLevel || "Not assessed";
-                  return <RiskBadge level={risk} />;
+                   return <RiskBadge level={consultationRisk(row)} />;
                 }
                 if (key === "followUp")
                   return row.followUpRequired === "Yes" ? (
@@ -1455,19 +1483,24 @@ export default function TreatmentConsultation() {
                   );
                 if (key === "actions")
                   return (
-                    <div className="relative flex justify-center" data-consultation-actions>
-                      <button type="button" onClick={() => setOpenActionMenu((current) => current === row.id ? null : row.id)} className="inline-flex h-8 w-8 items-center justify-center rounded-btn text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" aria-label={`Actions for ${row.resident?.name || "consultation"}`} aria-haspopup="menu" aria-expanded={openActionMenu === row.id}>
+                    <div className="flex justify-center">
+                      <button type="button" onClick={(event) => {
+                        const anchor = event.currentTarget;
+                        setOpenActionMenu((current) => current?.anchor === anchor ? null : { id: row.id, anchor });
+                      }} className="inline-flex h-8 w-8 items-center justify-center rounded-btn text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" aria-label={`Actions for ${row.resident?.name || "consultation"}`} aria-haspopup="menu" aria-expanded={openActionMenu?.id === row.id}>
                         <MoreVertical className="h-4 w-4" aria-hidden="true" />
                       </button>
-                      {openActionMenu === row.id && <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-[10rem] rounded-btn border border-brand-border bg-white p-1 shadow-lg">
-                        <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); setDetailRecord(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>
-                        {canEditConsultation && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openForEdit(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><FileText className="h-4 w-4 text-brand-gray" /> Edit Consultation</button>}
-                      </div>}
                     </div>
                   );
                 return row[key];
               }}
             />
+            {actionRow && <ConsultationActionMenu
+              anchor={openActionMenu.anchor}
+              onClose={closeActionMenu}
+              onView={() => openRecord(actionRow)}
+              onEdit={canEditConsultation ? () => openRecord(actionRow, true) : null}
+            />}
             {!focusedId && filteredRecordRows.length > 0 && <TablePagination total={filteredRecordRows.length} page={recordPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }} className="mt-3" />}
             {focusedId ? null : loading ? (
               <p className="py-10 text-center text-sm text-brand-gray">Loading consultations...</p>
@@ -1496,18 +1529,18 @@ export default function TreatmentConsultation() {
                   ["Chief Complaint", detailRecord.chiefComplaint],
                 ]],
                 ["Clinical Information", [
-                   ["Clinical Findings & Diagnosis", detailRecord.findings],
-                   ["Risk Level", detailRecord.resident?.riskLevel || detailRecord.resident?.risk_level || detailRecord.riskLevel],
+                   ["Clinical Findings & Diagnosis", [detailRecord.findings, detailRecord.diagnosis].filter(Boolean).join("\n")],
+                    ["Risk Level", consultationRisk(detailRecord)],
                    ["Vital Signs", parseVitals(detailRecord.vitals)],
                 ]],
                 ["Treatment and Care", [
                   ["Treatment", detailRecord.treatmentGiven],
-                  ["Medicines", detailRecord.medicationPrescribed || (detailRecord.medications || []).map((medicine) => medicine.name || medicine).join(", ")],
-                  ["Recommendations", detailRecord.adviceGiven],
-                  ["Follow-up", detailRecord.followUpRequired === "Yes" ? (detailRecord.nextVisitDate ? `Required — ${formatDate(detailRecord.nextVisitDate)}` : "Required") : "Not required"],
+                  ["Medicines", (detailRecord.medications || []).length ? detailRecord.medications.map((medicine) => typeof medicine === "string" ? medicine : [medicine.genericName || medicine.name, medicine.strength, medicine.dose || medicine.dosage, medicine.frequency, medicine.route, medicine.duration, medicine.instructions].filter(Boolean).join(" · ")).join("\n") : detailRecord.medicationPrescribed],
+                  ["Recommendations", [detailRecord.adviceGiven, ...(detailRecord.referrals || []).map((referral) => ["Referral:", referral.destination_facility || referral.receiving_facility, referral.reason, referral.status, referral.resolution_notes].filter(Boolean).join(" "))].filter(Boolean).join("\n")],
+                  ["Follow-up", [(detailRecord.followUpRequired === "Yes" ? (detailRecord.nextVisitDate ? `Required — ${formatDate(detailRecord.nextVisitDate)}` : "Required") : "Not required"), ...(detailRecord.followUps || []).map((followUp) => [followUp.scheduled_date, followUp.status, followUp.outcome, followUp.notes].filter(Boolean).join(" · "))].join("\n")],
                 ]],
                 ["Recording Information", [
-                  ["Recording Personnel", detailRecord.recordedByName || detailRecord.personnelName],
+                  ["Recording Personnel", [detailRecord.recordedByName || detailRecord.personnelName, detailRecord.consultingPersonnel && `Attending: ${detailRecord.consultingPersonnel}`].filter(Boolean).join("\n")],
                 ]],
               ].map(([section, fields]) => (
                 <section key={section} className="mt-4 first:mt-4">
@@ -1529,6 +1562,7 @@ export default function TreatmentConsultation() {
                   </div>
                 </section>
               ))}
+              <LabResultsPanel residentId={detailRecord.resident?.id || detailRecord.residentId} consultationId={detailRecord.offline ? undefined : detailRecord.id} compact />
             </div>
           </Card>
         </div>

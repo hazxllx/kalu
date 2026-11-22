@@ -28,6 +28,7 @@ const normalizeOptions = (options) =>
  * @param {string} [props.placeholder] Shown before anything is chosen
  * @param {string} [props.emptyText] Shown when the filter has no matches
  * @param {string} [props.error] Inline validation message
+ * @param {boolean} [props.disabled] Prevents searching, clearing, and changing the selection
  * @param {number} [props.maxResults] Scrollable result cap (panel scrolls if exceeded)
  * @param {boolean} [props.portalDropdown] Render the menu outside overflow-clipped containers
  */
@@ -40,6 +41,7 @@ export default function SearchableSelect({
   placeholder = "Search...",
   emptyText = "No options found.",
   error = "",
+  disabled = false,
   maxResults = 6,
   portalDropdown = false,
 }) {
@@ -105,12 +107,14 @@ export default function SearchableSelect({
   }, [open, portalDropdown, results.length, maxResults]);
 
   const select = (option) => {
+    if (disabled) return;
     onChange(option.value);
     setQuery("");
     setOpen(false);
   };
 
   const clear = () => {
+    if (disabled) return;
     onChange("");
     setQuery("");
     setHighlighted(0);
@@ -154,7 +158,7 @@ export default function SearchableSelect({
   // field simply shows the selected option; focusing starts a fresh search.
   const showSelected = value && !open;
   const controlValue = showSelected ? items.find((o) => o.value === value)?.label || value : query;
-  const dropdown = open ? (
+  const dropdown = open && !disabled ? (
     <div
       ref={menuRef}
       style={portalDropdown ? (menuPosition || { visibility: "hidden" }) : undefined}
@@ -209,6 +213,8 @@ export default function SearchableSelect({
             value={controlValue}
             role="combobox"
             aria-invalid={Boolean(error)}
+            aria-disabled={disabled}
+            readOnly={disabled}
             aria-expanded={open}
             aria-autocomplete="list"
             aria-controls="searchable-select-listbox"
@@ -217,17 +223,20 @@ export default function SearchableSelect({
             }
             placeholder={placeholder}
             onChange={(e) => {
+              if (disabled) return;
               setQuery(e.target.value);
               setOpen(true);
             }}
             onFocus={() => {
+              if (disabled) return;
               if (showSelected) setQuery("");
               setOpen(true);
             }}
             onKeyDown={onKeyDown}
-            className="w-full min-w-0 bg-transparent text-sm text-brand-ink dark:text-foreground outline-none placeholder:text-brand-gray/70 dark:placeholder:text-muted-foreground/70"
+            className={`w-full min-w-0 bg-transparent text-sm text-brand-ink dark:text-foreground outline-none placeholder:text-brand-gray/70 dark:placeholder:text-muted-foreground/70 ${disabled ? "cursor-not-allowed" : ""}`}
+            disabled={disabled}
           />
-          {(value || query) && (
+          {(value || query) && !disabled && (
             <button
               type="button"
               onClick={clear}

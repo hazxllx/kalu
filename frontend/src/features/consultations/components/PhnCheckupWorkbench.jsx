@@ -3,10 +3,12 @@ import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTrian
 import { Card } from "@/components/common/Card";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import { formatClinicalDateTime } from "@/lib/dateUtils";
+import ResidentHealthHistory from "@/features/consultations/components/ResidentHealthHistory";
 
 export const CHECKUP_STATUS_TONES = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -119,6 +121,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const certOpenRef = useRef(false);
   certOpenRef.current = certOpen;
   const { user } = useAuth();
+  const { can } = usePermissions();
 
   const completed = Boolean(patient?.checkup) || patient?.status === "Consultation Completed";
   const checkup = patient?.checkup;
@@ -352,6 +355,11 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
               </div>
             </div>
 
+            {user?.id && patient?.residentId && can("consultation.history.view")
+              && ["phn", "health_supervisor", "mho"].includes(user.role) && (
+                <ResidentHealthHistory residentId={patient.residentId} consultationId={patient.id} ownerId={user.id}
+                  scopeKey={JSON.stringify([user.role, user.municipalityId, user.barangayId])} revision={`${patient.id}:${completed || justCompleted}`} />
+              )}
             {/* PHN Check-up */}
             {completed && checkup ? (
               <div>

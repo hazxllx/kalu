@@ -1,7 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
 import { getEmailTransporter, sendSmtpMail } from './email.service.js';
 import { decryptTemporaryPassword } from '../utils/temporaryPassword.js';
+import { digestInvitationRecoverySecret } from '../utils/personnelInvitationRecovery.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -14,7 +16,7 @@ const WORKER_ERROR_CODES = new Set([
   'AUTH_USER_READ_FAILED', 'AUTH_IDENTITY_MISMATCH', 'AUTH_LINK_GENERATION_FAILED',
   'AUTH_LINK_IDENTITY_MISMATCH', 'AUTH_LINK_INVALID', 'AUTH_REDIRECT_MISMATCH',
   'SMTP_NOT_CONFIGURED', 'CLIENT_URL_NOT_CONFIGURED', 'CLIENT_URL_INVALID', 'TEMPORARY_PASSWORD_INVALID',
-  'NOTIFICATION_BEGIN_FAILED',
+  'NOTIFICATION_BEGIN_FAILED', 'NOTIFICATION_RECOVERY_PROOF_FAILED', 'NOTIFICATION_LINK_PREPARE_FAILED',
 ]);
 let activeBatch = null;
 let stopCurrentWorker = null;
@@ -163,7 +165,7 @@ const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, auth
     paragraphs.push(job.event_type === 'approved' ? `Your ${accountLabel} has been approved.`
       : job.event_type === 'reactivated' ? `Your administrator has removed the suspension from your approved ${accountLabel}.`
         : `Your administrator has invited you to set up your approved ${accountLabel}.`);
-    if (account.must_change_password === true) {
+    if (account.must_change_password === true && !needsSetup) {
       paragraphs.push('Your administrator has provided you with temporary login credentials.');
       paragraphs.push('For security reasons, you will be required to create your own permanent password the first time you sign in.');
       paragraphs.push('Please keep your credentials confidential. Your administrator will communicate the temporary password through an approved secure channel.');
@@ -308,7 +310,8 @@ export const processPersonnelNotifications = ({
           throw failure('ACCOUNT_IDENTITY_MISMATCH');
         }
         const needsSetup = ACCESS_EVENTS.has(job.event_type) && account.setup_required === true
-          && !account.setup_completed_at && account.must_change_password !== true;
+          && !account.setup_completed_at && (account.must_change_password !== true
+            || (job.event_type === 'invitation' && account.must_change_password === true));
         if (job.event_type === 'invitation' && !needsSetup) {
           await finish('cancelled', 'NOTIFICATION_SETUP_COMPLETED');
           return;
@@ -344,6 +347,16 @@ export const processPersonnelNotifications = ({
         }
         let actionLink = null;
         if (needsSetup) {
+          const { data: prepared, error: prepareError } = await client.rpc('prepare_personnel_notification_link', {
+            p_notification_id: job.id,
+            p_claim_token: job.claim_token,
+          });
+          if (prepareError) throw failure('NOTIFICATION_LINK_PREPARE_FAILED');
+          if (prepared !== true) {
+            result.notStarted += 1;
+            log(logger, 'info', job, 'NOTIFICATION_LINK_NOT_PREPARED');
+            return;
+          }
           const type = authUser.email_confirmed_at ? 'recovery' : 'invite';
           // Keep the redirect target on the already configured reset URL. The
           // token-hash email itself points to the clearer setup-password route.
@@ -363,9 +376,20 @@ export const processPersonnelNotifications = ({
           if (typeof tokenHash !== 'string' || tokenHash.length < 16 || tokenHash.length > 2048) {
             throw failure('AUTH_LINK_INVALID');
           }
+          const recoverySecret = job.event_type === 'invitation' && account.must_change_password === true
+            ? randomBytes(32).toString('base64url') : null;
+          if (job.event_type === 'invitation' && account.must_change_password === true) {
+            const { data: registered, error: proofError } = await client.rpc('register_personnel_invitation_recovery', {
+              p_notification_id: job.id,
+              p_claim_token: job.claim_token,
+              p_token_digest: digestInvitationRecoverySecret(recoverySecret),
+            });
+            if (proofError || registered !== true) throw failure('NOTIFICATION_RECOVERY_PROOF_FAILED');
+          }
           const setupUrl = new URL('/reset-password', origin);
           setupUrl.searchParams.set('token_hash', tokenHash);
           setupUrl.searchParams.set('type', type);
+          if (recoverySecret) setupUrl.searchParams.set('recovery_secret', recoverySecret);
           actionLink = setupUrl.href;
         }
         message = buildMail({

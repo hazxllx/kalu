@@ -26,10 +26,7 @@ export const getAccountOptions = async (_req, res) => {
 };
 
 export const getAccountSummary = async (req, res) => {
-  sendData(res, await usersService.getAccountSummary({
-    personnelOnly: req.query.personnelOnly,
-    approvalStatus: req.query.approvalStatus,
-  }));
+  sendData(res, await usersService.getAccountSummary(req.query));
 };
 
 export const createUser = async (req, res) => {

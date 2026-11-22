@@ -72,6 +72,29 @@ export const getUserClient = (accessToken) => {
   });
 };
 
+export const updateOwnPassword = async (accessToken, password) => {
+  assertConfigured();
+  if (!env.supabaseAnonKey) throw new Error('SUPABASE_ANON_KEY is required for an own-account password change.');
+  if (typeof accessToken !== 'string' || !accessToken) throw new Error('A verified user access token is required.');
+  const fetcher = env.isProduction ? globalThis.fetch : developmentFetch;
+  const response = await fetcher(`${env.supabaseUrl.replace(/\/$/, '')}/auth/v1/user`, {
+    method: 'PUT',
+    redirect: 'error',
+    headers: {
+      apikey: env.supabaseAnonKey,
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ password }),
+  });
+  let user = null;
+  try { user = await response.json(); } catch { /* A malformed Auth response is treated as a failed mutation. */ }
+  if (!response.ok || !user?.id) {
+    return { data: { user: null }, error: { status: response.status, code: user?.code ?? user?.error_code ?? null } };
+  }
+  return { data: { user }, error: null };
+};
+
 /**
  * Isolated, throwaway auth client for backend email/password sign-in.
  *

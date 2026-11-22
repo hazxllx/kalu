@@ -40,3 +40,13 @@ test('PHN assessment returns the factor label and existing configured classifica
   assert.equal(result.riskFactors[0].name, 'High blood pressure');
   assert.match(result.riskReason, /High blood pressure/);
 });
+
+test('BP emergency safety flags remain visible without local protocol approval', () => {
+  const clinical = { reviewStatus: 'requires_clinical_approval', level: 'High', status: 'assessed',
+    referralEvaluationRequired: true, urgency: 'immediate', assessedAt: '2026-11-20T09:00:00Z',
+    reasons: [{ ruleId: 'bp_emergency' }], followUpRequirements: ['immediate_emergency_evaluation'] };
+  const result = assessPhnVisitRisk({ vitals: { bp: '185/125' }, consultationDetails: { clinicalAssessment: clinical } }, config);
+  assert.equal(result.riskLevel, 'High');
+  assert.equal(result.clinicalAssessment.urgency, 'immediate');
+  assert.match(result.riskReason, /bp emergency/);
+});

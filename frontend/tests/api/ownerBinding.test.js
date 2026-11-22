@@ -117,3 +117,17 @@ test('multipart uploads use the same identity fence without forcing JSON content
   assert.equal(calls[0].options.body, body);
   assert.equal(calls[0].options.headers['Content-Type'], undefined);
 });
+
+test('authenticated file reads preserve binary data and honor no-store', async () => {
+  const bytes = new Uint8Array([0, 255, 6]);
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(bytes, { headers: { 'content-type': 'application/pdf' } });
+  };
+  const { api } = await loadClient();
+  const blob = await api.get('/lab-results/test/file', { responseType: 'blob', cache: 'no-store' });
+  assert.equal(blob.type, 'application/pdf');
+  assert.deepEqual(new Uint8Array(await blob.arrayBuffer()), bytes);
+  assert.equal(calls[0].options.cache, 'no-store');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer unit-test-token');
+});

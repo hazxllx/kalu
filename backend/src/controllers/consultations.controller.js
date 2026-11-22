@@ -35,6 +35,7 @@ export const list = async (req, res) => {
     from: req.query.from,
     to: req.query.to,
     serviceId: req.query.serviceId ?? req.query.service_id,
+    residentId: req.query.residentId ?? req.query.resident_id,
     status: req.query.status,
   });
   if (errors.length) {

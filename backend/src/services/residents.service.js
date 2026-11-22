@@ -16,7 +16,7 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
-import { getServiceClient } from '../config/supabase.js';
+import { getServiceClient, getUserClient } from '../config/supabase.js';
 import env from '../config/env.js';
 import {
   ageFromDateOnly,
@@ -32,6 +32,8 @@ import {
   assessResidentById,
 } from './residentRisk.service.js';
 import { getRiskConfig } from './riskConfig.service.js';
+import { withHistoryLinks } from './consultations.service.js';
+import { classifyBloodPressure } from '../config/bpThresholds.js';
 
 const SELF_ROLES = ['resident', 'resident-limited'];
 
@@ -206,6 +208,10 @@ export const formatMedicationText = (m = {}) => {
  */
 export const toResidentRecord = (visit = {}) => {
   const v = visit.vitals || {};
+  const details = visit.consultationDetails || {};
+  const bloodPressureClassification = visit.bpClassification && typeof visit.bpClassification === 'object'
+    ? visit.bpClassification : classifyBloodPressure(v.bp, { chiefComplaint: visit.chiefComplaint,
+      findings: visit.findings ?? details.findings });
 
   const findings = clean(visit.findings);
   const diagnosisMarker = '\nDiagnosis: ';
@@ -242,12 +248,12 @@ export const toResidentRecord = (visit = {}) => {
   }));
   const medication = structuredMeds.length
     ? medicationList.map(formatMedicationText).join('\n')
-    : clean(legacyMedication);
+    : clean(details.medicationPrescribed ?? legacyMedication);
 
   const recommendation = clean(visit.recommendation);
 
   const nextVisitDate =
-    recommendation.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '';
+    details.nextVisitDate ?? (recommendation.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '');
 
   const adviceText = recommendation
     .replace(/\n?Next visit:\s*\d{4}-\d{2}-\d{2}/, '')
@@ -260,28 +266,35 @@ export const toResidentRecord = (visit = {}) => {
 
   return {
     id: visit.id,
-    date: visit.visitDate
+    date: details.consultationDate ?? (visit.visitDate
       ? String(visit.visitDate).slice(0, 10)
-      : '',
-    time: String(visit.visitDate || '').includes('T')
+      : ''),
+    time: details.consultationTime ?? (String(visit.visitDate || '').includes('T')
       ? String(visit.visitDate).slice(11, 16)
-      : '',
+      : ''),
     chiefComplaint: clean(visit.chiefComplaint),
-    findings: clean(findingsText),
-    diagnosis: clean(diagnosis),
-    treatmentGiven: clean(treatmentText),
+    allergies: clean(details.allergies ?? details.knownAllergies ?? visit.allergies),
+    existingConditions: clean(details.existingConditions ?? details.chronicConditions ?? details.pastMedicalHistory ?? visit.clinicalHistory),
+    findings: clean(details.findings ?? findingsText),
+    diagnosis: clean(details.diagnosis ?? diagnosis),
+    treatmentGiven: clean(details.treatmentGiven ?? treatmentText),
     medications: clean(medication),
     medicationList,
-    recommendations: adviceText,
-    followUpRequired: nextVisitDate ? 'Yes' : 'No',
+    recommendations: clean(details.adviceGiven ?? adviceText),
+    remarks: clean(details.remarks ?? visit.phn?.notes ?? visit.clinicalHistory),
+    followUpRequired: details.followUpRequired ?? (nextVisitDate ? 'Yes' : 'No'),
     nextVisitDate,
 
     vitals: {
       bloodPressure: clean(v.bp),
+      systolic: v.systolic ?? bloodPressureClassification?.systolic ?? null,
+      diastolic: v.diastolic ?? bloodPressureClassification?.diastolic ?? null,
+      bloodPressureCategory: bloodPressureClassification?.label ?? null,
       temperature: v.temperature ?? '',
       pulseRate: v.hr ?? '',
       respiratoryRate: v.rr ?? '',
       oxygenSaturation: v.o2sat ?? '',
+      bloodSugar: v.bloodSugar ?? '',
       height: v.heightCm ?? '',
       weight: v.weightKg ?? '',
       bmi: bmi ?? '',
@@ -301,6 +314,13 @@ export const toResidentRecord = (visit = {}) => {
     referralId: visit.referralId || null,
     fromReferral: Boolean(visit.referralId),
     status: visit.status || '',
+    outcome: visit.status || '',
+    completedAt: visit.completedAt || null,
+    referralRequired: visit.referralRequired ? 'Yes' : 'No',
+    bloodPressureClassification,
+    followUps: visit.followUps || [],
+    referrals: visit.referrals || [],
+    recordedAt: visit.recordedAt || visit.createdAt || null,
   };
 };
 
@@ -401,14 +421,96 @@ export const applyConsultationFilters = (consultations, filters = {}) => {
   return rows;
 };
 
-export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
+export const getStaffHealthHistory = async ({ user, residentId, repo = repository,
+  supabase = repo.driver === 'file' ? null : getServiceClient() }) => {
+  if (!['health_supervisor', 'phn', 'mho'].includes(user?.role) || !user.municipalityId
+    || (user.role === 'health_supervisor' && !user.barangayId)) throw ApiError.forbidden();
+  if (typeof residentId !== 'string' || !residentId.trim() || residentId.length > 200) throw ApiError.badRequest('A valid resident ID is required.');
+  if (user.accessToken) {
+    const { data, error } = await getUserClient(user.accessToken).rpc('personnel_session_is_usable');
+    if (error) throw new ApiError(503, 'Could not verify clinical history access.');
+    if (data !== true) throw ApiError.forbidden();
+  }
+  const scope = { municipalityId: user.municipalityId, barangayId: user.role === 'health_supervisor' ? user.barangayId : null };
+  const assertScope = async () => {
+    const resident = await repo.getResident(residentId);
+    if (!resident || resident.municipalityId !== scope.municipalityId
+      || (scope.barangayId && resident.barangayId !== scope.barangayId)) throw ApiError.notFound('Resident record not found.');
+  };
+  await assertScope();
+
+  const pageSize = 200;
+  const readRows = async (table, columns, dateColumn) => {
+    if (!supabase) return [];
+    const rows = new Map();
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error, count } = await supabase.from(table).select(columns, { count: 'exact' }).eq('resident_id', residentId)
+        .order(dateColumn, { ascending: false, nullsFirst: false }).order('id').range(offset, offset + pageSize - 1);
+      if (error || !Array.isArray(data)) throw new ApiError(502, 'Could not load resident health history.');
+      data.forEach((row) => rows.set(row.id, row));
+      if (offset + data.length >= count && Number.isFinite(count)) return [...rows.values()];
+      if (data.length < pageSize) {
+        if (Number.isFinite(count)) throw new ApiError(502, 'Could not load complete resident health history.');
+        return [...rows.values()];
+      }
+    }
+  };
+  const readVisits = async () => {
+    const visits = new Map();
+    for (let offset = 0; ; offset += pageSize) {
+      const { rows, total } = await repo.listVisits({ residentId, ...scope, orderBy: 'clinicalDate',
+        statuses: ['completed', 'referred'], limit: pageSize, offset });
+      if (!Array.isArray(rows) || rows.some((row) => row.residentId !== residentId)) throw new ApiError(502, 'Could not load resident consultation history.');
+      rows.forEach((visit) => visits.set(visit.id, visit));
+      if (offset + rows.length >= total || (!Number.isFinite(total) && rows.length < pageSize)) return [...visits.values()];
+      if (rows.length < pageSize) throw new ApiError(502, 'Could not load complete consultation history.');
+    }
+  };
+  const [residentProfile, visits, services, referrals, followUps, pregnancies, maternalRecords, vaccinations, deliveries, screenings] = await Promise.all([
+    repo.getResident(residentId),
+    readVisits(),
+    supabase ? listActiveServices({ municipalityId: scope.municipalityId, supabase }) : [],
+    readRows('health_referrals', 'id,referral_date,created_at,scheduled_at,reason,destination_facility,external_receiving_facility,status,schedule_response_status,medical_history,resolution_notes,facility:facilities!recipient_facility_id(name)', 'referral_date'),
+    readRows('follow_ups', 'id,consultation_id,purpose,scheduled_date,scheduled_time,location,assigned_provider,status,schedule_response_status,notes,completed_at', 'scheduled_date'),
+    readRows('maternal_pregnancies', 'id,date_of_registration,lmp_date,edd_date,status,risk_level,risk_notes,outcome,outcome_date,outcome_notes', 'date_of_registration'),
+    readRows('maternal_records', 'id,created_at,lmp,edd,status,risk,notes,provider', 'created_at'),
+    readRows('immunizations', 'id,vaccine,dose,administered_date,next_dose,status,notes', 'administered_date'),
+    readRows('health_service_attendance', 'id,scheduled_date,attended_at,attendance_status,service_provided,assessment,recommendations,notes,provided_by_name,service:health_services(name)', 'scheduled_date'),
+    readRows('ncd_risk_assessments', 'id,assessment_date,data,notes', 'assessment_date'),
+  ]);
+  await assertScope();
+
+  const serviceNames = new Map(services.map((service) => [service.id, service.name]));
+  return {
+    residentId,
+    profile: residentProfile ? {
+      bloodType: residentProfile.bloodType ?? residentProfile.blood_type ?? '',
+      allergies: residentProfile.allergies ?? residentProfile.knownAllergies ?? '',
+      existingConditions: residentProfile.existingConditions ?? residentProfile.chronicConditions ?? residentProfile.medicalConditions ?? '',
+    } : {},
+    consultations: visits.map((visit) => {
+      const record = toResidentRecord(visit);
+      return { ...record,
+        diagnosis: clean(visit.consultationDetails?.diagnosis ?? clean(visit.findings).split('\nDiagnosis: ')[1]),
+        vitals: { ...record.vitals, bmi: visit.vitals?.bmi ?? record.vitals.bmi },
+        serviceName: visit.healthServiceName || serviceNames.get(visit.healthServiceId) || '',
+        clinicalHistory: clean(visit.clinicalHistory),
+      };
+    }).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.id.localeCompare(a.id)),
+    referrals, followUps, pregnancies, maternalRecords, vaccinations, screenings,
+    deliveries: deliveries.filter((row) => row.attendance_status === 'attended' && row.service_provided),
+  };
+};
+
+export const getOwnHealthRecords = async ({ user, filters = {}, repo = repository,
+  supabase = repo.driver === 'file' ? null : getServiceClient() } = {}) => {
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden(
       'Only a resident may view their own health record.',
     );
   }
 
-  const resident = await repository.getResidentByAuthUserId(user.id);
+  const resident = await repo.getResidentByAuthUserId(user.id);
 
   if (!resident) {
     // Account exists but is not yet linked to a resident record.
@@ -422,17 +524,15 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
     };
   }
 
-  const supabase = getServiceClient();
-
   // Delivered health services use the existing attendance row as the encounter
   // record. Only completed deliveries are exposed in the resident's own chart.
-  const { data: deliveryRows, error: deliveryError } = await supabase
+  const { data: deliveryRows, error: deliveryError } = await (supabase ? supabase
     .from('health_service_attendance')
     .select('id, scheduled_date, attended_at, service_provided, assessment, recommendations, follow_up_required, follow_up_date, notes, provided_by_name, service:health_services(name, category)')
     .eq('resident_id', resident.id)
     .eq('attendance_status', 'attended')
     .not('service_provided', 'is', null)
-    .order('scheduled_date', { ascending: false });
+    .order('scheduled_date', { ascending: false }) : { data: [] });
   // Keep the existing Health Record available if the deployment is awaiting
   // the additive delivery-fields migration.
   const healthServiceRecords = deliveryError
@@ -452,12 +552,12 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
         providedByName: row.provided_by_name || '',
       }));
 
-  const { data: immunizationRows, error: immunizationError } = await supabase
+  const { data: immunizationRows, error: immunizationError } = await (supabase ? supabase
     .from('immunizations')
     .select('id, vaccine, dose, administered_date, next_dose, provider, status, notes')
     .eq('resident_id', resident.id)
     .order('administered_date', { ascending: false })
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false }) : { data: [] });
   const vaccinations = immunizationError ? [] : (immunizationRows || []).map((row) => ({
     id: row.id,
     name: row.vaccine || 'Immunization',
@@ -470,39 +570,54 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
   }));
 
   const [followUpResult, referralResult] = await Promise.all([
-    supabase.from('follow_ups').select('id,purpose,scheduled_date,scheduled_time,location,assigned_provider,status,schedule_response_status,linked_service_type,linked_service_id')
-      .eq('resident_id', resident.id).order('scheduled_date', { ascending: false }).limit(500),
-    supabase.from('health_referrals').select('id,reason,destination_facility,scheduled_at,referral_date,created_at,status,schedule_response_status,recipient:profiles!recipient_personnel_id(full_name),facility:facilities!recipient_facility_id(name,type)')
-      .eq('resident_id', resident.id).order('referral_date', { ascending: false }).limit(500),
+    supabase ? supabase.from('follow_ups').select('id,consultation_id,purpose,scheduled_date,scheduled_time,location,assigned_provider,status,schedule_response_status,linked_service_type,linked_service_id,notes')
+      .eq('resident_id', resident.id).order('scheduled_date', { ascending: false }).limit(500) : { data: [] },
+    supabase ? supabase.from('health_referrals').select('id,treatment_visit_id,reason,destination_facility,scheduled_at,referral_date,created_at,status,schedule_response_status,recipient:profiles!recipient_personnel_id(full_name),facility:facilities!recipient_facility_id(name,type)')
+      .eq('resident_id', resident.id).order('referral_date', { ascending: false }).limit(500) : { data: [] },
   ]);
   const followUps = followUpResult.error ? [] : (followUpResult.data || []).map((row) => ({
     id: row.id, purpose: row.purpose || '', date: row.scheduled_date || '', time: String(row.scheduled_time || '').slice(0, 5),
     facility: row.location || '', assignedPersonnel: row.assigned_provider || '',
     scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed', serviceProgressStatus: row.status || 'Scheduled',
     linkedServiceType: row.linked_service_type || '', linkedServiceId: row.linked_service_id || '',
+    consultationId: row.consultation_id || null, notes: row.notes || '',
   }));
   const referrals = referralResult.error ? [] : (referralResult.data || []).map((row) => ({
     id: row.id, reason: row.reason || '', date: row.scheduled_at || row.referral_date || row.created_at || '', facility: row.facility?.name || row.destination_facility || '',
     assignedPersonnel: row.recipient?.full_name || '', facilityType: row.facility?.type || '',
     scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed', serviceProgressStatus: row.status || 'Pending',
+    consultationId: row.treatment_visit_id || null,
   }));
 
-  const result = await repository.listVisits({
-    residentId: resident.id,
-    from: filters.from || null,
-    to: filters.to || null,
-    serviceId: filters.serviceId || null,
-    statuses: filters.statuses || ['completed'],
-    limit: 500,
-  });
+  const history = new Map();
+  for (let offset = 0; ; offset += 500) {
+    const page = await repo.listVisits({
+      residentId: resident.id,
+      from: filters.from || null,
+      to: filters.to || null,
+      serviceId: filters.serviceId || null,
+      statuses: filters.statuses || ['completed'],
+      orderBy: 'clinicalDate', limit: 500, offset,
+    });
+    if (!Array.isArray(page?.rows)) throw new ApiError(502, 'Could not load complete consultation history.');
+    const previousSize = history.size;
+    page.rows.forEach((visit) => history.set(visit.id, visit));
+    if (Number.isFinite(page.total) && offset + page.rows.length >= page.total) break;
+    if (page.rows.length < 500) {
+      if (Number.isFinite(page.total) && offset + page.rows.length < page.total) throw new ApiError(502, 'Consultation history is incomplete.');
+      break;
+    }
+    if (history.size === previousSize) throw new ApiError(502, 'Consultation history pagination did not advance.');
+  }
 
   // Enrich each of the resident's own consultations with the linked health
   // service (name + category) so the page can display and filter by type.
   // Best-effort: the plain record is still returned if the lookup fails.
-  const serviceRows = await listActiveServices({ municipalityId: resident.municipalityId, supabase }).catch(() => []);
+  const serviceRows = supabase ? await listActiveServices({ municipalityId: resident.municipalityId, supabase }).catch(() => []) : [];
   const servicesById = new Map(serviceRows.map((s) => [s.id, s]));
 
-  const consultations = (result.rows || [])
+  const visits = await withHistoryLinks([...history.values()], repo);
+  const consultations = visits
     .map((visit) => {
       const record = toResidentRecord(visit);
       const linked = visit.healthServiceId ? servicesById.get(visit.healthServiceId) : null;
@@ -515,7 +630,7 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
       return record;
     })
     .sort((a, b) =>
-      String(b.date).localeCompare(String(a.date)),
+      String(b.date).localeCompare(String(a.date)) || String(b.time).localeCompare(String(a.time)) || String(b.id).localeCompare(String(a.id)),
     );
 
   const filteredConsultations = applyConsultationFilters(consultations, filters);
@@ -526,7 +641,7 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
   // visit's vitals. Null when there is no vitals-bearing consultation to assess.
 
   const latestVisit =
-    (result.rows || [])
+    visits
       .slice()
       .sort((a, b) =>
         String(b.visitDate || '').localeCompare(
@@ -539,7 +654,7 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
     (latestVisit.vitals.bp || latestVisit.vitals.o2sat);
 
   const riskConfig = await getRiskConfig({
-    repo: repository,
+    repo,
   });
 
   const riskLevel = hasVitals
@@ -1089,10 +1204,8 @@ export const createResident = async ({
   const sex = text(payload.sex);
   const barangay = text(payload.barangay);
   const cellphoneNoRaw = text(payload.cellphoneNo);
-  // Store the canonical, separator-free form the DB CHECK
-  // (residents_cellphone_no_format) and the rest of the app expect, so a number
-  // entered as "0917 123 4567" persists as "09171234567".
-  const cellphoneNo = cellphoneNoRaw ? normalizePhone(cellphoneNoRaw) : '';
+  // Preserve the exact canonical 11-digit form required by the DB CHECK and API.
+  const cellphoneNo = cellphoneNoRaw;
 
   const errors = [];
 
@@ -1132,11 +1245,10 @@ export const createResident = async ({
   }
 
   // Contact number is OPTIONAL, but when supplied it must be a valid PH mobile.
-  // Previously this was unchecked here, so a number the DB CHECK constraint
-  // rejects (residents_cellphone_no_format) surfaced as an opaque 500 "Could
-  // not create resident" instead of a clear, correctable field error.
-  if (cellphoneNoRaw && !isPhonePH(cellphoneNoRaw)) {
-    errors.push('Contact number must be a valid PH mobile number (e.g. 0917 123 4567).');
+  // Validate before persistence so malformed values receive a clear field error
+  // instead of an opaque database constraint failure.
+  if (cellphoneNoRaw && !/^09\d{9}$/.test(cellphoneNoRaw)) {
+    errors.push('Contact number must be exactly 11 digits and start with 09 (e.g. 09171234567).');
   }
 
   if (errors.length) {
@@ -1171,6 +1283,10 @@ export const createResident = async ({
     throw ApiError.unprocessable(
       `Unknown barangay: ${barangay}. It must belong to your municipality.`,
     );
+  }
+
+  if (scope && user?.barangayId && String(user.barangayId) !== String(barangayRow.id)) {
+    throw ApiError.forbidden('Your account is assigned to a different barangay.');
   }
 
   // Inactive or unapproved legacy barangays are not valid new assignments.
@@ -1766,4 +1882,5 @@ export default {
   getResident,
   updateResident,
   getOwnHealthRecords,
+  getStaffHealthHistory,
 };

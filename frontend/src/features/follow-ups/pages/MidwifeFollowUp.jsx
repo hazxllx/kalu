@@ -33,6 +33,7 @@ import {
 } from "../lib/scheduleDates";
 import { followUpActionAvailability } from "../lib/followUpActions";
 import ScheduleRequestsPanel from "../components/ScheduleRequestsPanel";
+import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -1611,6 +1612,7 @@ export default function MidwifeFollowUp() {
 
               {supervisor && <div className="mb-4 flex flex-wrap gap-2"><StatusBadge value={selectedFollowUp.priority || "Not specified"} /><StatusBadge value={isOverdue(selectedFollowUp) ? "Overdue" : selectedFollowUp.status} /><span className="text-caption text-brand-gray">Follow-up ID: {selectedFollowUp.id}</span>{selectedFollowUp.syncStatus && <span className="text-caption text-amber-800">{selectedFollowUp.syncStatus}</span>}</div>}
 
+              {can("consultation.history.view") && ["health_supervisor", "phn", "mho"].includes(user?.role) && <LabResultsPanel residentId={selectedFollowUp.residentId} compact />}
               {selectedFollowUp.remarks && (
                 <div className="mb-5">
                   <p className="text-xs text-brand-gray mb-1">Remarks</p>

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, Clock, MapPin, Stethoscope, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import ResidentHealthSnapshot from "@/features/dashboards/components/ResidentHealthSnapshot";
@@ -285,7 +285,6 @@ function ResidentServicePoster({ service }) {
           />
         ) : (
           <div className="grid h-full place-items-center bg-gradient-to-br from-brand-blue to-brand-dark">
-            <Stethoscope className="h-12 w-12 text-white/55" strokeWidth={1.4} aria-hidden="true" />
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-brand-dark via-brand-dark/45 to-transparent" />
@@ -301,16 +300,14 @@ function ResidentServicePoster({ service }) {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-brand-gray">
         <span className="inline-flex min-w-0 items-center gap-1.5">
-          <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
           <span className="truncate">{service.facilityName || "Health service"}</span>
         </span>
         {deadline && (
           <span className="inline-flex items-center gap-1.5">
-            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
             <span>Register by {deadline}</span>
           </span>
         )}
-        {!schedule && !deadline && state.note && <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />{state.note}</span>}
+        {!schedule && !deadline && state.note && <span>{state.note}</span>}
       </div>
     </Link>
   );

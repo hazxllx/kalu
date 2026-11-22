@@ -469,12 +469,17 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
     setHistoryLoading(true);
     setHistoryError("");
     try {
-      const [result, profile] = await Promise.all([usersApi.history(target.id), usersApi.get(target.id)]);
+      const [result, profile] = await Promise.allSettled([usersApi.history(target.id), usersApi.get(target.id)]);
       if (request === sequence.current) {
-        setHistory(result);
-        if (profile?.user) setTarget({ ...profile.user, roleId: profile.user.role, role: roleLabel(profile.user.role), statusId: profile.user.status });
+        if (profile.status === "fulfilled" && profile.value?.user) {
+          const account = profile.value.user;
+          setTarget({ ...account, roleId: account.role, role: roleLabel(account.role), statusId: account.status });
+        }
+        if (result.status === "rejected") throw result.reason;
+        if (profile.status === "rejected") throw profile.reason;
+        setHistory(result.value);
       }
-      return result;
+      return result.status === "fulfilled" ? result.value : null;
     } catch (error) {
       if (request === sequence.current) setHistoryError(error?.message || "Account history could not be loaded.");
     } finally {
@@ -484,8 +489,19 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
 
   useEffect(() => {
     if (personnel) void loadHistory();
+    else {
+      const request = ++sequence.current;
+      usersApi.get(target.id).then((profile) => {
+        if (request === sequence.current && profile?.user) {
+          const account = profile.user;
+          setTarget({ ...account, roleId: account.role, role: roleLabel(account.role), statusId: account.status });
+        }
+      }).catch((error) => {
+        if (request === sequence.current) setHistoryError(error?.message || "Account details could not be loaded.");
+      });
+    }
     return () => { sequence.current += 1; };
-  }, [personnel, loadHistory]);
+  }, [personnel, loadHistory, target.id]);
 
   const legacyRequest = history?.request;
   const documents = Array.isArray(legacyRequest?.verificationDocuments) ? legacyRequest.verificationDocuments : [];
@@ -508,6 +524,7 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
 
   return (
     <AccountDialog title={target.name || "Account details"} description={target.email || "Account profile and history"} onClose={onClose} wide={personnel} header={dialogHeader}>
+      {!personnel && historyError && <p role="alert" className="rounded-btn bg-brand-danger/10 p-3 text-sm text-brand-danger">{historyError}</p>}
       <InfoSection title="Account Overview">
         <DetailRow label={personnel ? "Account status" : "Status"} value={<LifecyclePill account={target} />} />
         {personnel && <DetailRow label="Sign-in access" value={target.statusId === "active" && personnelState(target) === "active" ? "Enabled" : "Not enabled"} />}
@@ -1256,9 +1273,7 @@ export default function UserManagement({ personnelOnly = false }) {
       }
       setModalTarget(null);
       await Promise.all([load(), loadSummary()]);
-      showToast(wasNew && isPersonnelRole(result?.user?.role)
-        ? "Account created. Temporary password sent to email."
-        : wasNew ? personnelActionMessage("create", result?.user) : "Account updated.");
+      showToast(wasNew ? personnelActionMessage("create", result?.user) : "Account updated.");
     } catch (error) {
       setActionError(error?.message || "Could not save the account.");
     } finally {

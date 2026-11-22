@@ -58,7 +58,7 @@ const scenario = async ({ residentId = `TRANSFER-CASE-${++scenarioNumber}`, owne
   const requestId = randomUUID();
   await query(`insert into public.transfer_requests(id,auth_user_id,resident_id,from_barangay_id,to_barangay_id,
     status,submitted_at,reason) values($1,$2,$3,$4,$5,$6,now(),'Current residency change')`,
-  [requestId, owner, residentId, source, target, status]);
+   [requestId, owner, residentId, source, target, 'draft']);
   let proofId;
   if (proof) {
     proofId = randomUUID();
@@ -67,6 +67,7 @@ const scenario = async ({ residentId = `TRANSFER-CASE-${++scenarioNumber}`, owne
       values($1,$2,'transfer_proof_of_address','transfer_proof_of_address','proof.pdf',$3,'application/pdf',100,'pending',$4)`,
     [proofId, requestId, `transfer-documents/${requestId}/${proofId}.pdf`, owner]);
   }
+  await query('update public.transfer_requests set status=$2 where id=$1', [requestId, status]);
   return { residentId, owner, requestId, proofId };
 };
 const rejectWithoutWrites = async (run, code) => {
@@ -227,6 +228,45 @@ before(async () => {
 }, { timeout: 120000 });
 after(async () => { await db.close(); });
 
+test('submitted transfer evidence is immutable in PostgreSQL, while drafts, corrections and staff review remain usable', async () => {
+  const sample = await scenario();
+  for (const status of ['pending', 'under_review', 'approved', 'rejected', 'cancelled']) {
+    await query('update public.transfer_requests set status=$2 where id=$1', [sample.requestId, status]);
+    await rejectWithoutWrites(() => query('delete from public.documents where id=$1', [sample.proofId]), '55000');
+    await rejectWithoutWrites(() => query("update public.documents set file_name='changed.pdf' where id=$1", [sample.proofId]), '55000');
+    await rejectWithoutWrites(() => query(`insert into public.documents(transfer_request_id,document_type,purpose,file_name,storage_path,mime_type,size_bytes,uploaded_by)
+      values($1,'transfer_previous_health_record','transfer_previous_health_record','late.pdf',$2,'application/pdf',100,$3)`,
+    [sample.requestId, `late/${sample.requestId}.pdf`, sample.owner]), '55000');
+  }
+  await query("update public.documents set verification_status='rejected',rejection_reason='Unreadable scan' where id=$1", [sample.proofId]);
+  for (const status of ['draft', 'resubmission_required']) {
+    await query('update public.transfer_requests set status=$2 where id=$1', [sample.requestId, status]);
+    await query('update public.documents set file_name=$2 where id=$1', [sample.proofId, `${status}.pdf`]);
+  }
+  await query('delete from public.documents where id=$1', [sample.proofId]);
+  assert.equal((await query('select id from public.documents where id=$1', [sample.proofId])).length, 0);
+});
+
+test('approval notification failure rolls back residency, request, scope, and audit changes together', async () => {
+  const sample = await scenario();
+  await db.exec(`create function public.test_reject_transfer_notice() returns trigger language plpgsql as $$
+    begin if new.related_type = 'transfer_request_approved' then
+      raise exception using errcode = '23514', message = 'Simulated notification failure';
+    end if; return new; end; $$;
+    create trigger test_reject_transfer_notice before insert on public.notifications
+      for each row execute function public.test_reject_transfer_notice();`);
+  try {
+    await rejectWithoutWrites(() => approve(sample.requestId), '23514');
+  } finally {
+    await db.exec('drop trigger test_reject_transfer_notice on public.notifications; drop function public.test_reject_transfer_notice();');
+  }
+  await approve(sample.requestId);
+  const notices = await query(`select * from public.notifications where related_type='transfer_request_approved' and related_id=$1`, [sample.requestId]);
+  assert.equal(notices.length, 1);
+  await assert.rejects(() => query(`insert into public.notifications(recipient_id,title,message,related_type,related_id)
+    values($1,'Duplicate','Duplicate','transfer_request_approved',$2)`, [sample.owner, sample.requestId]), (error) => error.code === '23505');
+});
+
 test('complete current chain reproduces the old trigger-order defect; forward migration writes no existing data', async (t) => {
   assert.ok(appliedFiles.includes(candidate));
   assert.equal(appliedFiles.filter((file) => file.startsWith('20261106')).length, 7);
@@ -294,9 +334,16 @@ test('normal same-municipality approval atomically moves canonical resident/prof
   }
   for (const table of ['referrals', 'health_referral_legacy_map', 'health_referral_history', 'households',
     'household_member_health_profiles', 'health_service_attendance', 'health_services', 'health_service_assignments',
-    'notifications', 'appointments', 'record_counters']) {
+    'appointments', 'record_counters']) {
     assert.deepEqual(after[table], saved[table], `${table}: unchanged history`);
   }
+  assert.deepEqual(after.notifications.filter((row) => !(row.related_type === 'transfer_request_approved' && row.related_id === main.requestId)), saved.notifications);
+  const approvalNotices = after.notifications.filter((row) => row.related_type === 'transfer_request_approved' && row.related_id === main.requestId);
+  assert.equal(approvalNotices.length, 1);
+  assert.equal(approvalNotices[0].recipient_id, main.owner);
+  assert.equal(approvalNotices[0].title, 'Residency transfer approved');
+  assert.equal(await approve(main.requestId), null);
+  assert.equal((await records('notifications')).filter((row) => row.related_type === 'transfer_request_approved' && row.related_id === main.requestId).length, 1);
   const sourceMember = after.household_members.find((row) => row.household_id === 'TRANSFER-SOURCE-HH');
   const originalMember = saved.household_members.find((row) => row.id === sourceMember.id);
   assert.deepEqual(withoutScope({ ...sourceMember, resident_id: originalMember.resident_id }), withoutScope(originalMember));

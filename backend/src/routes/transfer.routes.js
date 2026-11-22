@@ -49,6 +49,7 @@ const staff = [
 // ---------------------------------------------------------------------------
 router.get('/transfer-requests/context', ...self, asyncHandler(controller.getContext));
 router.get('/transfer-requests/me', ...self, asyncHandler(controller.getMine));
+router.get('/transfer-requests/me/:id', ...self, asyncHandler(controller.getOwnDetail));
 router.post('/transfer-requests', ...self, asyncHandler(controller.startTransfer));
 router.post('/transfer-requests/:id/documents', ...self, uploadDocumentFile, asyncHandler(controller.uploadDocument));
 router.delete('/transfer-requests/:id/documents/:documentId', ...self, asyncHandler(controller.removeDocument));

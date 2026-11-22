@@ -6,6 +6,7 @@ import { ButtonSelectGroup } from "@/components/system";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import TablePagination from "@/components/tables/TablePagination";
 import { intakeApi, referralsApi } from "@/services/api";
+import { formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import {
@@ -263,8 +264,8 @@ export default function RhuTriage() {
       ? walkIn.barangay || ""
       : "";
 
-  const flags = reviewFlags(vitals);
   const finalReason = reason === "Other" ? reasonDetail.trim() : reason.trim();
+  const flags = reviewFlags(vitals, { chiefComplaint: finalReason });
 
   const showToast = (message, ok) => {
     setToast({ message, ok });
@@ -927,7 +928,16 @@ export default function RhuTriage() {
                         type="text"
                         placeholder="e.g. 120/80"
                         value={vitals.bloodPressure}
-                        onChange={(e) => setVitals((prev) => ({ ...prev, bloodPressure: e.target.value }))}
+                        onChange={(e) => {
+                          const input = e.currentTarget;
+                          const formatted = formatBloodPressureInput(input.value, input.selectionStart, input.selectionEnd, e.nativeEvent.inputType);
+                          if (formatted) {
+                            input.value = formatted.value;
+                            input.setSelectionRange(formatted.caret, formatted.caret);
+                          }
+                          const bloodPressure = input.value;
+                          setVitals((prev) => ({ ...prev, bloodPressure }));
+                        }}
                         className={inputCls(errors.bloodPressure)}
                         aria-invalid={Boolean(errors.bloodPressure)}
                       />

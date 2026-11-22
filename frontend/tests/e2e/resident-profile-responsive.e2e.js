@@ -43,6 +43,7 @@ const recordData = {
 };
 
 const modules = {
+  '@/features/health-records/components/LabResultsPanel': 'export default function LabResultsPanel() { return null; }',
   '@/context/AuthContext': `export const useAuth = () => ({ user: { id: 'synthetic-resident', name: ${JSON.stringify(residentName)}, email: 'resident@example.test', role: 'resident' }, refreshProfile: async () => {}, logout: async () => {} });`,
   '@/context/ThemeContext': `export const useTheme = () => ({ theme: 'light', setTheme: () => {} });`,
   '@/lib/brand': `export const ROLES = { resident: { name: 'Resident' }, 'resident-limited': { name: 'Resident' } };`,

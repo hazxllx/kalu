@@ -585,20 +585,332 @@ const POSTPARTUM_DATE_FIELDS = ['pp_checkup_24h', 'pp_checkup_day3', 'pp_checkup
  */
 const maternalKeyDate = (derive, row) => {
   if (!derive) return null;
+  if (derive.rule === 'prenatal_4plus') return row.prenatal_visit_dates?.[3] || null;
+  if (derive.rule === 'first_trimester_nutrition') return row.nutritional_assessment_date || null;
+  if (derive.rule === 'td_doses') return row.td_completion_date || null;
+  if (derive.rule === 'calcium') return row.calcium_completed_date || null;
   if (derive.rule === 'postpartum_2plus') {
-    const dates = POSTPARTUM_DATE_FIELDS.map((f) => row[f]).filter(Boolean).sort();
+    const dates = [...new Set([...(row.postpartum_visit_dates || []), ...POSTPARTUM_DATE_FIELDS.map((f) => row[f])].filter(Boolean))].sort();
     return dates.length >= 2 ? dates[1] : null;
   }
   return row[derive.dateField] || null;
 };
 
+const matchesMaternalDerivation = (derive, row) => {
+  if (!derive) return true;
+  if (derive.rule === 'prenatal_4plus' && (Number(row.prenatal_visits) || 0) < 4) return false;
+  if (derive.rule === 'first_trimester_nutrition' && (!row.nutritional_assessment_date || parseNum(row.nutritional_bmi) === null)) return false;
+  if (derive.rule === 'td_doses' && (Number(row.td_dose_count) || 0) < 1) return false;
+  if (derive.rule === 'calcium' && !row.calcium_completed_date) return false;
+  return matchMaternalFilter(row, derive.filter);
+};
+
 const loadMaternalRecords = async (supabase, scope) => {
-  const { data, error } = await applyScope(
-    supabase.from(MATERNAL).select(`*, resident:residents(${RESIDENT_SELECT})`).limit(50000),
-    scope,
-  );
-  throwOnError(error, 'Could not load maternal records');
-  return data || [];
+  const loadOptional = async (table, select = '*', parent = null) => {
+    if (parent && !parent.ids.length) return [];
+    const rows = [];
+    const batches = parent ? Array.from({ length: Math.ceil(parent.ids.length / 100) }, (_, index) => parent.ids.slice(index * 100, (index + 1) * 100)) : [null];
+    for (const ids of batches) {
+    for (let offset = 0; ; offset += 500) {
+      let query = supabase.from(table).select(select);
+      query = parent ? query.in(parent.field, ids) : applyScope(query, scope);
+      const paginated = typeof query.range === 'function';
+      if (paginated) query = query.order('id').range(offset, offset + 499);
+      const result = await query;
+      if (table !== MATERNAL && result.error && isMissingRelation(result.error)) return [];
+      throwOnError(result.error, `Could not load ${table}`);
+      rows.push(...(result.data || []));
+      if (!paginated || (result.data || []).length < 500) break;
+    }
+    }
+    return rows;
+  };
+  const legacy = await loadOptional(MATERNAL, `*, resident:residents(${RESIDENT_SELECT})`);
+
+  let pregnancies;
+  let encounters;
+  let services;
+  let deliveries;
+  let postpartum;
+  let legacyVisits;
+  let immunizations;
+  try {
+    pregnancies = await loadOptional('maternal_pregnancies', `*, resident:residents(${RESIDENT_SELECT})`);
+    const pregnancyParent = { field: 'pregnancy_id', ids: pregnancies.map((row) => row.id) };
+    [encounters, services, deliveries, postpartum, legacyVisits, immunizations] = await Promise.all([
+      loadOptional('pregnancy_encounters', '*', pregnancyParent),
+      loadOptional('prenatal_services', '*', pregnancyParent),
+      loadOptional('delivery_records', '*', pregnancyParent),
+      loadOptional('postpartum_encounters', '*', pregnancyParent),
+      loadOptional('maternal_visits', '*', { field: 'maternal_case_id', ids: legacy.map((row) => row.id) }),
+      loadOptional('immunizations'),
+    ]);
+  } catch (error) {
+    throw error;
+  }
+
+  const encounterRows = Array.isArray(encounters) ? encounters : [];
+  const serviceRows = Array.isArray(services) ? services : [];
+  const deliveryRows = Array.isArray(deliveries) ? deliveries : [];
+  const postpartumRows = Array.isArray(postpartum) ? postpartum : [];
+  const legacyVisitRows = Array.isArray(legacyVisits) ? legacyVisits : [];
+
+  const validDate = (value) => {
+    const date = text(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+    const parsed = new Date(`${date}T00:00:00Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : '';
+  };
+  const validDates = (values) => [...new Set(values.map(validDate).filter(Boolean))].sort();
+    const serviceDates = (rows, matcher) => validDates(rows.filter(matcher).map((row) => row.date_provided));
+  const completedService = (rows, matcher) => serviceDates(rows, (row) =>
+    text(row.status).toLowerCase() === 'completed' && matcher(row));
+  const enrichMaternal = (row, visits = [], pregnancyRows = [], pregnancyServices = []) => {
+    const prenatalVisits = visits.filter((visit) => text(visit.visit_type || 'prenatal').toLowerCase() === 'prenatal');
+    const visitDates = validDates(prenatalVisits.map((visit) => visit.visit_date));
+    const encounterRows = pregnancyRows.filter((visit) => text(visit.encounter_type || 'prenatal').toLowerCase() === 'prenatal');
+    const allPrenatalDates = validDates([...visitDates, ...encounterRows.map((visit) => visit.encounter_date)]);
+    const nutritionRows = [...prenatalVisits, ...encounterRows]
+      .map((visit) => {
+        const weight = parseNum(visit.weight ?? visit.weight_kg);
+        const height = parseNum(visit.height_cm);
+        const bmi = weight > 0 && height > 0 ? weight / ((height / 100) ** 2) : parseNum(visit.bmi);
+        return { date: validDate(visit.visit_date || visit.encounter_date), bmi, weeks: parseNum(visit.gestational_age_weeks) };
+      })
+      .filter((visit) => visit.date && visit.bmi > 0)
+      .filter((visit) => {
+        if (visit.weeks !== null) return visit.weeks >= 0 && visit.weeks < 14;
+        if (!row.lmp) return false;
+        const days = Math.floor((Date.parse(`${visit.date}T00:00:00Z`) - Date.parse(`${row.lmp}T00:00:00Z`)) / 86400000);
+        return days >= 0 && days < 14 * 7;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const doseMap = new Map();
+    const addDose = (dose, date) => {
+      const key = Number(text(dose).match(/[1-5]/)?.[0]);
+      const day = validDate(date);
+      if (key && day && (!doseMap.has(key) || day < doseMap.get(key))) doseMap.set(key, day);
+    };
+    for (const [dose, date] of Object.entries(row.tt_td_doses || {})) addDose(dose, date);
+    for (const service of pregnancyServices) {
+      if (text(service.status).toLowerCase() === 'completed' && /^(td|tt)(?:[1-5]|_|$)/i.test(text(service.service_type))) {
+        addDose(service.service_details?.dose_number || service.service_type, service.date_provided);
+      }
+    }
+    for (const vaccine of immunizations || []) {
+      if (vaccine.resident_id === row.resident_id && vaccine.status === 'Completed' && /^(td|tt|tetanus)(?:\b|[1-5])/i.test(text(vaccine.vaccine))) {
+        // A resident vaccine must fall within this pregnancy to be attributed to it.
+        if (row.lmp && vaccine.administered_date >= row.lmp && (!row.delivery_date || vaccine.administered_date <= row.delivery_date)) addDose(vaccine.dose, vaccine.administered_date);
+      }
+    }
+    const tdDates = validDates([...doseMap.values()]);
+    const ironDates = completedService(pregnancyServices, (service) => /^(iron_folic|iron_folic_completed|iron_folic_completion)$/.test(text(service.service_type)) || service.service_details?.course_completed === true && /iron|folic/i.test(text(service.service_type)));
+    const calciumDates = completedService(pregnancyServices, (service) => /^(calcium|calcium_completed|calcium_completion)$/.test(text(service.service_type)) || service.service_details?.course_completed === true && /calcium/i.test(text(service.service_type)));
+    const fieldsFromServices = (patterns, positive = false) => {
+      const dates = pregnancyServices
+        .filter((item) => text(item.status).toLowerCase() === 'completed')
+        .filter((item) => patterns.some((pattern) => pattern.test(`${text(item.service_type)} ${text(item.service_name)}`)))
+        .filter((item) => !positive || ['+', 'positive'].includes(text(item.result_status || item.result_value).toLowerCase()))
+        .map((item) => positive ? item.result_date || item.date_provided : item.date_provided);
+      return validDates(dates)[0] || '';
+    };
+    const screeningFields = {};
+    for (const [prefix, dateKey, resultKey, patterns] of [
+      ['syphilis', 'syphilisScreenDate', 'syphilisResult', [/syphilis/i]],
+      ['hepb', 'hepbScreenDate', 'hepbResult', [/hepatitis\s*b|hepb/i]],
+      ['hiv', 'hivScreenDate', null, [/hiv/i]],
+      ['cbc', 'cbcScreenDate', 'cbcResult', [/cbc|hgb|hematocrit/i]],
+      ['gdm', 'gdmScreenDate', 'gdmResult', [/gestational|gdm/i]],
+    ]) {
+      const snapshots = prenatalVisits.map((visit) => visit.clinical_data?.prenatal || {});
+      screeningFields[`${prefix}_screen_date`] = validDates([
+        row[`${prefix}_screen_date`], fieldsFromServices(patterns), ...snapshots.map((snapshot) => snapshot[dateKey]),
+      ])[0] || '';
+      screeningFields[`${prefix}_positive_date`] = validDates([
+        ['+', 'positive'].includes(text(row[`${prefix}_result`]).toLowerCase()) ? row[`${prefix}_screen_date`] : '',
+        fieldsFromServices(patterns, true),
+        ...snapshots.filter((snapshot) => ['+', 'positive'].includes(text(snapshot[resultKey]).toLowerCase())).map((snapshot) => snapshot[dateKey]),
+      ])[0] || '';
+    }
+    const postpartumVisits = visits.filter((visit) => visit.visit_type === 'postpartum');
+    const ppIronDate = validDates(postpartumVisits.filter((visit) => visit.clinical_data?.postpartum?.ironFolicCompleted === true).map((visit) => visit.visit_date))[0] || '';
+    // The legacy UI used one iron completion column for both stages. Attribute
+    // an explicitly recorded completion after delivery to postpartum care only.
+    const legacyIronIsPostpartum = row.delivery_date && row.iron_folic_completed_date >= row.delivery_date;
+    return {
+      ...row,
+      prenatal_visit_dates: allPrenatalDates,
+      prenatal_visits: Math.max(Number(row.prenatal_visits) || 0, allPrenatalDates.length),
+      nutritional_assessment_date: nutritionRows[0]?.date || '',
+      nutritional_bmi: nutritionRows[0]?.bmi ?? null,
+      td_dose_count: tdDates.length,
+      td_completion_date: tdDates[Number(row.gravida) === 1 ? 1 : 2] || '',
+      iron_folic_completed_date: validDates([legacyIronIsPostpartum ? '' : row.iron_folic_completed_date, ...ironDates])[0] || '',
+      pp_iron_folic_completed_date: validDates([row.pp_iron_folic_completed_date, ppIronDate, legacyIronIsPostpartum ? row.iron_folic_completed_date : ''])[0] || '',
+      calcium_completed_date: row.calcium_completed_date || calciumDates.at(-1) || '',
+      postpartum_visit_dates: validDates([...(row.postpartum_visit_dates || []), ...postpartumVisits.map((visit) => visit.visit_date)]),
+      vitamin_a_given_date: validDates([row.vitamin_a_given_date, ...postpartumVisits.filter((visit) => visit.clinical_data?.postpartum?.vitaminAGiven === true).map((visit) => visit.visit_date)])[0] || '',
+      pregnancy_outcome: row.pregnancy_outcome || ({ 'Fetal Death': 'FD', 'Abortion/Miscarriage': 'AB' })[row.delivery_outcome] || '',
+      pregnancy_outcome_date: row.pregnancy_outcome_date || row.delivery_date || '',
+      iodine_given_date: row.iodine_given_date || fieldsFromServices([/iodine/i]),
+      deworming_date: row.deworming_date || fieldsFromServices([/deworm/i]),
+      ...screeningFields,
+    };
+  };
+
+  const canonical = (pregnancies || []).map((pregnancy) => {
+    const pregnancyId = text(pregnancy.id);
+    const residentId = text(pregnancy.resident_id);
+    const linkedLegacy = legacy.filter((row) => text(row.resident_id) === residentId && (
+      text(row.pregnancy_id) === pregnancyId || !row.pregnancy_id && (
+        row.lmp && row.lmp === pregnancy.lmp_date || row.edd && row.edd === pregnancy.edd_date
+      )
+    ));
+    const legacyCase = linkedLegacy[0] || {};
+    const pregnancyEncounters = encounterRows.filter((row) =>
+      text(row.pregnancy_id) === pregnancyId
+      && text(row.encounter_type || 'prenatal').toLowerCase() === 'prenatal');
+    const pregnancyServices = serviceRows.filter((row) => text(row.pregnancy_id) === pregnancyId);
+    const pregnancyDeliveries = deliveryRows.filter((row) => text(row.pregnancy_id) === pregnancyId);
+    const pregnancyPostpartum = postpartumRows.filter((row) => text(row.pregnancy_id) === pregnancyId);
+
+    const prenatalVisitDates = pregnancyEncounters
+      .map((row) => text(row.encounter_date))
+      .filter(Boolean)
+      .sort();
+    const deliveriesSorted = pregnancyDeliveries
+      .slice()
+      .sort((a, b) => String(b.delivery_date || '').localeCompare(String(a.delivery_date || '')));
+    const delivery = deliveriesSorted[0] || null;
+    const postpartumDates = pregnancyPostpartum
+      .map((row) => ({
+        date: text(row.encounter_date),
+        milestone: text(row.scheduled_milestone).toLowerCase(),
+        row,
+      }))
+      .filter((item) => item.date)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const ppByMilestone = (milestone) => postpartumDates.find((item) =>
+      item.milestone === milestone || item.row?.scheduled_milestone === milestone)?.date || '';
+    const ppFallback = postpartumDates.map((item) => item.date);
+    const postpartumIronDate = postpartumDates
+      .filter((item) => item.row?.iron_folic_completed === true)
+      .map((item) => item.date)
+      .sort()
+      .at(-1) || '';
+    const postpartumVitaminDate = postpartumDates
+      .filter((item) => item.row?.vitamin_a_given === true)
+      .map((item) => item.date)
+      .sort()
+      .at(-1) || '';
+
+    const placeKey = text(delivery?.place_of_delivery).toLowerCase();
+    const attendantKey = text(delivery?.birth_attendant).toLowerCase();
+    const outcomeKey = text(delivery?.delivery_outcome).toLowerCase();
+    const deliveryTypeKey = text(delivery?.type_of_delivery).toLowerCase();
+    const place = placeKey === 'public_facility'
+      ? 'Public Facility'
+      : placeKey === 'private_facility'
+        ? 'Private Facility'
+        : placeKey === 'home'
+          ? 'Home / Non-Facility'
+          : placeKey === 'other'
+            ? 'Other'
+            : '';
+    const attendant = attendantKey === 'doctor'
+      ? 'Doctor'
+      : attendantKey === 'nurse'
+        ? 'Nurse'
+        : attendantKey === 'midwife'
+          ? 'Midwife'
+          : attendantKey === 'hilot'
+            ? 'Hilot/TBA'
+            : attendantKey === 'other'
+              ? 'Other'
+              : '';
+    const outcome = outcomeKey === 'live_birth'
+      ? 'Live Birth'
+      : outcomeKey === 'stillbirth'
+        ? 'Fetal Death'
+        : outcomeKey === 'abortion'
+          ? 'Abortion/Miscarriage'
+          : outcomeKey === 'ectopic'
+            ? 'Ectopic'
+            : '';
+    const deliveryType = deliveryTypeKey === 'vaginal'
+      ? 'Vaginal'
+      : deliveryTypeKey === 'cesarean'
+        ? 'Cesarean'
+        : '';
+    return enrichMaternal({
+      ...legacyCase,
+      id: `canonical-pregnancy-${pregnancyId}`,
+      pregnancy_id: pregnancyId,
+      resident_id: residentId,
+      municipality_id: pregnancy.municipality_id,
+      barangay_id: pregnancy.barangay_id,
+      resident: pregnancy.resident || delivery?.resident || null,
+      lmp: pregnancy.lmp_date || '',
+      edd: pregnancy.edd_date || '',
+      gravida: pregnancy.gravida ?? pregnancy.pregnancy_number ?? legacyCase.gravida,
+      para: pregnancy.para ?? pregnancy.parity_before_pregnancy ?? legacyCase.para,
+      socio_economic_status: pregnancy.socio_economic_status || legacyCase.socio_economic_status || '',
+      prenatal_visits: pregnancyEncounters.length,
+      prenatal_visit_dates: prenatalVisitDates,
+      risk: pregnancy.risk_level || '',
+      status: text(pregnancy.status) === 'delivered' ? 'Delivered' : text(pregnancy.status) || 'Active',
+      date_of_registration: pregnancy.date_of_registration || '',
+      delivery_date: delivery?.delivery_date || legacyCase.delivery_date || '',
+      delivery_outcome: outcome || legacyCase.delivery_outcome || '',
+      type_of_delivery: deliveryType || legacyCase.type_of_delivery || '',
+      place_of_delivery: place || legacyCase.place_of_delivery || '',
+      birth_attendant: attendant || legacyCase.birth_attendant || '',
+      birth_weight: delivery?.birth_weight_kg != null ? String(delivery.birth_weight_kg) : legacyCase.birth_weight || '',
+      birth_weight_class: delivery?.birth_weight_class || '',
+      pp_checkup_24h: ppByMilestone('24h') || legacyCase.pp_checkup_24h || '',
+      pp_checkup_day3: ppByMilestone('3d') || legacyCase.pp_checkup_day3 || '',
+      pp_checkup_7_14d: ppByMilestone('7-14d') || legacyCase.pp_checkup_7_14d || '',
+      pp_checkup_6wk: ppByMilestone('6wk') || legacyCase.pp_checkup_6wk || '',
+      postpartum_visit_dates: ppFallback,
+      iron_folic_completed_date: legacyCase.iron_folic_completed_date || '',
+      pp_iron_folic_completed_date: postpartumIronDate || '',
+      vitamin_a_given_date: postpartumVitaminDate || legacyCase.vitamin_a_given_date || '',
+      created_at: pregnancy.created_at || '',
+      updated_at: pregnancy.updated_at || '',
+    }, legacyVisitRows.filter((visit) => linkedLegacy.some((row) => text(row.id) === text(visit.maternal_case_id))), pregnancyEncounters, pregnancyServices);
+  });
+
+  const canonicalIds = new Set(canonical.map((row) => text(row.pregnancy_id)).filter(Boolean));
+  const canonicalResidents = new Map();
+  for (const row of canonical) canonicalResidents.set(row.resident_id, row);
+
+  const enrichedLegacy = legacy.map((row) => enrichMaternal(
+    row,
+    legacyVisitRows.filter((visit) => text(visit.maternal_case_id) === text(row.id)),
+    [],
+    [],
+  ));
+  const reconciledLegacy = enrichedLegacy.filter((row) => {
+    if (row.pregnancy_id && canonicalIds.has(text(row.pregnancy_id))) return false;
+    const residentId = text(row.resident_id);
+    const canonicalRow = canonicalResidents.get(residentId);
+    if (!canonicalRow) return true;
+    const signatureKeys = ['lmp', 'edd', 'delivery_date'];
+    return !signatureKeys.some((key) =>
+      text(row[key]).length > 0
+      && text(row[key]) === text(canonicalRow[key]));
+  });
+
+  const seen = new Set();
+  return [...canonical, ...reconciledLegacy].filter((row) => {
+    const key = row.pregnancy_id
+      ? `pregnancy:${row.pregnancy_id}`
+      : `legacy:${row.resident_id}:${text(row.delivery_date)}:${text(row.created_at)}:${text(row.id)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 };
 
 /**
@@ -850,12 +1162,17 @@ export const computeIndicator = (ind, sets) => {
     // Derived from the maternal case: count each matching record in the month
     // of its key date, broken down by the mother's age band when configured.
     for (const row of sets.maternal) {
-      if (!matchMaternalFilter(row, ind.derive?.filter)) continue;
+       if (!matchesMaternalDerivation(ind.derive, row)) continue;
       const key = maternalKeyDate(ind.derive, row);
       if (!key) continue;
       const ds = String(key).slice(0, 10);
       if (ds < sets.rangeStart || ds > sets.rangeEnd) continue;
-      total += 1;
+       if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+         const residentId = text(row.resident_id || row.resident?.id);
+         if (!residentId || uniqueResidents.has(residentId)) continue;
+         uniqueResidents.add(residentId);
+       }
+       total += 1;
       if (ind.derive?.age && ind.ageScheme !== 'none') {
         const age = ageYearsAt(row.resident?.birth_date, key);
         const g = bucketForAge(ind.ageScheme, age);
@@ -987,7 +1304,7 @@ export const computeIndicator = (ind, sets) => {
           addToBreakdown(r, r.resident, val);
         }
       }
-      if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') total = uniqueResidents.size;
+     if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') total = uniqueResidents.size;
     }
   } else {
     throw new Error(`Unsupported M1 indicator source: ${ind.source}`);
@@ -1083,10 +1400,7 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
     sexFilter: 'Female',
   });
 
-  let matQ = supabase.from(MATERNAL).select('*, resident:residents(birth_date, sex)').limit(50000);
-  matQ = applyScope(matQ, scope);
-  const { data: maternal, error: matErr } = await matQ;
-  throwOnError(matErr, 'Could not load maternal records');
+  const maternal = await loadMaternalRecords(supabase, scope);
 
   let tclQ = supabase
     .from('tcl_entries')
@@ -1147,13 +1461,20 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
       for (const h of households || []) if (matchHousehold(h, ind.match)) c += 1;
       months[11] = c;
     } else if (ind.source === 'maternal_records') {
+      const seen = new Set();
       for (const row of maternal || []) {
-        if (!matchMaternalFilter(row, ind.derive?.filter)) continue;
+        if (!matchesMaternalDerivation(ind.derive, row)) continue;
         const key = maternalKeyDate(ind.derive, row);
         const date = key ? String(key).slice(0, 10) : '';
         if (!date || date < start || date > end) continue;
         const m = monthOf(key);
         if (!m) continue;
+        if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+          const residentId = text(row.resident_id || row.resident?.id);
+          if (!residentId || seen.has(`${m}:${residentId}`)) continue;
+          seen.add(`${m}:${residentId}`);
+          uniqueYear.add(residentId);
+        }
         months[m - 1] += 1;
         if (bySex) bySex[resolveSex({ sex: '' }, row.resident)] += 1;
       }
@@ -1337,16 +1658,19 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, quart
       });
     }
   } else if (ind.source === 'maternal_records') {
-    let q = supabase.from(MATERNAL).select('*, resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date)').limit(5000);
-    q = applyScope(q, scope);
-    const { data, error } = await q;
-    throwOnError(error, 'Could not load maternal drill-down');
-    for (const row of data || []) {
-      if (!matchMaternalFilter(row, ind.derive?.filter)) continue;
+    const data = await loadMaternalRecords(supabase, scope);
+    const seen = new Set();
+    for (const row of data) {
+      if (!matchesMaternalDerivation(ind.derive, row)) continue;
       const key = maternalKeyDate(ind.derive, row);
       if (!key) continue;
       const ds = String(key).slice(0, 10);
       if (ds < start || ds > end) continue;
+      if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+        const residentId = text(row.resident_id || row.resident?.id);
+        if (!residentId || seen.has(residentId)) continue;
+        seen.add(residentId);
+      }
       records.push({
         id: row.id, resident: row.resident, date: ds, status: row.status,
         ageGroup: ind.derive?.age ? bucketForAge(ind.ageScheme, ageYearsAt(row.resident?.birth_date, key)) : 'Total',
@@ -1354,6 +1678,11 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, quart
           delivery_date: row.delivery_date, delivery_outcome: row.delivery_outcome,
           type_of_delivery: row.type_of_delivery, place_of_delivery: row.place_of_delivery,
           birth_attendant: row.birth_attendant, birth_weight: row.birth_weight,
+          pregnancy_id: row.pregnancy_id, prenatal_visits: row.prenatal_visits,
+          prenatal_visit_dates: row.prenatal_visit_dates, nutritional_assessment_date: row.nutritional_assessment_date,
+          nutritional_bmi: row.nutritional_bmi, td_completion_date: row.td_completion_date,
+          td_dose_count: row.td_dose_count, iron_folic_completed_date: row.iron_folic_completed_date,
+          pp_iron_folic_completed_date: row.pp_iron_folic_completed_date,
         },
         remarks: '',
       });
@@ -1680,7 +2009,7 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
     environmental: {
       section: 'G',
       indicatorCodes: M1_INDICATORS.filter((indicator) => indicator.section === 'G').map((indicator) => indicator.code),
-      table: 'households',
+      table: SCHEMAS.environmental.table,
     },
     enrollment: {
       section: null,
@@ -1702,11 +2031,15 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
     const derived = M1_INDICATORS.filter((indicator) => indicator.section === 'B' && indicator.source === MATERNAL);
     // Manual figures have no case-level attribution. Include only cases that
     // contribute a derived event in this period, regardless of creation date.
-    records = maternal.filter((row) => derived.some((indicator) => {
+    records = maternal.filter((row) => {
+      const registered = text(row.date_of_registration).slice(0, 10);
+      if (registered && registered >= fromDate && registered <= toDate) return true;
+      return derived.some((indicator) => {
       const key = maternalKeyDate(indicator.derive, row);
       const date = key ? String(key).slice(0, 10) : '';
-      return date >= fromDate && date <= toDate && matchMaternalFilter(row, indicator.derive?.filter);
-    }));
+      return date >= fromDate && date <= toDate && matchesMaternalDerivation(indicator.derive, row);
+      });
+    });
   } else {
     const select = programId === 'environmental' ? '*'
       : '*, resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date)';
@@ -1722,6 +2055,28 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
     const { data, error } = await query;
     throwOnError(error, `Could not fetch ${programId} records`);
     records = data || [];
+  }
+
+  // A program card represents qualifying program records, rather than repeated
+  // source rows for the same enrollment or household masterlist.
+  if (programId === 'enrollment') {
+    const seen = new Set();
+    records = records.filter((record) => {
+      const programName = text(record.program).toLowerCase();
+      const key = `${text(record.resident_id)}:${programName}`;
+      if (!record.resident_id || !programName || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  if (programId === 'environmental') {
+    const seen = new Set();
+    records = records.filter((record) => {
+      const key = text(record.household_id) || text(record.id);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   // Fetch indicator values from M1 aggregation
@@ -1746,16 +2101,7 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
 
   const summary = programId === 'environmental' ? {
     label: 'Unique contributing households',
-    total: new Set(
-      (records || [])
-        .filter((record) => M1_INDICATORS.some(
-          (indicator) => indicator.section === 'G'
-            && indicator.source === 'households'
-            && matchHousehold(record, indicator.match),
-        ))
-        .map((record) => record.id)
-        .filter(Boolean),
-    ).size,
+    total: new Set((records || []).map((record) => record.household_id || record.id).filter(Boolean)).size,
     note: 'Counts each household once even when it contributes to parent and child indicators.',
   } : null;
 
@@ -1769,7 +2115,7 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
     ...(programId === 'prenatal' ? {
       warnings: [
         'Legacy catalog measures retain 4 prenatal check-ups and 2 postpartum check-ups; they are not approved mappings to workbook 8ANC/4PNC measures.',
-        'Records include maternal cases contributing derived events in this period; manual aggregate figures have no case-level attribution.',
+        'Records include TCL pregnancy registrations and maternal cases with eligible service events in this period. Registration alone does not complete any care indicator.',
       ],
     } : {
       warnings: [programId === 'enrollment'
