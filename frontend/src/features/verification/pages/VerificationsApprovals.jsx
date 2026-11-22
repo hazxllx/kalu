@@ -7,11 +7,13 @@ import PageHeader from "@/components/common/PageHeader";
 const PendingVerifications = lazy(() => import("@/features/verification/pages/PendingVerifications"));
 const HouseholdVerifications = lazy(() => import("@/features/verification/pages/HouseholdVerifications"));
 const TransferRequests = lazy(() => import("@/features/verification/pages/TransferRequests"));
+const UserManagement = lazy(() => import("@/features/users/pages/UserManagement"));
 
 const TABS = [
   { id: "resident", label: "Resident Verification", permission: "residents.registration.approve" },
   { id: "household", label: "Household Verification", permission: "households.verify" },
   { id: "transfer", label: "Resident Transfer Requests", permission: "residents.transfer.approve" },
+  { id: "personnel", label: "Health Personnel", permission: "accounts.personnel.approve", roles: ["phn", "health_supervisor"] },
 ];
 
 export default function VerificationsApprovals() {
@@ -22,6 +24,7 @@ export default function VerificationsApprovals() {
   const availableTabs = TABS.filter(
     (tab) =>
       (!tab.permission || can(tab.permission)) &&
+      (user?.role !== "phn" || tab.id === "personnel") &&
       (!tab.roles || tab.roles.includes(user?.role)),
   );
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab)
@@ -45,15 +48,17 @@ export default function VerificationsApprovals() {
   return (
     <main className="space-y-4">
       <PageHeader
-        eyebrow="Verification"
-        title="Verifications & Approvals"
-        subtitle="Review resident, household, and transfer requests in one place."
+        eyebrow={activeTab === "personnel" ? "Accounts" : "Verification"}
+        title={activeTab === "personnel" ? "Account Management" : "Verifications & Approvals"}
+        subtitle={activeTab === "personnel"
+          ? "Manage health personnel accounts within your authorized service area."
+          : "Review resident, household, and transfer requests in one place."}
       />
 
       <section aria-label="Verification and approval workflows">
         {availableTabs.length === 0 ? (
           <p className="rounded-card border border-brand-border bg-white px-4 py-3 text-sm text-brand-gray dark:border-border dark:bg-card">
-            No verification or transfer-approval permissions are assigned to this role.
+            No verification or approval permissions are assigned to this role.
           </p>
         ) : (
         <>
@@ -116,6 +121,9 @@ export default function VerificationsApprovals() {
             )}
             {activeTab === "transfer" && (
               <TransferRequests embedded />
+            )}
+            {activeTab === "personnel" && (
+              <UserManagement personnelOnly delegated embedded />
             )}
           </Suspense>
         </div>

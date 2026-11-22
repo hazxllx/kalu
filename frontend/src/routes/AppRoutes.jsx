@@ -635,13 +635,6 @@ const CertificateComposer = appPage(
     )
 );
 
-const StaffAccountApprovals = appPage(
-  () =>
-    import(
-      '@/features/accounts/pages/StaffAccountApprovals'
-    )
-);
-
 /**
  * Central route table for KALUSAGAP.
  *
@@ -1044,10 +1037,18 @@ const AppRoutes = () => (
           path="certificates"
           element={<MedicalCertificates />}
         />
-        {/* Account approval authority: the PHN approves Health Supervisor and RHU Personnel accounts. */}
+        {/* Keep the old PHN account-approvals URL working; personnel are managed in one list now. */}
         <Route
           path="account-approvals"
-          element={<StaffAccountApprovals />}
+          element={<Navigate to="/app/phn/verifications?tab=personnel" replace />}
+        />
+        <Route
+          path="verifications"
+          element={<VerificationsApprovals />}
+        />
+        <Route
+          path="personnel"
+          element={<Navigate to="/app/phn/verifications?tab=personnel" replace />}
         />
         <Route
           path="reports"
@@ -1105,6 +1106,10 @@ const AppRoutes = () => (
         <Route
           path="verifications"
           element={<VerificationsApprovals />}
+        />
+        <Route
+          path="personnel"
+          element={<Navigate to="/app/health_supervisor/verifications?tab=personnel" replace />}
         />
         <Route
           path="transfer-requests"
@@ -1185,12 +1190,7 @@ const AppRoutes = () => (
         {/* Account approval authority: the Health Supervisor approves BHW and Resident accounts. */}
         <Route
           path="account-approvals"
-          element={
-            <Navigate
-              to="/app/health_supervisor/verifications?tab=accounts"
-              replace
-            />
-          }
+          element={<Navigate to="/app/health_supervisor/verifications?tab=personnel" replace />}
         />
 
         <Route

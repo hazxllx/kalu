@@ -92,6 +92,50 @@ test('creation reserves identity, provisions approval, and confirms the temporar
   });
 });
 
+test('PHN creates only municipality-scoped Health Supervisor and RHU Personnel accounts', async () => {
+  const actor = { id: ACTOR, role: 'phn', municipalityId: MUNICIPALITY, barangayId: null };
+  const creations = [];
+  await withMethods(repository, {
+    getAccountAssignmentOptions: async () => options(),
+    reservePersonnelAccount: async (args) => { assert.equal(args.delegated, true); return { target_id: TARGET, completed: true }; },
+    createPersonnelAccountProfile: async (args) => { creations.push(args.profile); return profile({ role: args.profile.role }); },
+    getProfileById: async () => profile({ notification: { status: 'sent' } }),
+  }, async () => {
+    for (const input of [
+      creation({ role: 'health_supervisor', barangayId: BARANGAY }),
+      creation({ role: 'rhu_personnel', facilityId: FACILITY, rhuStations: ['triage'] }),
+    ]) await users.createUser({ actor, input, notificationProcessor: async () => ({ mailServerAccepted: 1 }) });
+    await assert.rejects(() => users.createUser({ actor, input: creation({ role: 'bhw', barangayId: BARANGAY }) }),
+      (error) => error.statusCode === 403);
+    await assert.rejects(() => users.createUser({ actor, input: creation({ role: 'health_supervisor', municipalityId: OTHER_MUNICIPALITY, barangayId: BARANGAY }) }),
+      (error) => [403, 422].includes(error.statusCode));
+  });
+  assert.equal(creations[0].municipality_id, MUNICIPALITY);
+  assert.equal(creations[0].barangay_id, BARANGAY);
+  assert.equal(creations[1].facility_id, FACILITY);
+  assert.deepEqual(creations[1].rhu_stations, ['triage']);
+});
+
+test('Health Supervisor creates BHW only in the actor assigned barangay', async () => {
+  const actor = { id: ACTOR, role: 'health_supervisor', municipalityId: MUNICIPALITY, barangayId: BARANGAY };
+  let createdProfile;
+  await withMethods(repository, {
+    getAccountAssignmentOptions: async () => options(),
+    reservePersonnelAccount: async (args) => { assert.equal(args.delegated, true); return { target_id: TARGET, completed: true }; },
+    createPersonnelAccountProfile: async (args) => { createdProfile = args.profile; return profile({ role: 'bhw' }); },
+    getProfileById: async () => profile({ role: 'bhw', notification: { status: 'sent' } }),
+  }, async () => {
+    await users.createUser({ actor, input: creation({ role: 'bhw', barangayId: BARANGAY }), notificationProcessor: async () => ({ mailServerAccepted: 1 }) });
+    await assert.rejects(() => users.createUser({ actor, input: creation({ role: 'bhw', barangayId: '88888888-8888-4888-8888-888888888888' }) }),
+      (error) => error.statusCode === 422);
+    await assert.rejects(() => users.createUser({ actor, input: creation({ role: 'phn' }) }),
+      (error) => error.statusCode === 403);
+  });
+  assert.equal(createdProfile.role, 'bhw');
+  assert.equal(createdProfile.barangay_id, BARANGAY);
+  assert.equal(createdProfile.municipality_id, MUNICIPALITY);
+});
+
 test('temporary passwords are backend-generated and are never accepted from or returned to the administrator', async () => {
   let reservedProfile;
   let authInput;

@@ -16,24 +16,23 @@ import {
 import * as controller from '../controllers/users.controller.js';
 
 /**
- * System Administration — User & Personnel Account Management routes.
+ * Role-scoped User & Personnel Account Management routes.
  *
  * Role in KALUSAGAP:
- * Provides full administrative lifecycle governance over Supabase Auth identities
- * and `public.profiles` rows (provisioning accounts, assigning roles/municipalities/
- * barangays/RHU stations, approving/suspending/reactivating personnel, resetting
- * credentials, inspecting audit history, and permanent deletion).
+ * Administrators retain full lifecycle governance. PHNs can create and manage
+ * Health Supervisors and RHU Personnel within their municipality; Health
+ * Supervisors can create and manage BHW accounts in their assigned barangay.
  *
  * Architectural pipeline:
- *   route -> authenticate -> authorize(FEATURE_ROLES.users) -> [validate]
+ *   route -> authenticate -> authorize(FEATURE_ROLES.personnelManagement) -> [validate]
  *         -> authorize(dynamicPermissions) -> users.controller
  *         -> users.service -> Supabase Auth (service role) & DB
  *
  * Security & RBAC:
  * Every route resolves the caller's role server-side from `public.profiles` via
- * `authenticate` and requires `admin` (`FEATURE_ROLES.users`). Non-admin roles
- * receive HTTP 403 and unauthenticated callers receive HTTP 401. Write endpoints
- * further evaluate payload-sensitive permission sets (`accounts.create`,
+ * `authenticate`. Delegated role and coverage checks are repeated by the service
+ * and database RPCs. Administrators retain payload-sensitive permission checks
+ * (`accounts.create`,
  * `accounts.edit`, `accounts.roles.manage`, `accounts.personnel.approve`,
  * `accounts.deactivate`, `accounts.access.reset`, `accounts.delete`).
  *
@@ -51,15 +50,27 @@ import * as controller from '../controllers/users.controller.js';
  */
 const router = Router();
 
-router.use(authenticate, authorize(FEATURE_ROLES.users));
+router.use(authenticate, authorize(FEATURE_ROLES.personnelManagement));
+
+const adminOrPersonnelManager = (options = null) => (req, res, next) => {
+  if (req.user?.role === 'admin') {
+    if (options) return authorize(FEATURE_ROLES.users, options)(req, res, next);
+    return authorize(FEATURE_ROLES.users)(req, res, next);
+  }
+  // PHN and Health Supervisor scope/field restrictions are enforced again in
+  // users.service and the delegated database RPCs.
+  return next();
+};
+
+const administratorOnly = (options = {}) => authorize(FEATURE_ROLES.users, options);
 
 // Read & reference endpoints (`accounts.view`):
 // - GET /options : Assignment dropdown metadata (roles, municipalities, barangays, facilities, stations).
 // - GET /summary : Filtered/global account status counters (`userQueryValidator`).
 // - GET /        : Paginated account directory (`userQueryValidator`).
-router.get('/options', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.getAccountOptions));
-router.get('/summary', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), validate(userQueryValidator, 'query'), asyncHandler(controller.getAccountSummary));
-router.get('/', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), validate(userQueryValidator, 'query'), asyncHandler(controller.listUsers));
+router.get('/options', adminOrPersonnelManager({ permission: 'accounts.view' }), asyncHandler(controller.getAccountOptions));
+router.get('/summary', adminOrPersonnelManager({ permission: 'accounts.view' }), validate(userQueryValidator, 'query'), asyncHandler(controller.getAccountSummary));
+router.get('/', adminOrPersonnelManager({ permission: 'accounts.view' }), validate(userQueryValidator, 'query'), asyncHandler(controller.listUsers));
 
 // POST / : Creates a new managed user (`createUserValidator` body).
 // Dynamically requires `accounts.create` + `accounts.roles.manage`, plus
@@ -68,7 +79,7 @@ router.get('/', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }),
 router.post(
   '/',
   validate(createUserValidator),
-  authorize(FEATURE_ROLES.users, {
+  adminOrPersonnelManager({
     allPermissions: (req) => {
       const input = req.body?.user || req.body || {};
       const permissions = ['accounts.create', 'accounts.roles.manage'];
@@ -84,7 +95,7 @@ router.post(
 const idParam = validate(userIdParamValidator, 'params');
 
 // GET /:id/history : Returns audit trail entries and safe notification history for account `:id`.
-router.get('/:id/history', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), idParam, asyncHandler(controller.getUserHistory));
+router.get('/:id/history', adminOrPersonnelManager({ permission: 'accounts.view' }), idParam, asyncHandler(controller.getUserHistory));
 
 // POST /:id/lifecycle : Transitions account `:id` lifecycle (`personnelLifecycleValidator` body).
 // Maps `action` to granular permissions: `approve`/`reject` -> `accounts.personnel.approve`
@@ -94,7 +105,7 @@ router.post(
   '/:id/lifecycle',
   idParam,
   validate(personnelLifecycleValidator),
-  authorize(FEATURE_ROLES.users, {
+  administratorOnly({
     allPermissions: (req) => {
       if (req.body.action === 'approve') return req.body.activate
         ? ['accounts.personnel.approve', 'accounts.deactivate']
@@ -108,7 +119,7 @@ router.post(
 );
 
 // GET /:id : Fetches single user profile, role, assignment scope, and lifecycle status for `:id`.
-router.get('/:id', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), idParam, asyncHandler(controller.getUser));
+router.get('/:id', adminOrPersonnelManager({ permission: 'accounts.view' }), idParam, asyncHandler(controller.getUser));
 
 // PUT /:id : Updates account `:id` (`updateUserValidator` body).
 // Dynamically requires `accounts.edit` for profile/scope fields, `accounts.roles.manage`
@@ -118,7 +129,7 @@ router.put(
   '/:id',
   idParam,
   validate(updateUserValidator),
-  authorize(FEATURE_ROLES.users, {
+  adminOrPersonnelManager({
     allPermissions: (req) => {
       const patch = req.body?.user || req.body || {};
       const permissions = [];
@@ -140,7 +151,7 @@ router.put(
 // POST /:id/access-reset : Sends a password recovery email or resets credentials (`accessResetValidator` body).
 router.post(
   '/:id/access-reset',
-  authorize(FEATURE_ROLES.users, { permission: 'accounts.access.reset' }),
+  administratorOnly({ permission: 'accounts.access.reset' }),
   idParam,
   validate(accessResetValidator),
   asyncHandler(controller.resetUserAccess),
@@ -149,7 +160,7 @@ router.post(
 // DELETE /:id : Permanently deletes Supabase Auth user and `profiles` row `:id` (`accounts.delete`).
 router.delete(
   '/:id',
-  authorize(FEATURE_ROLES.users, { permission: 'accounts.delete' }),
+  administratorOnly({ permission: 'accounts.delete' }),
   idParam,
   asyncHandler(controller.deleteUser),
 );

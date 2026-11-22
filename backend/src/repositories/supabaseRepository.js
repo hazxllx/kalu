@@ -811,14 +811,17 @@ const throwAccountError = (error, fallback) => {
  * `awaiting_setup`, `active`, `approved_inactive`) onto a `profiles` query.
  */
 const applyAccountFilters = (query, {
-  q, role, status, municipalityId, barangayId, personnelOnly, approvalStatus, lifecycleState,
+  q, role, roles, status, municipalityId, barangayId, facilityId, rhuStation, personnelOnly, approvalStatus, lifecycleState,
 } = {}) => {
-  if (personnelOnly) query = query.in('role', ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']);
+  if (Array.isArray(roles) && roles.length) query = query.in('role', roles);
+  else if (personnelOnly) query = query.in('role', ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']);
   if (role === 'resident') query = query.in('role', ['resident', 'resident-limited']);
   else if (role) query = query.eq('role', role);
   if (status) query = query.eq('status', status);
   if (municipalityId) query = query.eq('municipality_id', municipalityId);
   if (barangayId) query = query.eq('barangay_id', barangayId);
+  if (facilityId) query = query.eq('facility_id', facilityId);
+  if (rhuStation) query = query.contains('rhu_stations', [rhuStation]);
   if (approvalStatus) query = query.eq('personnel_account.approval_status', approvalStatus);
   const term = escapeSearchToken(q);
   if (term) query = query.or(`full_name.ilike.%${term}%,email.ilike.%${term}%`);
@@ -1272,6 +1275,9 @@ export const supabaseRepository = {
     q = '',
     barangay = null,
     barangayId = null,
+    facilityId = null,
+    rhuStation = null,
+    roles = null,
     municipalityId = null,
     limit = 50,
     offset = 0,
@@ -1947,6 +1953,8 @@ export const supabaseRepository = {
     status = null,
     municipalityId = null,
     barangayId = null,
+    facilityId = null,
+    rhuStation = null,
     personnelOnly = false,
     approvalStatus = null,
     lifecycleState = null,
@@ -1965,7 +1973,7 @@ export const supabaseRepository = {
         .order('created_at', { referencedTable: 'notifications', ascending: false })
         .limit(1, { referencedTable: 'notifications' })
         .range(offset, offset + limit - 1);
-      return applyAccountFilters(query, { q, role, status, municipalityId, barangayId, personnelOnly, approvalStatus, lifecycleState });
+      return applyAccountFilters(query, { q, role, roles, status, municipalityId, barangayId, facilityId, rhuStation, personnelOnly, approvalStatus, lifecycleState });
     };
     let { data, error, count } = await read(PROFILE_ADMIN_SELECT);
     if (error && isEmbeddedResourceUnavailable(error)) {
@@ -2090,8 +2098,8 @@ export const supabaseRepository = {
     };
   },
 
-  async reservePersonnelAccount({ actorId, operationId, profile }) {
-    const { data, error } = await getServiceClient().rpc('admin_reserve_personnel_account', {
+  async reservePersonnelAccount({ actorId, operationId, profile, delegated = false }) {
+    const { data, error } = await getServiceClient().rpc(delegated ? 'delegated_reserve_personnel_account' : 'admin_reserve_personnel_account', {
       p_actor_id: actorId,
       p_operation_id: operationId,
       p_profile: profile,
@@ -2174,8 +2182,8 @@ export const supabaseRepository = {
     return id;
   },
 
-  async createPersonnelAccountProfile({ actorId, operationId, profile, temporaryPasswordCiphertext = null }) {
-    const { data, error } = await getServiceClient().rpc('admin_create_personnel_account', {
+  async createPersonnelAccountProfile({ actorId, operationId, profile, temporaryPasswordCiphertext = null, delegated = false }) {
+    const { data, error } = await getServiceClient().rpc(delegated ? 'delegated_create_personnel_account' : 'admin_create_personnel_account', {
       p_actor_id: actorId,
       p_operation_id: operationId,
       p_profile: profile,
@@ -2186,8 +2194,8 @@ export const supabaseRepository = {
     return row?.id ? profileToAdminUser(row) : null;
   },
 
-  async updatePersonnelAccountProfile({ id, actorId, profile, operationId }) {
-    const { data, error } = await getServiceClient().rpc('admin_update_personnel_account', {
+  async updatePersonnelAccountProfile({ id, actorId, profile, operationId, delegated = false }) {
+    const { data, error } = await getServiceClient().rpc(delegated ? 'delegated_update_personnel_account' : 'admin_update_personnel_account', {
       p_target_id: id,
       p_actor_id: actorId,
       p_profile: profile,

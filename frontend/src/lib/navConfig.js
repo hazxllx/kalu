@@ -168,10 +168,16 @@ export const NAV = {
       permission: "residents.directory.view",
     },
     {
-      label: "Account Approvals",
+      label: "Account Management",
       icon: "ShieldCheck",
-      path: "/app/phn/account-approvals",
-      permission: "accounts.personnel.approve",
+      path: "/app/phn/verifications",
+      search: "?tab=personnel",
+      anyPermissions: [
+        "residents.registration.approve",
+        "households.verify",
+        "residents.transfer.approve",
+        "accounts.personnel.approve",
+      ],
       group: "Main",
     },
     {
@@ -283,14 +289,6 @@ export const NAV = {
       icon: "Users",
       path: "/app/health_supervisor/residents",
       permission: "residents.directory.view",
-      group: "Main",
-    },
-    {
-      label: "Account Approvals",
-      icon: "ShieldCheck",
-      path: "/app/health_supervisor/verifications",
-      search: "?tab=accounts",
-      permission: "accounts.personnel.approve",
       group: "Main",
     },
     {
@@ -415,15 +413,15 @@ children: [
       group: "Account",
     },
     {
-      label: "Verifications & Approvals",
+      label: "Account Management",
       icon: "ShieldCheck",
       path: "/app/health_supervisor/verifications",
+      search: "?tab=personnel",
       anyPermissions: [
         "residents.registration.approve",
         "households.verify",
         "accounts.personnel.approve",
       ],
-      hidden: true,
     },
     {
       label: "Settings",

@@ -129,9 +129,10 @@ export const userQueryValidator = (input = {}) => {
   }
   if (input.approvalStatus && !APPROVAL_STATUSES.includes(input.approvalStatus)) errors.approvalStatus = 'Unknown approval status.';
   if (input.lifecycleState && !PERSONNEL_STATES.includes(input.lifecycleState)) errors.lifecycleState = 'Unknown personnel lifecycle state.';
-  for (const field of ['municipalityId', 'barangayId']) {
+  for (const field of ['municipalityId', 'barangayId', 'facilityId']) {
     if (input[field] && (typeof input[field] !== 'string' || !isUuid(input[field]))) errors[field] = 'Use a valid assignment UUID.';
   }
+  if (input.rhuStation && !['triage', 'consultation'].includes(input.rhuStation)) errors.rhuStation = 'Choose a valid RHU station.';
   return Object.keys(errors).length ? invalid(errors) : valid(value);
 };
 

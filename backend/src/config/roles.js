@@ -44,6 +44,7 @@ export const ALL_ROLES = Object.values(ROLES);
 export const FEATURE_ROLES = Object.freeze({
   // Account/access administration
   users: [ROLES.ADMIN],
+  personnelManagement: [ROLES.ADMIN, ROLES.PHN, ROLES.HEALTH_SUPERVISOR],
   system: [ROLES.ADMIN],
 
   // Barangay registry administration (Admin Barangay Management). The barangay

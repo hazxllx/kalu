@@ -99,18 +99,45 @@ test('public registration route rejects before malformed multipart parsing, uplo
   });
 });
 
-test('all users endpoints require a real token and the actual profile admin role, not Auth/client role metadata', async () => {
+test('personnel management rejects unsupported roles and limits lifecycle, reset, and deletion controls to admins', async () => {
   await harness({}, async ({ api }) => {
     assert.equal((await api('/users', { token: null })).status, 401);
     assert.equal((await api('/users', { token: 'invalid-token' })).status, 401);
   });
-  for (const role of ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw', 'resident']) {
+  for (const role of ['mho', 'rhu_personnel', 'bhw', 'resident']) {
     await harness({ role }, async ({ api }) => {
       for (const [path, method, body] of [
         ['/users', 'GET'], ['/users/options', 'GET'], ['/users/summary', 'GET'], [`/users/${TARGET}`, 'GET'],
         [`/users/${TARGET}/history`, 'GET'], ['/users', 'POST', {}], [`/users/${TARGET}`, 'PUT', {}],
         [`/users/${TARGET}/lifecycle`, 'POST', { action: 'approve', operationId: OPERATION }],
       ]) assert.equal((await api(path, { method, body })).status, 403, `${role} ${method} ${path}`);
+    });
+  }
+  for (const role of ['phn', 'health_supervisor']) {
+    await harness({ role, repo: {} }, async ({ api }) => {
+      assert.equal((await api(`/users/${TARGET}/lifecycle`, { method: 'POST', body: { action: 'suspend', reason: 'test', operationId: OPERATION } })).status, 403);
+      assert.equal((await api(`/users/${TARGET}/access-reset`, { method: 'POST', body: {} })).status, 403);
+      assert.equal((await api(`/users/${TARGET}`, { method: 'DELETE' })).status, 403);
+    });
+  }
+});
+
+test('PHN and Health Supervisor personnel directories pass through only their managed scope', async () => {
+  for (const { role, expectedRole, municipalityId, barangayId } of [
+    { role: 'phn', expectedRole: 'health_supervisor', municipalityId: MUNICIPALITY, barangayId: null },
+    { role: 'health_supervisor', expectedRole: 'bhw', municipalityId: MUNICIPALITY, barangayId: BARANGAY },
+  ]) {
+    let received;
+    await harness({ role, repo: {
+      listProfiles: async (filters) => { received = filters; return { rows: [], total: 0 }; },
+    } }, async ({ api }) => {
+      const result = await api(`/users?role=${expectedRole}`);
+      assert.equal(result.status, 200);
+      assert.equal(received.role, expectedRole);
+      assert.equal(received.personnelOnly, true);
+      assert.equal(received.municipalityId, municipalityId);
+      assert.equal(received.barangayId, barangayId);
+      assert.deepEqual(received.roles, role === 'phn' ? ['health_supervisor', 'rhu_personnel'] : ['bhw']);
     });
   }
 });

@@ -721,7 +721,7 @@ function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onC
 /* Invite / edit account modal                                               */
 /* ------------------------------------------------------------------------- */
 
-function AccountModal({ initial, options, busy, error, actorId, canManageRoles, canEdit, personnelOnly, onClose, onSave }) {
+function AccountModal({ initial, options, busy, error, actorId, canManageRoles, canEdit, personnelOnly, delegated = false, allowedRoles = [], fixedRole = null, fixedMunicipalityId = null, fixedBarangayId = null, onClose, onSave }) {
   const isNew = !initial;
   const [form, setForm] = useState(() => ({
     name: initial?.name || "",
@@ -729,9 +729,9 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     contact: initial?.contact || "",
     position: initial?.position || "",
     licenseNo: initial?.licenseNo || "",
-    role: initial?.roleId || "phn",
-    municipalityId: initial?.municipalityId || "",
-    barangayId: initial?.barangayId || "",
+    role: initial?.roleId || fixedRole || allowedRoles[0] || "phn",
+    municipalityId: initial?.municipalityId || fixedMunicipalityId || "",
+    barangayId: initial?.barangayId || fixedBarangayId || "",
     facilityId: initial?.facilityId || "",
     rhuStations: Array.isArray(initial?.rhuStations) ? initial.rhuStations : [],
   }));
@@ -748,7 +748,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
   const facilityScoped = role === "rhu_personnel";
   const municipalityScoped = role === "mho" || role === "phn";
   const piliMunicipality = options.municipalities.find((item) => item.name.trim().toLowerCase() === "pili");
-  const selectedMunicipalityId = isNew && personnel ? piliMunicipality?.id || "" : form.municipalityId;
+  const selectedMunicipalityId = isNew && personnel ? fixedMunicipalityId || piliMunicipality?.id || "" : form.municipalityId;
   const visibleBarangays = useMemo(
     () => options.barangays.filter((item) => !selectedMunicipalityId || item.municipalityId === selectedMunicipalityId),
     [options.barangays, selectedMunicipalityId],
@@ -798,8 +798,8 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     if (!form.name.trim() || form.name.trim().length > 120) next.name = "Enter a name of 1–120 characters.";
     if (isNew && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) next.email = "Enter a valid email address.";
     if (isNew && personnel && !/^09\d{9}$/.test(form.contact)) next.contact = "Enter exactly 11 digits starting with 09.";
-    if (isNew && personnel && !piliMunicipality) next.municipalityId = "The Pili municipality is unavailable.";
-    if (!role || ((isNew || role !== initial.roleId) && (!options.roles.some((item) => item.id === role) || (personnelOnly && !personnel)))) next.role = "Select an available account role.";
+    if (isNew && personnel && !selectedMunicipalityId) next.municipalityId = "Your municipality assignment is unavailable.";
+    if (!role || ((isNew || role !== initial.roleId) && (!options.roles.some((item) => item.id === role) || (personnelOnly && !personnel) || (delegated && !allowedRoles.includes(role))))) next.role = "Select an available account role.";
     if (!isNew && role !== initial.roleId && (!canManageRoles || residentRole)) next.role = "Role changes are not allowed for this account.";
     if (!isNew && Object.keys(coveragePatch).length > 0 && !canManageRoles) next.form = "Assignment changes are not allowed for this account.";
     if (assignmentChanged && barangayScoped && !form.barangayId) next.barangayId = "Select a barangay.";
@@ -823,6 +823,11 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
         licenseNo: form.licenseNo.trim(),
         role: form.role,
       };
+      if (delegated) {
+        payload.municipalityId = fixedMunicipalityId || selectedMunicipalityId;
+        if (fixedRole) payload.role = fixedRole;
+        if (fixedBarangayId) payload.barangayId = fixedBarangayId;
+      }
       preparation.current = true;
       setPreparing(true);
       try {
@@ -903,21 +908,21 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
             <Field label="License number" htmlFor="account-license">
               <input id="account-license" value={form.licenseNo} onChange={(event) => change("licenseNo", event.target.value)} className={inputCls()} />
             </Field>
-            <Field label="Role" htmlFor="account-role" required error={errors.role} hint={residentRole ? "Resident identities are managed through registration." : !canManageRoles && !isNew ? "Role changes are not allowed for this account." : undefined}>
+            <Field label="Role" htmlFor="account-role" required error={errors.role} hint={fixedRole ? "Your account can create BHW accounts only." : delegated && !isNew ? "Role is fixed for existing personnel accounts." : residentRole ? "Resident identities are managed through registration." : !canManageRoles && !isNew ? "Role changes are not allowed for this account." : undefined}>
               <select
                 id="account-role"
                 value={form.role}
                 onChange={(event) => change("role", event.target.value)}
-                disabled={!canManageRoles || residentRole}
+                disabled={!canManageRoles || residentRole || Boolean(fixedRole) || (delegated && !isNew)}
                 className={`${inputCls(errors.role)} disabled:cursor-not-allowed disabled:opacity-70`}
               >
-                {options.roles.filter((item) => item.id !== "resident" && item.id !== "resident-limited" && (!personnelOnly || isPersonnelRole(item.id))).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                {options.roles.filter((item) => item.id !== "resident" && item.id !== "resident-limited" && (!personnelOnly || isPersonnelRole(item.id)) && (!delegated || allowedRoles.includes(item.id))).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 {residentRole && <option value={initial.roleId}>{roleLabel(initial.roleId)}</option>}
               </select>
             </Field>
             {isNew && personnel ? (
               <Field label="Municipality" htmlFor="account-municipality" required error={errors.municipalityId}>
-                <input id="account-municipality" value="Pili" readOnly disabled className={`${inputCls(errors.municipalityId)} cursor-not-allowed bg-slate-50 opacity-70`} />
+                <input id="account-municipality" value={options.municipalities.find((item) => item.id === selectedMunicipalityId)?.name || (fixedMunicipalityId ? "Assigned municipality" : "Pili")} readOnly disabled className={`${inputCls(errors.municipalityId)} cursor-not-allowed bg-slate-50 opacity-70`} />
               </Field>
             ) : (municipalityScoped || barangayScoped || facilityScoped) && (
               <Field label="Municipality" htmlFor="account-municipality" required={municipalityScoped} error={errors.municipalityId}>
@@ -930,7 +935,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
             )}
             {barangayScoped && (
               <Field label="Assigned barangay" htmlFor="account-barangay" required error={errors.barangayId}>
-                <select id="account-barangay" value={form.barangayId} onChange={(event) => change("barangayId", event.target.value)} disabled={!canManageRoles} className={inputCls(errors.barangayId)}>
+                <select id="account-barangay" value={fixedBarangayId || form.barangayId} onChange={(event) => change("barangayId", event.target.value)} disabled={!canManageRoles || Boolean(fixedBarangayId)} className={inputCls(errors.barangayId)}>
                   <option value="">Select barangay</option>
                   {initial?.barangayId === form.barangayId && form.barangayId && !visibleBarangays.some((item) => item.id === form.barangayId) && <option value={form.barangayId}>{initial.barangay || "Current barangay"} (existing assignment)</option>}
                   {visibleBarangays.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -1104,7 +1109,7 @@ function AccountDirectory({
 /* Page                                                                      */
 /* ------------------------------------------------------------------------- */
 
-export default function UserManagement({ personnelOnly = false }) {
+export default function UserManagement({ personnelOnly = false, delegated = false, embedded = false }) {
   const { toast: notify } = useToast();
   const { navItem } = /** @type {{ navItem?: { label: string, tabs: Array<{ label: string, icon: string, path: string }> } }} */ (
     useOutletContext() || {}
@@ -1112,11 +1117,17 @@ export default function UserManagement({ personnelOnly = false }) {
   const { user: currentUser } = useAuth();
   const { can } = usePermissions();
   const isAdmin = currentUser?.role === "admin";
-  const canCreate = isAdmin && can("accounts.create");
-  const canEdit = isAdmin && can("accounts.edit");
+  const isDelegate = delegated && ["phn", "health_supervisor"].includes(currentUser?.role);
+  const canUseManagement = isAdmin || isDelegate;
+  const allowedRoles = currentUser?.role === "phn" ? ["health_supervisor", "rhu_personnel"] : currentUser?.role === "health_supervisor" ? ["bhw"] : [];
+  const fixedRole = currentUser?.role === "health_supervisor" ? "bhw" : null;
+  const fixedMunicipalityId = isDelegate ? currentUser?.municipalityId || null : null;
+  const fixedBarangayId = currentUser?.role === "health_supervisor" ? currentUser?.barangayId || null : null;
+  const canCreate = isDelegate || (isAdmin && can("accounts.create"));
+  const canEdit = isDelegate || (isAdmin && can("accounts.edit"));
   const canManageRoles = isAdmin && can("accounts.roles.manage");
   const canApprove = isAdmin && can("accounts.personnel.approve");
-  const canDeactivate = isAdmin && can("accounts.deactivate");
+  const canDeactivate = isDelegate || (isAdmin && can("accounts.deactivate"));
   const canResetAccess = isAdmin && can("accounts.access.reset");
   const canDelete = !personnelOnly && isAdmin && can("accounts.delete");
 
@@ -1136,6 +1147,8 @@ export default function UserManagement({ personnelOnly = false }) {
   const [lifecycleFilter, setLifecycleFilter] = useState("");
   const [municipalityFilter, setMunicipalityFilter] = useState("");
   const [barangayFilter, setBarangayFilter] = useState("");
+  const [facilityFilter, setFacilityFilter] = useState("");
+  const [stationFilter, setStationFilter] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [modalTarget, setModalTarget] = useState(null);
@@ -1163,7 +1176,7 @@ export default function UserManagement({ personnelOnly = false }) {
   };
 
   const loadSummary = useCallback(async () => {
-    if (!isAdmin) { setSummaryLoading(false); return; }
+    if (!canUseManagement) { setSummaryLoading(false); return; }
     setSummaryLoading(true);
     try {
       const result = await usersApi.summary(personnelOnly ? { personnelOnly: true } : undefined);
@@ -1174,10 +1187,10 @@ export default function UserManagement({ personnelOnly = false }) {
     } finally {
       setSummaryLoading(false);
     }
-  }, [isAdmin, personnelOnly]);
+  }, [canUseManagement, personnelOnly]);
 
   const load = useCallback(async () => {
-    if (!isAdmin) { setLoading(false); return; }
+    if (!canUseManagement) { setLoading(false); return; }
     const sequence = ++requestSequence.current;
     setLoading(true);
     setLoadError("");
@@ -1191,6 +1204,8 @@ export default function UserManagement({ personnelOnly = false }) {
         lifecycleState: lifecycleFilter,
         municipalityId: municipalityFilter,
         barangayId: barangayFilter,
+        facilityId: facilityFilter,
+        rhuStation: stationFilter,
         limit: pageSize,
         offset: page * pageSize,
       });
@@ -1212,15 +1227,15 @@ export default function UserManagement({ personnelOnly = false }) {
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [isAdmin, personnelOnly, query, roleFilter, statusFilter, approvalFilter, lifecycleFilter, municipalityFilter, barangayFilter, page]);
+  }, [canUseManagement, personnelOnly, query, roleFilter, statusFilter, approvalFilter, lifecycleFilter, municipalityFilter, barangayFilter, facilityFilter, stationFilter, page]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canUseManagement) return;
     usersApi.options()
       .then((result) => setOptions({ roles: [], municipalities: [], barangays: [], facilities: [], rhuStations: [], ...result }))
       .catch((error) => setOptionsError(error?.message || "Unable to load account assignment options."));
     void loadSummary();
-  }, [isAdmin, loadSummary]);
+  }, [canUseManagement, loadSummary]);
 
   useEffect(() => {
     const timer = window.setTimeout(load, 250);
@@ -1232,7 +1247,7 @@ export default function UserManagement({ personnelOnly = false }) {
     [options.barangays, municipalityFilter],
   );
 
-  const hasActiveFilters = Boolean(query || roleFilter || statusFilter || approvalFilter || lifecycleFilter || municipalityFilter || barangayFilter);
+  const hasActiveFilters = Boolean(query || roleFilter || statusFilter || approvalFilter || lifecycleFilter || municipalityFilter || barangayFilter || facilityFilter || stationFilter);
 
   const resetFilters = () => {
     setQuery("");
@@ -1242,6 +1257,8 @@ export default function UserManagement({ personnelOnly = false }) {
     setLifecycleFilter("");
     setMunicipalityFilter("");
     setBarangayFilter("");
+    setFacilityFilter("");
+    setStationFilter("");
     setPage(0);
   };
 
@@ -1261,7 +1278,7 @@ export default function UserManagement({ personnelOnly = false }) {
         if (!supabase) throw new Error("Account creation requires a configured, verified Supabase session.");
         const { data: auth, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
-        if (!auth?.session?.access_token || auth.session.user?.id !== creationOperation?.actorId) throw new Error("The administrator session changed. Sign in to the original account and retry this creation request.");
+        if (!auth?.session?.access_token || auth.session.user?.id !== creationOperation?.actorId) throw new Error("The signed-in account changed. Sign in to the original account and retry this creation request.");
         result = await usersApi.create(data, { headers: { Authorization: `Bearer ${auth.session.access_token}` } });
       }
       else if (!modalTarget) return;
@@ -1358,6 +1375,13 @@ export default function UserManagement({ personnelOnly = false }) {
 
   const buildActions = (row) => {
     const isSelf = row.id === currentUser?.id;
+    if (isDelegate) return [
+      { key: "view", label: "View details", icon: Eye, onClick: () => setDetailsTarget(row) },
+      canEdit && { key: "edit", label: "Edit account", icon: Pencil, onClick: () => { setActionError(""); setModalTarget(row); } },
+      canDeactivate && !isSelf && (row.statusId === "disabled"
+        ? { key: "enable", label: "Reactivate account", icon: UserCheck, onClick: () => setConfirm({ kind: "enable", target: row }) }
+        : { key: "disable", label: "Deactivate account", icon: Ban, onClick: () => setConfirm({ kind: "disable", target: row }) }),
+    ].filter(Boolean);
     const personnel = Boolean(personnelState(row));
     const lifecycle = personnelActions(row, { isAdmin, isSelf, canApprove, canDeactivate, canResetAccess }).map((action) => ({
       key: action,
@@ -1394,18 +1418,18 @@ export default function UserManagement({ personnelOnly = false }) {
   const showEmpty = !loading && !loadError && users.length === 0;
 
 
-  if (!isAdmin) return <Card className="p-5"><p className="text-sm text-brand-danger" role="alert">Account management is available only to system administrators.</p></Card>;
+  if (!canUseManagement) return <Card className="p-5"><p className="text-sm text-brand-danger" role="alert">Account management is not available for this account.</p></Card>;
 
   return (
     <>
-      <PageHeader
+      {!embedded && <PageHeader
         management
-        crumbs={["Admin", personnelOnly ? "Health Personnel Management" : "User Management"]}
+        crumbs={[isAdmin ? "Admin" : currentUser?.role === "phn" ? "PHN" : "BHS", personnelOnly ? "Health Personnel Management" : "User Management"]}
         title={personnelOnly ? "Health Personnel Management" : "User Management"}
         subtitleClassName="text-[#C4D2E0]"
         subtitle={
           personnelOnly
-            ? "Manage staff accounts, assignments, and approvals."
+            ? isDelegate ? "Manage health personnel accounts within your assigned service area." : "Manage staff accounts, assignments, and approvals."
             : "Manage staff and resident accounts, roles, coverage, and access."
         }
         meta={
@@ -1418,9 +1442,9 @@ export default function UserManagement({ personnelOnly = false }) {
               : "Accounts"}
           </span>
         }
-      />
+      />}
 
-      <NavTabs item={navItem} compact />
+      {!embedded && <NavTabs item={navItem} compact />}
 
       <SummaryCards
         summary={summary}
@@ -1463,9 +1487,9 @@ export default function UserManagement({ personnelOnly = false }) {
             {hasActiveFilters && (
               <button type="button" onClick={resetFilters} className="h-9 shrink-0 rounded-btn px-2 text-xs font-medium text-brand-blue hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/20">Clear filters</button>
             )}
-            {canCreate && canManageRoles && (
+            {canCreate && (isDelegate || canManageRoles) && (
               <button onClick={() => { setActionError(""); setModalTarget({ isNew: true }); }} disabled={Boolean(optionsError) || options.roles.length === 0} className="ml-auto inline-flex h-9 w-44 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-btn bg-brand-blue px-3 text-sm font-medium text-white hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 disabled:cursor-not-allowed disabled:opacity-60">
-                <Plus className="h-4 w-4" aria-hidden="true" /> {personnelOnly ? "Create Personnel" : "Create Account"}
+                <Plus className="h-4 w-4" aria-hidden="true" /> {personnelOnly ? "Add Health Personnel" : "Create Account"}
               </button>
             )}
           </div>
@@ -1502,20 +1526,34 @@ export default function UserManagement({ personnelOnly = false }) {
                 <option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
               </select>
             </div>}
-            <div className="min-w-0">
+            {!isDelegate && <div className="min-w-0">
               <label htmlFor="filter-municipality" className="mb-1 block text-xs font-medium text-brand-gray">Municipality</label>
               <select id="filter-municipality" value={municipalityFilter} onChange={(event) => { setMunicipalityFilter(event.target.value); setBarangayFilter(""); setPage(0); }} className={selectCls}>
                 <option value="">All municipalities</option>
                 {options.municipalities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
-            </div>
-            <div className="min-w-0">
+            </div>}
+            {(isAdmin || currentUser?.role === "phn") && <div className="min-w-0">
               <label htmlFor="filter-barangay" className="mb-1 block text-xs font-medium text-brand-gray">Barangay</label>
-              <select id="filter-barangay" value={barangayFilter} onChange={(event) => { setBarangayFilter(event.target.value); setPage(0); }} disabled={!municipalityFilter} className={`${selectCls} disabled:cursor-not-allowed disabled:opacity-60`}>
-                <option value="">{municipalityFilter ? "All barangays" : "Select municipality first"}</option>
+              <select id="filter-barangay" value={barangayFilter} onChange={(event) => { setBarangayFilter(event.target.value); setPage(0); }} disabled={!isDelegate && !municipalityFilter} className={`${selectCls} disabled:cursor-not-allowed disabled:opacity-60`}>
+                <option value="">{municipalityFilter || isDelegate ? "All barangays" : "Select municipality first"}</option>
                 {visibleBarangays.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
-            </div>
+            </div>}
+            {personnelOnly && (isAdmin || currentUser?.role === "phn") && <div className="min-w-0">
+              <label htmlFor="filter-facility" className="mb-1 block text-xs font-medium text-brand-gray">RHU facility</label>
+              <select id="filter-facility" value={facilityFilter} onChange={(event) => { setFacilityFilter(event.target.value); setPage(0); }} className={selectCls}>
+                <option value="">All facilities</option>
+                {options.facilities.filter((item) => !municipalityFilter || item.municipalityId === municipalityFilter).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>}
+            {personnelOnly && (isAdmin || currentUser?.role === "phn") && <div className="min-w-0">
+              <label htmlFor="filter-station" className="mb-1 block text-xs font-medium text-brand-gray">RHU station</label>
+              <select id="filter-station" value={stationFilter} onChange={(event) => { setStationFilter(event.target.value); setPage(0); }} className={selectCls}>
+                <option value="">All stations</option>
+                {options.rhuStations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>}
 
           </div>
         </div>
@@ -1565,9 +1603,14 @@ export default function UserManagement({ personnelOnly = false }) {
           busy={busy}
           error={actionError}
           actorId={currentUser?.id}
-          canManageRoles={canManageRoles && modalTarget.id !== currentUser?.id}
+          canManageRoles={isDelegate ? Boolean(modalTarget.isNew) : canManageRoles && modalTarget.id !== currentUser?.id}
           canEdit={modalTarget.isNew ? canCreate : canEdit}
           personnelOnly={personnelOnly}
+          delegated={isDelegate}
+          allowedRoles={allowedRoles}
+          fixedRole={modalTarget.isNew ? fixedRole : null}
+          fixedMunicipalityId={fixedMunicipalityId}
+          fixedBarangayId={modalTarget.isNew ? fixedBarangayId : null}
           onClose={() => { setModalTarget(null); setActionError(""); }}
           onSave={saveAccount}
         />
