@@ -412,7 +412,9 @@ export const createUser = async ({ actor, actorId = actor?.id, input = {}, notif
     await notificationProcessor({ targetId: user.id });
     createdUser = (await repository.getProfileById(user.id)) || createdUser;
     if (createdUser.notification?.status !== 'sent') {
-      throw new ApiError(503, 'The account was provisioned, but temporary-password email delivery could not be confirmed. Retry the same creation request or use the email retry action.');
+      const rawDeliveryCode = String(createdUser.notification?.lastErrorCode || createdUser.notification?.status || '').toUpperCase();
+      const deliveryCode = /^[A-Z0-9_]{1,64}$/.test(rawDeliveryCode) ? rawDeliveryCode : 'DELIVERY_UNCONFIRMED';
+      throw new ApiError(503, `The account was created, but its invitation email was not confirmed (${deliveryCode}). Check the backend email configuration, then retry this same form request. Keep the form open and do not create another account.`);
     }
   }
   return createdUser;

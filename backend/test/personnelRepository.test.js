@@ -65,6 +65,22 @@ test('personnel list sends exact filters and pagination through real Supabase qu
   });
 });
 
+test('delegated personnel list applies its permitted roles without an undefined variable error', async () => {
+  await withTransport(async (url) => {
+    assert.equal(url.pathname, '/rest/v1/profiles');
+    assert.equal(url.searchParams.get('role'), 'in.(health_supervisor,rhu_personnel)');
+    assert.equal(url.searchParams.get('municipality_id'), `eq.${ACTOR}`);
+    return respond([], { count: 0 });
+  }, async () => {
+    const result = await repository.listProfiles({
+      roles: ['health_supervisor', 'rhu_personnel'],
+      municipalityId: ACTOR,
+      personnelOnly: true,
+    });
+    assert.deepEqual(result, { rows: [], total: 0 });
+  });
+});
+
 test('the Resident directory filter includes pending resident identities', async () => {
   await withTransport(async (url) => {
     assert.equal(url.searchParams.get('role'), 'in.(resident,resident-limited)');

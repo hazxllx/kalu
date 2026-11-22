@@ -1950,6 +1950,7 @@ export const supabaseRepository = {
   async listProfiles({
     q = '',
     role = null,
+    roles = null,
     status = null,
     municipalityId = null,
     barangayId = null,

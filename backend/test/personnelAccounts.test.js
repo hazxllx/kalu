@@ -186,7 +186,8 @@ test('unconfirmed temporary-password email delivery is an explicit failure, neve
       input: creation(),
       notificationProcessor: async () => ({ failed: 1 }),
     }), (error) => error.statusCode === 503
-      && /temporary-password email delivery could not be confirmed/i.test(error.message)
+      && /invitation email was not confirmed \(SMTP_RECIPIENT_REJECTED\)/i.test(error.message)
+      && /do not create another account/i.test(error.message)
       && !/password:\s*\S+/i.test(error.message));
     assert.equal(provisioned.profile.must_change_password, true);
     assert.equal(typeof provisioned.temporaryPasswordCiphertext, 'string');
