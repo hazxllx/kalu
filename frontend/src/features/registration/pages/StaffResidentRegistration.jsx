@@ -1,4 +1,4 @@
-﻿import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Loader2 } from "lucide-react";
 import { residentsApi } from "@/services/api";
@@ -10,16 +10,32 @@ import {
 import {
   buildStaffResidentPayload,
   calcStaffRegistrationAge,
+  todayInManila,
   validateStaffResidentForm,
 } from "@/features/registration/lib/staffResidentRegistration";
 import { BARANGAYS } from "@/lib/barangays";
 import { ButtonSelectGroup } from "@/components/system";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/components/ui/use-toast";
 
 const labelClass = "block text-sm font-medium text-brand-ink mb-1.5";
 const inputClass = (error) => `w-full rounded-btn border ${error ? "border-brand-danger" : "border-brand-border"} bg-white px-3 py-2 text-sm placeholder:text-brand-gray focus:outline-none focus:ring-1 focus:ring-brand-blue`;
 const errorClass = "text-xs text-brand-danger mt-1";
+const SERVER_ERROR_FIELDS = [
+  [/first name/i, "firstName"],
+  [/middle name/i, "middleName"],
+  [/last name/i, "lastName"],
+  [/suffix/i, "suffix"],
+  [/date of birth/i, "dob"],
+  [/sex/i, "gender"],
+  [/civil status/i, "civilStatus"],
+  [/mobile|contact number/i, "contact"],
+  [/barangay/i, "barangay"],
+  [/zone/i, "purok"],
+  [/address/i, "street"],
+  [/email/i, "email"],
+];
 
 /**
  * Staff Resident Registration Modal
@@ -35,10 +51,12 @@ const errorClass = "text-xs text-brand-danger mt-1";
 export default function StaffResidentRegistration({ isOpen = true, onClose, onSuccess }) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState(null);
   const [barangayOptions, setBarangayOptions] = useState(BARANGAYS);
+  const submitting = useRef(false);
   
   // Form state matching PHN modal structure
   const [form, setForm] = useState({
@@ -85,7 +103,29 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
   }, [assignedBarangay]);
 
   // Helpers
-  const set = (field) => (value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const set = (field) => (value) => {
+    const nextValue = value?.target ? value.target.value : value;
+    const nextForm = { ...form, [field]: nextValue };
+    setForm((prev) => ({ ...prev, [field]: nextValue }));
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const message = validateStaffResidentForm(nextForm)[field];
+      const nextErrors = { ...prev };
+      if (message) nextErrors[field] = message;
+      else delete nextErrors[field];
+      return nextErrors;
+    });
+  };
+
+  const validateField = (field) => {
+    const message = validateStaffResidentForm(form)[field];
+    setErrors((prev) => {
+      const nextErrors = { ...prev };
+      if (message) nextErrors[field] = message;
+      else delete nextErrors[field];
+      return nextErrors;
+    });
+  };
 
   const handleClose = useCallback(() => {
     if (onClose) {
@@ -97,25 +137,20 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
   
   const onDobChange = (e) => {
     const dob = e.target.value;
-    setForm((prev) => ({
-      ...prev,
-      dob,
-      age: calcStaffRegistrationAge(dob),
-    }));
+    const nextForm = { ...form, dob, age: calcStaffRegistrationAge(dob) };
+    setForm((prev) => ({ ...prev, dob, age: calcStaffRegistrationAge(dob) }));
+    setErrors((prev) => {
+      if (!prev.dob) return prev;
+      const message = validateStaffResidentForm(nextForm).dob;
+      const nextErrors = { ...prev };
+      if (message) nextErrors.dob = message;
+      else delete nextErrors.dob;
+      return nextErrors;
+    });
   };
 
   const onContactChange = (e) => {
-    const val = e.target.value.replace(/\D/g, "");
-    set("contact")(val);
-  };
-
-  const onContactPaste = (e) => {
-    const pasted = e.clipboardData.getData("text");
-    const digits = pasted.replace(/\D/g, "");
-    if (digits.length > 11) {
-      e.preventDefault();
-      setErrors((prev) => ({ ...prev, contact: "Contact number must be exactly 11 digits and start with 09." }));
-    }
+    set("contact")(e.target.value);
   };
 
   // Validation
@@ -123,11 +158,13 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
 
   // Submit
   const handleSubmit = async () => {
+    if (submitting.current) return;
     const stepErrors = validateForm();
     setErrors(stepErrors);
 
     if (Object.keys(stepErrors).length > 0) return;
 
+    submitting.current = true;
     setLoading(true);
     setApiError(null);
 
@@ -155,12 +192,37 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
       });
       setErrors({});
 
+      toast({
+        title: "Resident registered",
+        description: "The resident was added to the directory successfully.",
+      });
       if (onSuccess) onSuccess();
       handleClose();
     } catch (error) {
-      const message = error?.response?.data?.message || error?.message || "Failed to register resident";
+      const response = error?.payload?.error || error?.response?.data?.error || error?.response?.data || {};
+      const message = response.message || error?.message || "Failed to register resident";
+      const details = response.errors || response.details;
+      const serverErrors = {};
+      if (details && !Array.isArray(details) && typeof details === "object") {
+        const fieldMap = {
+          firstName: "firstName", middleName: "middleName", lastName: "lastName",
+          suffix: "suffix", birthDate: "dob", sex: "gender", civilStatus: "civilStatus",
+          cellphoneNo: "contact", barangay: "barangay", zone: "purok",
+          currentAddress: "street", permanentAddress: "street", email: "email",
+        };
+        Object.entries(details).forEach(([key, value]) => {
+          if (fieldMap[key] && typeof value === "string") serverErrors[fieldMap[key]] = value;
+        });
+      } else if (Array.isArray(details)) {
+        details.forEach((detail) => {
+          const field = SERVER_ERROR_FIELDS.find(([pattern]) => pattern.test(String(detail)))?.[1];
+          if (field && !serverErrors[field]) serverErrors[field] = String(detail);
+        });
+      }
+      if (Object.keys(serverErrors).length) setErrors((prev) => ({ ...prev, ...serverErrors }));
       setApiError(message);
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
@@ -211,6 +273,8 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.firstName}
                      onChange={(e) => set("firstName")(e.target.value)}
+                     onBlur={() => validateField("firstName")}
+                     aria-invalid={Boolean(errors.firstName)}
                      placeholder="e.g. Maria"
                      className={inputClass(Boolean(errors.firstName))}
                    />
@@ -222,6 +286,8 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.middleName}
                      onChange={(e) => set("middleName")(e.target.value)}
+                     onBlur={() => validateField("middleName")}
+                     aria-invalid={Boolean(errors.middleName)}
                      placeholder="e.g. Santos"
                      className={inputClass(Boolean(errors.middleName))}
                    />
@@ -233,6 +299,8 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.lastName}
                      onChange={(e) => set("lastName")(e.target.value)}
+                     onBlur={() => validateField("lastName")}
+                     aria-invalid={Boolean(errors.lastName)}
                      placeholder="e.g. Dela Cruz"
                      className={inputClass(Boolean(errors.lastName))}
                    />
@@ -243,6 +311,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                    <select
                      value={form.suffix}
                      onChange={(e) => set("suffix")(e.target.value)}
+                     onBlur={() => validateField("suffix")}
                      className={inputClass(Boolean(errors.suffix))}
                    >
                      <option value="">None</option>
@@ -250,6 +319,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                        <option key={s} value={s}>{s}</option>
                      ))}
                    </select>
+                   {errors.suffix && <p className={errorClass}>{errors.suffix}</p>}
                  </div>
                  <div>
                    <label className={labelClass}>Date of Birth *</label>
@@ -257,6 +327,9 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="date"
                      value={form.dob}
                      onChange={onDobChange}
+                     onBlur={() => validateField("dob")}
+                     max={todayInManila()}
+                     aria-invalid={Boolean(errors.dob)}
                      className={inputClass(Boolean(errors.dob))}
                    />
                    {errors.dob && <p className={errorClass}>{errors.dob}</p>}
@@ -279,6 +352,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      options={SEX_OPTIONS}
                      value={form.gender}
                      onChange={set("gender")}
+                     onBlur={() => validateField("gender")}
                      error={Boolean(errors.gender)}
                    />
                    {errors.gender && <p className={errorClass}>{errors.gender}</p>}
@@ -288,6 +362,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                    <select
                      value={form.civilStatus}
                      onChange={(e) => set("civilStatus")(e.target.value)}
+                     onBlur={() => validateField("civilStatus")}
                      className={inputClass(Boolean(errors.civilStatus))}
                    >
                      <option value="">Select civil status</option>
@@ -314,11 +389,12 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                       type="tel"
                       value={form.contact}
                       onChange={onContactChange}
-                      onPaste={onContactPaste}
+                      onBlur={() => validateField("contact")}
                       placeholder="e.g. 09171234567"
-                      maxLength={11}
-                      inputMode="numeric"
+                      maxLength={20}
+                      inputMode="tel"
                       autoComplete="tel-national"
+                      aria-invalid={Boolean(errors.contact)}
                      className={inputClass(Boolean(errors.contact))}
                    />
                    {errors.contact && <p className={errorClass}>{errors.contact}</p>}
@@ -329,6 +405,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      required
                       value={form.barangay}
                       onChange={set("barangay")}
+                      onBlur={() => validateField("barangay")}
                       options={assignedBarangay ? [assignedBarangay] : barangayOptions}
                       disabled={Boolean(assignedBarangay)}
                      placeholder="Search barangay..."
@@ -343,9 +420,11 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.purok}
                      onChange={(e) => set("purok")(e.target.value)}
+                     onBlur={() => validateField("purok")}
                      placeholder="e.g. Purok 5"
                      className={inputClass(Boolean(errors.purok))}
                    />
+                   {errors.purok && <p className={errorClass}>{errors.purok}</p>}
                  </div>
                  <div>
                    <label className={labelClass}>Street / Sitio</label>
@@ -353,9 +432,11 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.street}
                      onChange={(e) => set("street")(e.target.value)}
+                     onBlur={() => validateField("street")}
                      placeholder="Enter street or sitio"
                      className={inputClass(Boolean(errors.street))}
                    />
+                   {errors.street && <p className={errorClass}>{errors.street}</p>}
                  </div>
                  <div>
                    <label className={labelClass}>House No.</label>
@@ -363,9 +444,11 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.houseNo}
                      onChange={(e) => set("houseNo")(e.target.value)}
+                     onBlur={() => validateField("houseNo")}
                      placeholder="Enter house number"
                      className={inputClass(Boolean(errors.houseNo))}
                    />
+                   {errors.houseNo && <p className={errorClass}>{errors.houseNo}</p>}
                  </div>
                </div>
              </div>
@@ -412,6 +495,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                          type="email"
                          value={form.email}
                          onChange={(e) => set("email")(e.target.value)}
+                         onBlur={() => validateField("email")}
                          placeholder="e.g. resident@example.com"
                          className={inputClass(Boolean(errors.email))}
                        />

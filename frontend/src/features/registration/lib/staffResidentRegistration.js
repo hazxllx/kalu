@@ -1,11 +1,58 @@
 import {
+  CIVIL_STATUSES,
+  NAME_SUFFIXES,
+  SEX_OPTIONS,
+  TEXT_LIMITS,
   email as validateEmail,
-  strictMobile as validateStrictMobile,
-  required,
-  personName,
+  enumValue,
   validateFields,
-  dateOfBirth,
+  maxLength,
 } from '../../../utils/validation/index.js';
+
+const normalizeStaffMobile = (value) => {
+  const compact = String(value || '').trim().replace(/[\s().-]/g, '');
+  if (/^09\d{9}$/.test(compact)) return compact;
+  if (/^\+639\d{9}$/.test(compact)) return `0${compact.slice(3)}`;
+  return null;
+};
+
+const validateStaffName = (value, label, isRequired) => {
+  const name = String(value || '').trim();
+  if (!name) return isRequired ? `${label} is required.` : '';
+  if (name.length > TEXT_LIMITS.short) return `${label} is too long (max ${TEXT_LIMITS.short} characters).`;
+  if (!/^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)*$/u.test(name)) {
+    return `${label} can contain letters, spaces, hyphens, and apostrophes only.`;
+  }
+  return '';
+};
+
+export const todayInManila = (now = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
+
+const validateStaffDateOfBirth = (value) => {
+  const date = String(value || '').trim();
+  if (!date) return 'Date of birth is required.';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'Date of birth is invalid.';
+  const [year, month, day] = date.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) return 'Date of birth is invalid.';
+  if (date > todayInManila()) return 'Date of birth cannot be in the future.';
+  const age = calcStaffRegistrationAge(date);
+  if (!age) return 'Date of birth is not a valid age (maximum 120 years).';
+  return '';
+};
 
 /**
  * Compute age in completed years from a YYYY-MM-DD birth date string.
@@ -78,18 +125,27 @@ export function composeStaffResidentAddress(form = {}) {
  */
 export function validateStaffResidentForm(form = {}) {
   return validateFields(form, {
-    firstName: (v) => personName(v, { label: 'First name', isRequired: true }),
-    middleName: (v) => personName(v, { label: 'Middle name', isRequired: false }),
-    lastName: (v) => personName(v, { label: 'Last name', isRequired: true }),
-    dob: (v) => dateOfBirth(v, { label: 'Date of birth', isRequired: true }),
-    gender: (v) => required(v, 'Sex'),
-    civilStatus: (v) => required(v, 'Civil status'),
-    barangay: (v) => required(v, 'Barangay'),
-    contact: (v) => validateStrictMobile(v, { label: 'Contact number', isRequired: false }),
-    email: (v, values) => validateEmail(v, {
-      label: 'Email',
-      isRequired: Boolean(values?.createAccount),
-    }),
+    firstName: (v) => validateStaffName(v, 'First name', true),
+    middleName: (v) => validateStaffName(v, 'Middle name', false),
+    lastName: (v) => validateStaffName(v, 'Last name', true),
+    suffix: (v) => enumValue(v || '', NAME_SUFFIXES, { label: 'suffix', isRequired: false }),
+    dob: validateStaffDateOfBirth,
+    gender: (v) => enumValue(v, SEX_OPTIONS, { label: 'sex' }),
+    civilStatus: (v) => enumValue(v, CIVIL_STATUSES, { label: 'civil status' }),
+    barangay: (v) => (String(v || '').trim() ? '' : 'Barangay is required.'),
+    contact: (v) => {
+      if (!String(v || '').trim()) return '';
+      return normalizeStaffMobile(v)
+        ? ''
+        : 'Enter a valid PH mobile number (09XXXXXXXXX or +639XXXXXXXXX).';
+    },
+    purok: (v) => maxLength(v, TEXT_LIMITS.medium, 'Purok/Zone'),
+    street: (v) => maxLength(v, TEXT_LIMITS.address, 'Street / Sitio'),
+    houseNo: (v) => maxLength(v, TEXT_LIMITS.short, 'House number'),
+    email: (v, values) => {
+      if (!values?.createAccount && !String(v || '').trim()) return '';
+      return validateEmail(v, { label: 'Email', isRequired: Boolean(values?.createAccount) });
+    },
   });
 }
 
@@ -108,7 +164,7 @@ export function buildStaffResidentPayload(form = {}) {
     sex: form.gender,
     civilStatus: form.civilStatus,
     barangay: form.barangay,
-    cellphoneNo: form.contact ? String(form.contact).trim() : undefined,
+    cellphoneNo: form.contact ? normalizeStaffMobile(form.contact) || String(form.contact).trim() : undefined,
     currentAddress: address || undefined,
     permanentAddress: address || undefined,
     createLoginAccount: Boolean(form.createAccount),

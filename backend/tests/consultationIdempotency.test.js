@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { beforeEach, afterEach } from 'node:test';
+import { randomUUID } from 'node:crypto';
 import { create, update, get, list, validateCreateReplay, toVisit, fromVisit, syncConsultationFollowUp } from '../src/services/consultations.service.js';
 import fileRepository from '../src/repositories/fileRepository.js';
 import store from '../src/repositories/fileStore.js';
@@ -17,7 +18,8 @@ const PAYLOAD = {
   recordedAt: '2026-11-05T01:43:12.000Z', chiefComplaint: 'Test complaint',
   findings: 'First finding\nDiagnosis: text inside a finding', diagnosis: 'Test assessment',
   treatmentGiven: 'Treatment\nMedication: text inside treatment', medicationPrescribed: 'Legacy medicine text',
-  medications: [{ genericName: 'Test medicine', strength: '1 mg', instructions: 'Test instruction' }],
+  medications: [{ genericName: 'Test medicine', strength: '1 mg', dose: '1 tablet', route: 'Oral', frequency: 'Once daily', duration: '3 days', quantity: '3', instructions: 'Test instruction' }],
+  clinicalIndicators: { dangerSignsReviewed: true },
   adviceGiven: 'Advice\nNext visit: text inside advice', remarks: 'Original clinical history',
   followUpRequired: 'Yes', nextVisitDate: '2026-11-12', referralRequired: 'Yes',
   bloodPressure: '120/80', pulseRate: '70', respiratoryRate: '18', temperature: '36.7',
@@ -180,15 +182,11 @@ test('clinical delimiters, exact date/time, medications, resident and authoritat
   assert.equal(toVisit({ consultationDate: PAYLOAD.consultationDate, pulseRate: '', height: '', weight: '' }, USER, PAYLOAD.residentId).vitals.hr, null);
 });
 
-test('consultations save and reload with either or both clinical text fields empty', async () => {
+test('findings are required on new consultations but diagnosis and treatment remain optional', async () => {
   const { findings, diagnosis, treatmentGiven, remarks, followUpRequired, nextVisitDate, referralRequired, ...base } = PAYLOAD;
   const cases = [
-    [{ clinicalFindingsDiagnosis: '', treatmentGiven }, '', '', treatmentGiven],
     [{ findings, treatmentGiven: '' }, findings, '', ''],
-    [{ clinicalFindingsDiagnosis: '', treatmentGiven: '' }, '', '', ''],
-    [{ clinicalFindingsDiagnosis: null, treatmentGiven: null }, '', '', ''],
-    [{}, '', '', ''],
-    [{ clinicalFindingsDiagnosis: `Diagnosis: ${diagnosis}` }, '', diagnosis, ''],
+    [{ findings, diagnosis: '', treatmentGiven }, findings, '', treatmentGiven],
   ];
   for (const [index, [fields, expectedFindings, expectedDiagnosis, expectedTreatment]] of cases.entries()) {
     const clientOperationKey = `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${index}`;
@@ -204,16 +202,20 @@ test('consultations save and reload with either or both clinical text fields emp
   }
   assert.equal(store.data.visits.length, cases.length);
   assert.equal(store.data.followUps?.length ?? 0, 0);
+  for (const fields of [{}, { findings: '' }, { clinicalFindingsDiagnosis: `Diagnosis: ${diagnosis}` }]) {
+    await assert.rejects(create(input({ payload: { ...base, ...fields, clientOperationKey: randomUUID() } })),
+      (error) => error.statusCode === 422 && Boolean(error.details.findings));
+  }
 });
 
 test('editing through the simplified form preserves historical follow-up, referral and remarks', async () => {
   const saved = await create(input());
   const { followUpRequired, nextVisitDate, referralRequired, remarks, findings, diagnosis, ...base } = PAYLOAD;
   const updated = await update(edit({
-    payload: { ...base, consultationDate: '2026-11-13', clinicalFindingsDiagnosis: '', treatmentGiven: null },
+    payload: { ...base, consultationDate: '2026-11-13', findings: 'Updated clinical findings', treatmentGiven: null },
     syncFollowUp: () => assert.fail('Updating other fields must not reschedule an existing follow-up'),
   }));
-  assert.equal(updated.findings, '');
+  assert.equal(updated.findings, 'Updated clinical findings');
   assert.equal(updated.treatmentGiven, '');
   const loaded = await get({ ...input(), id: saved.id });
   assert.equal(loaded.followUpRequired, followUpRequired);

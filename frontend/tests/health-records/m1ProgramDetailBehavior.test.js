@@ -7,6 +7,7 @@ import { transform } from 'esbuild';
 import { M1_INDICATORS } from '../../../backend/src/config/m1Catalog.js';
 import { getProgram, getBreadcrumbPath } from '../../src/features/health-records/lib/m1ProgramConfig.js';
 import * as reportingPeriod from '../../src/features/health-records/lib/reportingPeriod.js';
+import { getManilaDateTime } from '../../../shared/consultationClinical.js';
 
 const source = await readFile(new URL('../../src/features/health-records/pages/M1ProgramDetailTemplate.jsx', import.meta.url), 'utf8');
 const maternal = M1_INDICATORS.filter((row) => row.section === 'B');
@@ -21,6 +22,7 @@ const response = () => ({
 let serial = 0;
 async function mount(load = async () => response(), drill = async () => ({ records: [], count: 0 }), programId = 'prenatal') {
   const calls = [];
+  let user = { id: 'supervisor-a', role: 'health_supervisor', barangayId: 'barangay-a' };
   const Panel = ({ children, ...props }) => React.createElement('div', props, children);
   const Empty = () => null;
   const ErrorState = ({ title, message, onRetry }) => React.createElement('div', null, title, message, onRetry && React.createElement('button', { onClick: onRetry }, 'Try Again'));
@@ -35,9 +37,9 @@ async function mount(load = async () => response(), drill = async () => ({ recor
   const M1ReportingPeriod = ({ period, onPeriodChange }) => React.createElement('div', null, ['monthly', 'quarterly', 'annual'].map((value) => React.createElement('button', { key: value, 'aria-pressed': period === value, onClick: () => onPeriodChange(value) }, value[0].toUpperCase() + value.slice(1))));
   const TclTabs = ({ tabs, active, onChange }) => React.createElement('div', { role: 'tablist' }, tabs.map((tab) => React.createElement('button', { key: tab.value, role: 'tab', 'aria-selected': active === tab.value, onClick: () => onChange(tab.value) }, tab.label)));
   const deps = {
-    ...reportingPeriod, periodLabel: reportingPeriod.periodLabel,
+    ...reportingPeriod, periodLabel: reportingPeriod.periodLabel, getManilaDateTime,
     useSearchParams: () => [new URLSearchParams(), () => {}], getProgram, getBreadcrumbPath,
-    useAuth: () => ({ user: { id: 'supervisor-a' } }),
+    useAuth: () => ({ user }),
     M1PageHeader: ({ title }) => React.createElement('h1', null, title), M1ReportingPeriod, M1IndicatorTable, M1DrilldownDialog,
     Card: Panel, ErrorState, StatusBadge: ({ value }) => React.createElement('span', null, value), DataTable,
     TablePagination: Empty, SkeletonTable: Empty, TclEmptyState: ({ title, description }) => React.createElement('div', null, title, description), TclTabs,
@@ -63,6 +65,7 @@ async function mount(load = async () => response(), drill = async () => ({ recor
   await act(async () => { renderer = create(React.createElement(Page)); });
   return {
     renderer, calls,
+    setUser: async (value) => { user = value; await act(async () => { renderer.update(React.createElement(Page)); }); },
     text: () => JSON.stringify(renderer.toJSON()),
     click: (label) => act(async () => {
       renderer.root.findAllByType('button').find((button) => button.children.includes(label)).props.onClick();
@@ -101,19 +104,69 @@ test('maternal catalog rows render once in their own subsection with original na
     assert.doesNotMatch(page.text(), /Indicator B[123]_/);
     assert.doesNotMatch(page.text(), /Clinical definition and workbook compatibility notice/);
     assert.doesNotMatch(page.text(), /Reporting notes/);
-    assert.doesNotMatch(page.text(), /Legacy catalog measures retain/);
-    assert.doesNotMatch(page.text(), /Records include maternal cases contributing/);
+    assert.match(page.text(), /Indicator definitions: legacy M1 catalog/);
+    assert.match(page.text(), /Workbook mapping is unverified/);
+    assert.match(page.text(), /Legacy catalog measures retain/);
+    assert.match(page.text(), /Records include maternal cases contributing/);
+  } finally { page.close(); }
+});
+
+test('prenatal activity explanations distinguish recorded contacts from unique residents and attainment', async () => {
+  const data = response();
+  data.summary = { label: 'Unique prenatal residents seen', total: 1, visitCount: 5 };
+  const page = await mount(async () => data);
+  try {
+    assert.match(page.text(), /Completed prenatal source records:/);
+    assert.match(page.text(), /Unique residents seen are separate from B1_1 attainment on the fourth distinct contact day/);
+    assert.match(page.text(), /not every later visit/);
+  } finally { page.close(); }
+});
+
+test('saved consultation and TCL evidence stays separate from the server unique-resident count', async () => {
+  const data = response();
+  data.summary = { label: 'Unique prenatal residents seen', total: 1, visitCount: 2 };
+  data.records = [{ resident_id: 'RES-actual', resident: { first_name: 'Ana', middle_name: 'Reyes', last_name: 'Cruz' }, episode_key: 'pregnancy-real', episode_identity_status: 'identified' }];
+  data.visits = [
+    { id: 'VIS-actual', source: 'visits', resident_id: 'RES-actual', visit_date: '2026-11-01', visit_type: 'prenatal', health_service_name: 'Registered Maternal Care', eligible: true, episode_key: 'pregnancy-real', record: { id: 'VIS-actual' } },
+    { id: 'TCL-actual', source: 'maternal_visits', resident_id: 'RES-actual', visit_date: '2026-11-02', visit_type: 'prenatal', eligible: true, episode_key: 'pregnancy-real', record: { id: 'TCL-actual' } },
+  ];
+  data.unattributedVisits = [{ id: 'VIS-unverified', source: 'visits', resident_id: 'RES-actual', visit_type: 'prenatal', attributionStatus: 'service_scope_unverified' }];
+  const page = await mount(async () => data);
+  try {
+    for (const value of ['Ana Reyes Cruz', 'Registered Maternal Care', 'VIS-actual', 'TCL-actual', 'VIS-unverified', 'Attribution review required']) assert.ok(page.text().includes(value), value);
+    assert.equal(page.renderer.root.findAllByType('table').length, 2);
+    assert.equal(data.summary.total, 1, 'presentation never recalculates the official unique count from visits');
+  } finally { page.close(); }
+});
+
+test('same-account scope changes hide previous resident evidence while the next report is pending', async () => {
+  let resolveNext;
+  let requests = 0;
+  const first = response();
+  first.records = [{ resident_id: 'RES-private', resident: { first_name: 'Private', last_name: 'Resident' } }];
+  first.visits = [{ id: 'VIS-private', source: 'visits', resident_id: 'RES-private', visit_date: '2026-11-01', visit_type: 'prenatal', eligible: true }];
+  const page = await mount(() => ++requests === 1 ? first : new Promise((resolve) => { resolveNext = resolve; }));
+  try {
+    assert.match(page.text(), /Private Resident/);
+    await page.setUser({ id: 'supervisor-a', role: 'health_supervisor', barangayId: 'barangay-b' });
+    assert.doesNotMatch(page.text(), /Private Resident|VIS-private/);
+    await act(async () => { resolveNext({ ...response(), visits: [], unattributedVisits: [] }); });
+    assert.doesNotMatch(page.text(), /Private Resident|VIS-private/);
+    assert.equal(page.calls.length, 2);
   } finally { page.close(); }
 });
 
 test('monthly, quarterly and annual controls issue exactly one correctly shaped request', async () => {
   const page = await mount();
   try {
-    assert.equal(page.calls[0].month, new Date().getMonth() + 1);
+    const today = getManilaDateTime().date;
+    const year = Number(today.slice(0, 4));
+    const month = Number(today.slice(5, 7));
+    assert.equal(page.calls[0].month, month);
     await page.click('Quarterly');
-    assert.deepEqual(page.calls[1], { period: 'quarterly', year: new Date().getFullYear(), quarter: reportingPeriod.quarterOfMonth0(new Date().getMonth()) });
+    assert.deepEqual(page.calls[1], { period: 'quarterly', year, quarter: reportingPeriod.quarterOfMonth0(month - 1) });
     await page.click('Annual');
-    assert.deepEqual(page.calls[2], { period: 'annual', year: new Date().getFullYear() });
+    assert.deepEqual(page.calls[2], { period: 'annual', year });
     assert.equal(page.calls.length, 3);
   } finally { page.close(); }
 });

@@ -7,9 +7,9 @@
  * parent/child hierarchy, plus the per-section column scheme (age-group,
  * Male/Female, or Total-only). Contains NO values and NO highlight colours.
  *
- * `code` links a row to a KALUSAGAP M1 catalog indicator so the renderer fills it
- * from the live aggregation (`m1Api.monthly` → `byCode`). Rows the official form
- * defines but KALUSAGAP has no backing indicator for print blank (never invented).
+ * `code` identifies a legacy catalog source, not an approved workbook crosswalk.
+ * Incompatible rows are explicitly unverified and must not receive legacy totals.
+ * Rows without a verified backing value print blank, never an invented zero.
  */
 
 // ---- shared column schemes ----------------------------------------------
@@ -54,6 +54,7 @@ const section = (label) => ({ type: "section", label });
 const group = (label) => ({ type: "group", label });
 const twoCol = (left, right) => ({ type: "split", left, right });
 const r = (code, label, indent = 0) => ({ code: code || null, label, indent });
+const unverified = (code, label, remarks, indent = 0) => ({ ...r(code, label, indent), mappingStatus: "unverified", remarks });
 const lbl = (label, indent = 0) => ({ code: null, label, indent });
 // Pure category-heading row: shows the label but keeps its numeric cells empty
 // (matches the merged heading rows on the official sheet).
@@ -122,7 +123,7 @@ const prenatalLeft = [
   group("PRENATAL CARE SERVICES"),
   wra([
     hd("1. 8ANC"),
-    r("B1_1", "1a. No. of women who delivered and completed at least 8ANC = (a1+a2)", 1),
+    unverified("B1_1", "1a. No. of women who delivered and completed at least 8ANC = (a1+a2)", "Unverified: legacy B1_1 counts 4 prenatal check-ups, not women who delivered and completed 8ANC. Approval required.", 1),
     lbl("a1. No. of women who delivered and provided 1st to 8th ANC on schedule (Resident)", 2),
     lbl("a2. No. of women who delivered and completed at least 8ANC TRANS-IN from other LGUs", 2),
     lbl("1b. No. of women who delivered and who were tracked during pregnancy = (b1+b2)", 1),
@@ -195,7 +196,7 @@ const postpartumLeft = [
   group("POSTPARTUM CARE"),
   wra([
     hd("1. 4PNC"),
-    r("B3_28", "1a. Total No. of women who delivered and completed at least 4PNC = (a1+a2)", 1),
+    unverified("B3_28", "1a. Total No. of women who delivered and completed at least 4PNC = (a1+a2)", "Unverified: legacy B3_28 counts 2 postpartum check-ups, not women who delivered and completed 4PNC. Approval required.", 1),
     lbl("a1. No. of women who delivered and provided 1st to 4th PNC on schedule (Resident)", 2),
     lbl("a2. No. of women delivered and completed at least 4PNC TRANS-IN from other LGUs", 2),
     lbl("1b. Total No. of women due for PNC = (b1+b2)", 1),

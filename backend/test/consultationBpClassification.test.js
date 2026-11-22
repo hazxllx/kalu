@@ -6,7 +6,7 @@ import { classifyBloodPressure as authoritativeClassify } from '../src/config/bp
 
 // The legacy label helper and complete snapshots share the same classifier.
 
-test('values below both normal ceilings use the requested Normal category', () => {
+test('below-range readings use Normal while retaining the shared classification', () => {
   assert.equal(legacyClassify('85/55'), 'Normal');
 });
 
@@ -33,11 +33,11 @@ test('legacy label always equals the authoritative label (single source of truth
   }
 });
 
-test('the complete merged clinical field and reconstructed database vitals retain emergency classification', async () => {
+test('the complete merged clinical field and reconstructed database vitals retain crisis classification', async () => {
   const visit = toVisit({ bloodPressure: '185/125', clinicalFindingsDiagnosis: 'Alert\nDiagnosis: Chest pain' }, { id: 'test' }, 'resident');
-  assert.equal(visit.bpClassification.code, 'emergency');
+  assert.equal(visit.bpClassification.code, 'crisis');
   const restored = await fromVisit({ ...visit, vitals: { bp: '185/125' } }, null);
   assert.equal(restored.vitals.systolic, 185);
   assert.equal(restored.vitals.diastolic, 125);
-  assert.equal(restored.vitals.bloodPressureCategory, 'Hypertensive Emergency');
+  assert.equal(restored.vitals.bloodPressureCategory, 'Hypertensive Crisis');
 });

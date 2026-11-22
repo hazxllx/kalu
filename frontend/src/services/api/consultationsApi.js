@@ -11,6 +11,7 @@ import { api } from './apiClient.js';
  */
 export const consultationsApi = {
   list: (params, options = {}) => api.get('/consultations', { ...options, params }),
+  clinicalContext: (params, options = {}) => api.get('/consultations/clinical-context', { ...options, params }),
   get: (id, options) => api.get(`/consultations/${id}`, options),
   create: (payload, options) => api.post('/consultations', payload, options),
   update: (id, payload, options) => api.put(`/consultations/${id}`, payload, options),

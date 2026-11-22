@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import test, { beforeEach, afterEach } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
+import { getManilaDateTime, calculateConsultationBmi } from '../../../shared/consultationClinical.js';
 import { db, setOfflineOwnerResolver } from '../../src/services/offline/db.js';
 import { resetCachedKey } from '../../src/services/offline/crypto.js';
 import { getOperation, requeueOperation } from '../../src/services/offline/outbox.js';
@@ -25,11 +26,14 @@ const DATA = { residentId: 'RES-TEST', consultationDate: '2026-11-05', consultat
   findings: 'Finding\nDiagnosis: text inside finding', diagnosis: 'Test diagnosis',
   treatmentGiven: 'Treatment\nMedication: text inside treatment', adviceGiven: 'Advice\nNext visit: text inside advice',
   remarks: 'Original retained clinical history', nextVisitDate: '2026-11-12', followUpRequired: 'Yes', referralRequired: 'Yes',
-  bloodPressure: '120/80', pulseRate: '70', medications: [{ genericName: 'Test medicine', instructions: 'Test instruction' }] };
+  bloodPressure: '120/80', pulseRate: '70', temperature: '36.7', respiratoryRate: '18', height: '160', weight: '60', oxygenSaturation: '98',
+  clinicalIndicators: { dangerSignsReviewed: true }, medications: [{ genericName: 'Test medicine', custom: true, source: 'custom',
+    dose: '1 tablet', route: 'Oral', frequency: 'Once daily', duration: '3 days', quantity: '3', instructions: 'Test instruction' }] };
 const offline = () => false;
 const online = () => true;
 const recordFor = (data, id = 'SUB-TEST') => ({ ...data, id, resident: { id: data.residentId, name: 'Test Resident' },
-  vitals: { bp: data.bloodPressure }, bloodPressureClassification: classifyBloodPressure(data.bloodPressure),
+  vitals: { bp: data.bloodPressure, temperature: Number(data.temperature), hr: Number(data.pulseRate), rr: Number(data.respiratoryRate),
+    heightCm: Number(data.height), weightKg: Number(data.weight), o2sat: Number(data.oxygenSaturation), bmi: calculateConsultationBmi(data.height, data.weight) }, bloodPressureClassification: classifyBloodPressure(data.bloodPressure),
   createdAt: '2026-11-06T02:00:00.000Z', updatedAt: '2026-11-06T02:00:00.000Z', consultationEffectsCompletedAt: '2026-11-06T02:00:00.000Z', status: 'completed' });
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -300,14 +304,38 @@ test('consultations API forwards owner, idempotency headers and abort signal on 
   } finally { delete globalThis.__consultationApiTestTransport; }
 });
 
-test('new consultation date defaults use the local day and do not invent a consultation time', async () => {
+test('new consultation date and time use Asia/Manila and preserve saved values on edit', async () => {
   const page = await readFile(new URL('../../src/features/consultations/pages/TreatmentConsultation.jsx', import.meta.url), 'utf8');
   const source = page.match(/const emptyForm = \(now = new Date\(\)\) => \(\{[\s\S]*?\}\);/)?.[0];
   assert.ok(source);
-  const emptyForm = new Function(`${source}; return emptyForm;`)();
-  const localClock = { getFullYear: () => 2026, getMonth: () => 10, getDate: () => 6 };
-  const form = emptyForm(localClock);
+  const emptyForm = new Function('getManilaDateTime', `${source}; return emptyForm;`)(getManilaDateTime);
+  const form = emptyForm(new Date('2026-11-05T16:42:00.000Z'));
   assert.equal(form.consultationDate, '2026-11-06');
-  assert.equal(form.consultationTime, '');
+  assert.equal(form.consultationTime, '00:42');
   assert.ok(page.includes('consultationDate: record.consultationDate || ""'));
+});
+
+test('every required measurement and the actual time are validated before a new write-ahead operation', async () => {
+  for (const field of ['bloodPressure', 'temperature', 'pulseRate', 'respiratoryRate', 'height', 'weight', 'oxygenSaturation', 'consultationTime']) {
+    await assert.rejects(saveConsultationOffline({ ownerId: OWNER, payload: { ...DATA, [field]: '' }, online, create: async () => { throw new Error('Must not send'); } }),
+      (error) => error.status === 422 && Boolean(error.payload?.error?.errors?.[field]));
+  }
+  assert.equal(await db.outbox.count(), 0);
+});
+
+test('saved numeric measurements, computed BMI, service ID and each prescription must be confirmed', async () => {
+  const payload = { ...DATA, serviceId: 'service-actual', medications: [
+    { genericName: 'Medicine A', custom: true, source: 'custom', dose: '1 tablet', route: 'Oral', frequency: 'Once daily', duration: '3 days', quantity: '3', instructions: 'After breakfast' },
+    { genericName: 'Medicine B', custom: true, source: 'custom', dose: '2 drops', route: 'Ophthalmic', frequency: 'Twice daily', duration: '5 days', quantity: '1', instructions: 'Left eye only' },
+  ] };
+  for (const corrupt of [
+    (row) => ({ ...row, vitals: { ...row.vitals, temperature: 39 } }),
+    (row) => ({ ...row, vitals: { ...row.vitals, bmi: 0 } }),
+    (row) => ({ ...row, serviceId: 'different-service' }),
+    (row) => ({ ...row, medications: [{ ...row.medications[0], instructions: row.medications[1].instructions }, row.medications[1]] }),
+  ]) {
+    const queued = await saveConsultationOffline({ ownerId: OWNER, payload, online: offline, create: async () => null });
+    await assert.rejects(submitConsultationDraft({ ownerId: OWNER, localId: queued.localId, online,
+      create: async (data) => ({ consultation: corrupt(recordFor(data)) }) }), { code: 'malformed' });
+  }
 });

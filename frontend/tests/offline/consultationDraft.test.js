@@ -22,6 +22,7 @@ import {
 import { OfflineActionRequiredError } from '../../src/services/offline/mutationPolicy.js';
 import { getOperation } from '../../src/services/offline/outbox.js';
 import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
+import { calculateConsultationBmi } from '../../../shared/consultationClinical.js';
 
 const OWNER = 'phn-user-1';
 
@@ -54,11 +55,14 @@ test('invalid BP cannot be queued as a valid offline consultation', async () => 
 const CONSULT = {
   residentId: 'RES-0001',
   consultationDate: '2026-10-11',
+  consultationTime: '09:15',
   chiefComplaint: 'Cough and fever',
   findings: 'Clear breath sounds',
   diagnosis: 'Viral URI',
   bloodPressure: '120/80',
-  medications: [{ name: 'Paracetamol', qty: 10 }],
+  temperature: '36.7', pulseRate: '70', respiratoryRate: '18', height: '160', weight: '60', oxygenSaturation: '98',
+  clinicalIndicators: { dangerSignsReviewed: true },
+  medications: [{ genericName: 'Paracetamol', custom: true, source: 'custom', dose: '1 tablet', route: 'Oral', frequency: 'Once daily', duration: '10 days', quantity: '10' }],
 };
 
 const online = () => true;
@@ -80,7 +84,7 @@ const recordingCreate = (impl) => {
   const fn = async (data) => {
     calls.push(data);
     const result = impl ? await impl(data, calls.length) : { consultation: { id: 'SUB-000001', ...data } };
-    return result?.consultation ? { consultation: { status: 'completed', vitals: { bp: data.bloodPressure }, bloodPressureClassification: classifyBloodPressure(data.bloodPressure), createdAt: new Date().toISOString(), consultationEffectsCompletedAt: new Date().toISOString(),
+    return result?.consultation ? { consultation: { status: 'completed', vitals: { bp: data.bloodPressure, temperature: Number(data.temperature), hr: Number(data.pulseRate), rr: Number(data.respiratoryRate), heightCm: Number(data.height), weightKg: Number(data.weight), o2sat: Number(data.oxygenSaturation), bmi: calculateConsultationBmi(data.height, data.weight) }, bloodPressureClassification: classifyBloodPressure(data.bloodPressure), createdAt: new Date().toISOString(), consultationEffectsCompletedAt: new Date().toISOString(),
       resident: { id: data.residentId }, ...result.consultation } } : result;
   };
   fn.calls = calls;

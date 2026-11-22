@@ -76,13 +76,22 @@ export function buildMonitoringPriorities({ residents = [], referrals = [], foll
     href: `${BASE}/referrals?referral=${encodeURIComponent(row.id)}`, action: "View Referral",
   }));
 
-  recordsForBarangay(consultations, barangay).filter((row) => OPEN_CONSULTATION_STATUSES.includes(row.status)).forEach((row) => add({
-    key: `consultation-${row.id}`, residentId: row.resident?.id, resident: residentDisplayName(row.resident),
-    category: "Consultation", priority: "Unresolved", tone: "info", rank: 5,
-    detail: row.chiefComplaint || "Complaint not recorded", status: CONSULTATION_LABELS[row.status],
-    date: row.consultationDate || row.createdAt || "", dateLabel: "Recorded", filters: [],
-    href: `${BASE}/consultations?consultation=${encodeURIComponent(row.id)}`, action: "View Consultation",
-  }));
+  recordsForBarangay(consultations, barangay).forEach((row) => {
+    const assessment = consultationAssessment(row);
+    const risk = consultationRiskLevel(row);
+    const referralLinked = (row.referrals || []).some((referral) => !["Cancelled", "Rejected"].includes(referral.status));
+    const evaluationRequired = assessment?.referralEvaluationRequired === true && !referralLinked;
+    if (!evaluationRequired && !OPEN_CONSULTATION_STATUSES.includes(row.status)) return;
+    add({
+      key: `consultation-${row.id}`, residentId: row.resident?.id || row.residentId, resident: residentDisplayName(row.resident),
+      category: "Consultation", priority: evaluationRequired ? "Clinical Review Required" : "Unresolved",
+      tone: evaluationRequired ? "danger" : "info", rank: evaluationRequired ? 0 : 5,
+      detail: consultationRiskReasons(row) || row.chiefComplaint || "Complaint not recorded",
+      status: evaluationRequired ? "Referral evaluation required" : CONSULTATION_LABELS[row.status],
+      date: row.consultationDate || "", dateLabel: "Consultation", filters: risk === "High" ? ["high-risk"] : [],
+      href: `${BASE}/consultations?consultation=${encodeURIComponent(row.id)}`, action: "View Consultation",
+    });
+  });
 
   return [...records.values()].sort((a, b) => a.rank - b.rank || a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
 }
@@ -146,7 +155,7 @@ export function enrichMonitoringCases(items, { residents = [], referrals = [], f
   return items.map((item) => {
     const record = sources.get(item.key) || {};
     const person = people.get(item.residentId || record.resident_id || record.resident?.id) || record.resident || {};
-    const risk = ["High", "Moderate", "Low"].includes(person.riskLevel) ? person.riskLevel : null;
+    const risk = item.category === "Consultation" ? consultationRiskLevel(record) : canonicalRiskLevel(person.riskLevel);
     const purok = person.purok || person.household?.purok || record.purok || "";
     const zone = person.zone ?? record.resident?.zone;
     const area = purok ? (/^purok\b/i.test(String(purok)) ? String(purok) : `Purok ${purok}`)
@@ -154,7 +163,7 @@ export function enrichMonitoringCases(items, { residents = [], referrals = [], f
     const responsible = record.assigned_provider || record.responsiblePersonnelName || record.phn?.personnel ||
       record.recipient?.full_name || person.assignedBhw?.name || "";
     const factors = item.category === "Resident assessment" && Array.isArray(person.riskFactors)
-      ? person.riskFactors.map((factor) => typeof factor === "string" ? factor : factor?.label || factor?.message || factor?.reason || "").filter(Boolean).join("; ") : "";
+      ? person.riskFactors.map((factor) => typeof factor === "string" ? factor : factor?.label || factor?.message || factor?.reason || factor?.name || factor?.ruleId?.replaceAll("_", " ") || "").filter(Boolean).join("; ") : "";
     return {
       ...item,
       riskLevel: risk,
@@ -236,3 +245,5 @@ export function monitoringCasesCsv(rows) {
   return [header, ...rows.map((row) => [row.resident, row.riskLabel || "Unassessed", row.detail, row.area,
     row.date, row.dateLabel, row.responsible, row.category, row.key])].map((row) => row.map(cell).join(",")).join("\r\n");
 }
+import { consultationAssessment, consultationRiskLevel, consultationRiskReasons } from "../../consultations/lib/consultationRisk.js";
+import { canonicalRiskLevel } from "../../../lib/riskLevel.js";

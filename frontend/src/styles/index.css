@@ -345,8 +345,8 @@
     color: #fff;
   }
   :focus-visible {
-    outline: 2px solid #0B4A8F;
-    outline-offset: 2px;
+    outline: 1px solid rgb(11 74 143 / 45%);
+    outline-offset: 1px;
   }
 }
 
@@ -620,8 +620,8 @@
     --rdp-accent-color: #12518F;
     --rdp-accent-color-dark: #0B3C6B;
     --rdp-background-color: #E8F0FA;
-    --rdp-outline: 2px solid #12518F;
-    --rdp-outline-selected: 2px solid rgba(11, 60, 107, 0.5);
+    --rdp-outline: 1px solid #12518F;
+    --rdp-outline-selected: 1px solid rgba(11, 60, 107, 0.5);
     margin: 0;
     font-size: 0.8125rem;
     color: var(--dp-surface-text);
@@ -639,7 +639,7 @@
     background: var(--dp-surface);
   }
   .kalusagap-datepicker .rdp-dropdown:focus-visible {
-    outline: 2px solid var(--rdp-outline);
+    outline: 1px solid var(--rdp-outline);
     outline-offset: 1px;
   }
   /* Native month/year select popup inside the dropdown: use a dark surface
@@ -1117,8 +1117,6 @@
 .clinical-search:focus-within,
 .clinical-filter:focus {
   border-color: #0B4A8F;
-  outline: 2px solid rgb(11 74 143 / 12%);
-  outline-offset: -1px;
 }
 .clinical-table-card,
 .clinical-data-table {
@@ -1297,17 +1295,17 @@
   vertical-align: middle;
 }
 .supervisor-shell .consultation-records-grid th:nth-child(1),
-.supervisor-shell .consultation-records-grid td:nth-child(1) { width: 25%; }
+.supervisor-shell .consultation-records-grid td:nth-child(1) { width: 24%; }
 .supervisor-shell .consultation-records-grid th:nth-child(2),
-.supervisor-shell .consultation-records-grid td:nth-child(2) { width: 16%; }
+.supervisor-shell .consultation-records-grid td:nth-child(2) { width: 14%; }
 .supervisor-shell .consultation-records-grid th:nth-child(3),
-.supervisor-shell .consultation-records-grid td:nth-child(3) { width: 21%; }
+.supervisor-shell .consultation-records-grid td:nth-child(3) { width: 20%; }
 .supervisor-shell .consultation-records-grid th:nth-child(4),
-.supervisor-shell .consultation-records-grid td:nth-child(4) { width: 14%; }
+.supervisor-shell .consultation-records-grid td:nth-child(4) { width: 20%; }
 .supervisor-shell .consultation-records-grid th:nth-child(5),
-.supervisor-shell .consultation-records-grid td:nth-child(5) { width: 14%; }
+.supervisor-shell .consultation-records-grid td:nth-child(5) { width: 16%; }
 .supervisor-shell .consultation-records-grid th:nth-child(6),
-.supervisor-shell .consultation-records-grid td:nth-child(6) { width: 10%; text-align: center; }
+.supervisor-shell .consultation-records-grid td:nth-child(6) { width: 6%; text-align: center; }
 .supervisor-shell .consultation-records-grid th:nth-child(6) { text-align: center; }
 .supervisor-shell .consultation-records-grid td:first-child p,
 .supervisor-shell .consultation-records-grid td:nth-child(3) span {

@@ -37,7 +37,6 @@ const modules = {
     }
   `,
   '@/components/tables/TablePagination': emptyChild,
-  '@/features/consultations/components/MedicineSelector': emptyChild,
   '@/features/consultations/components/DateRangePicker': emptyChild,
   '@/features/health-records/components/LabResultsPanel': emptyChild,
   '@/context/AuthContext': `export const useAuth = () => ({ user: window.testUser || { id: 'mock-clinician', role: 'rhu_personnel' } });`,
@@ -47,6 +46,10 @@ const modules = {
   '@/services/api': `
     export const api = {};
     export const consultationsApi = {
+      async clinicalContext() {
+        if (window.delayClinicalContext) await new Promise(resolve => { (window.releaseClinicalContexts ||= []).push(resolve); });
+        return { pregnancy: null, existingConditions: [], previousAssessment: null, age: 35, sourceStatus: 'available', canReviewRisk: false };
+      },
       async get(id) {
         const consultation = window.testRecords.find(record => record.id === id);
         if (window.delayedId === id) await new Promise(resolve => { window.releaseDetail = resolve; });
@@ -66,6 +69,10 @@ const modules = {
       return { residentId: id, consultations: rows, referrals: [], followUps: [], pregnancies: [], maternalRecords: [], vaccinations: [], deliveries: [], screenings: [] };
     } };
     export const healthServicesApi = {};
+    export const medicinesApi = { async list({ q }) { return { medicines: [
+      { id: '00000000-0000-4000-8000-000000000001', genericName: 'Medicine One', strength: '100 mg', dosageForm: 'Tablet', source: 'local' },
+      { id: '00000000-0000-4000-8000-000000000002', genericName: 'Medicine Two', strength: '5 mg/ml', dosageForm: 'Drops', source: 'local' },
+    ].filter(medicine => medicine.genericName.toLowerCase().includes(q.toLowerCase())) }; } };
   `,
   '@/services/offline/consultationOfflineService': `
     export const listConsultationDrafts = async () => [];
@@ -142,6 +149,7 @@ test.beforeEach(async ({ page }, testInfo) => {
       ].map(([id, riskLevel, bp]) => ({ id, riskLevel, vitals: { bp },
         resident: { id: `resident-${id}`, name: `Resident ${id}`, barangay: window.testUser.barangay, riskLevel: 'High' },
         consultationDate: '2026-11-20', chiefComplaint: `Complaint ${id}`, findings: `Finding ${id}`,
+        consultationTime: '09:15', clinicalIndicators: { dangerSignsReviewed: true },
         diagnosis: `Diagnosis ${id}`, treatmentGiven: `Treatment ${id}`, clinicalAssessment: { level: riskLevel },
         ...(id === 'two' ? { followUpRequired: 'Yes', nextVisitDate: '2026-11-24', referrals: [{ reason: 'Linked referral' }] } : {}),
       }));
@@ -183,16 +191,19 @@ test('supervisor history switches residents, ignores late replies, and refreshes
   await select('First');
   await expect.poll(() => page.evaluate(() => Boolean(window.releaseHistory))).toBe(true);
   await select('Second');
-  await expect(page.getByText('No consultations, clinical history, referrals, or follow-ups recorded yet.')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Health history summary for Second Resident' })).toContainText('None recorded');
   await page.evaluate(() => window.releaseHistory());
   await expect(page.getByText(/First private complaint/)).toHaveCount(0);
   await select('Third');
-  await page.getByText('Previous Consultations (1)', { exact: true }).click();
   await expect(page.getByText(/Third private complaint/)).toBeVisible();
   await page.locator('input[type=date]').first().fill('2026-11-20');
+  await fillRequiredClinical(page);
   await page.getByPlaceholder('e.g. Fever, headache, prenatal check-up').fill('New chart complaint');
   await page.getByRole('button', { name: 'Save Consultation', exact: true }).click();
-  await page.getByText('Previous Consultations (2)', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Add Treatment Consultation', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.savedConsultation)).toMatchObject({ residentId: 'Third', chiefComplaint: 'New chart complaint' });
+  await page.getByRole('button', { name: 'Add Treatment Consultation', exact: true }).click();
+  await select('Third');
   await expect(page.getByText(/New chart complaint/)).toBeVisible();
   await expect(page.getByText(/Third private complaint/)).toBeVisible();
 });
@@ -231,7 +242,7 @@ test('supervisor opens and edits each encounter by ID and filters by encounter r
     await page.getByRole('menuitem', { name: action, exact: true }).click();
   };
   await expect(rows).toHaveCount(4);
-  for (const [id, risk, bp] of [['one', 'Low', '110/70'], ['two', 'Moderate', '135/85'], ['three', 'High', '185/125'], ['four', 'Unassessed', '']]) {
+  for (const [id, risk, bp] of [['one', 'Low', '110/70'], ['two', 'Medium', '135/85'], ['three', 'High', '185/125'], ['four', 'Unassessed', '']]) {
     await filter.selectOption(risk);
     await expect(rows).toHaveCount(id === 'two' ? 2 : 1);
     await expect(page.getByTestId(id)).toContainText(risk);
@@ -249,11 +260,12 @@ test('supervisor opens and edits each encounter by ID and filters by encounter r
     await expect(page.getByRole('heading', { name: 'Edit Treatment Consultation' }).locator('..')).toContainText(risk);
     await expect(bloodPressureField(page).input).toHaveValue(bp);
     await expect(page.getByText('Treatment Provided', { exact: true }).locator('..').getByRole('textbox')).toHaveValue(`Treatment ${id}`);
+    await fillRequiredClinical(page, { bloodPressure: bp || '118/76', findings: `Finding ${id}` });
     await page.getByRole('button', { name: 'Update Consultation', exact: true }).click();
     await expect(filter).toBeVisible();
-    expect(await page.evaluate(() => window.savedConsultation)).toMatchObject({ id, residentId: `resident-${id}`, bloodPressure: bp });
-    await filter.selectOption('Moderate');
-    await expect(page.getByTestId(id)).toContainText('Moderate');
+    expect(await page.evaluate(() => window.savedConsultation)).toMatchObject({ id, residentId: `resident-${id}`, bloodPressure: bp || '118/76' });
+    await filter.selectOption('Medium');
+    await expect(page.getByTestId(id)).toContainText('Medium');
   }
   await filter.selectOption('All');
   await expect(rows).toHaveCount(4);
@@ -347,15 +359,21 @@ for (const width of [1024, 375]) {
 }
 
 const inputClass = 'min-w-0 flex-1 bg-transparent text-sm font-medium text-slate-900 outline-none placeholder:text-slate-400';
-const inputWrapperClass = 'flex w-full min-w-0 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500';
-const badgeClass = 'inline-flex max-w-full shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight';
+const inputWrapperClass = 'flex w-full min-w-0 items-center rounded-btn border bg-white px-3 py-2 focus-within:border-brand-blue border-brand-border';
+const badgeClass = 'inline-flex max-w-full shrink-0 whitespace-normal rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight';
 
 const normal = ['Normal', 'bg-green-100 text-green-800'];
 const elevated = ['Elevated', 'bg-yellow-100 text-yellow-800'];
 const stage1 = ['Stage 1 Hypertension', 'bg-orange-100 text-orange-800'];
 const stage2 = ['Stage 2 Hypertension', 'bg-red-100 text-red-800'];
-const severe = ['Severe Hypertension', 'bg-red-800 text-white'];
-const emergency = ['Hypertensive Emergency', 'bg-red-800 text-white'];
+const severe = ['Hypertensive Crisis', 'bg-red-800 text-white'];
+
+async function fillRequiredClinical(page, { bloodPressure = '118/76', findings = 'Normal clinical examination' } = {}) {
+  for (const [id, value] of [['vital-blood-pressure', bloodPressure], ['vital-temperature', '36.7'], ['vital-pulse', '70'], ['vital-respiratory', '18'], ['vital-height', '160'], ['vital-weight', '60'], ['vital-oxygen', '98'], ['clinical-findings', findings]]) {
+    await page.locator(`#${id}`).fill(value);
+  }
+  await page.getByRole('checkbox', { name: /Clinical history, pregnancy status and warning signs reviewed/ }).check();
+}
 
 function bloodPressureField(page) {
   const input = page.getByRole('textbox', { name: 'Blood Pressure (mmHg)', exact: true });
@@ -398,6 +416,9 @@ test('formats compact BP and removes the previous badge on invalid or empty edit
 
   await bp.input.fill('110/70');
   await expectBadge(bp, normal);
+  await bp.input.fill('-120/80');
+  await expect(bp.input).toHaveValue('-120/80');
+  await expect(bp.badge).toHaveCount(0);
   await bp.input.clear();
   await expect(bp.input).toHaveValue('');
   await expect(bp.badge).toHaveCount(0);
@@ -405,38 +426,116 @@ test('formats compact BP and removes the previous badge on invalid or empty edit
   await expect(bp.wrapper).toHaveClass(inputWrapperClass);
 });
 
-for (const [findings, treatment] of [['', 'Rest'], ['Alert', ''], ['', '']]) {
-  test(`saves with ${findings ? 'empty treatment' : treatment ? 'empty findings' : 'both clinical fields empty'}`, async ({ page }) => {
-    const findingsLabel = page.getByText('Clinical Findings & Optional Diagnosis', { exact: true });
+for (const treatment of ['', 'Rest']) {
+  test(`saves required findings and vitals with ${treatment ? 'treatment' : 'no treatment'} and no diagnosis`, async ({ page }) => {
+    const findingsLabel = page.getByRole('heading', { name: 'Clinical Findings & Diagnosis', exact: true });
     const treatmentLabel = page.getByText('Treatment Provided', { exact: true });
     await expect(findingsLabel).toBeVisible();
     await expect(treatmentLabel).toBeVisible();
-    await expect(page.getByText(/^(Follow-up Required|Referral Required|Next Visit Date|Notes \/ Remarks)$/)).toHaveCount(0);
     await page.getByText('Test Resident', { exact: true }).click();
     const save = page.getByRole('button', { name: 'Save Consultation', exact: true });
     await save.click();
     await expect(page.getByText('Chief complaint is required.')).toBeVisible();
-    await expect(page.getByText(/(Clinical findings are required|Treatment provided is required|Next visit date is required)/i)).toHaveCount(0);
+    await expect(page.getByText('Record the clinical findings from this consultation.')).toBeVisible();
     await page.getByPlaceholder('e.g. Fever, headache, prenatal check-up').fill('Routine check-up');
-    await findingsLabel.locator('..').getByRole('textbox').fill(findings);
+    await fillRequiredClinical(page);
     await treatmentLabel.locator('..').getByRole('textbox').fill(treatment);
     await save.click();
     await expect(page.getByText('Consultation saved successfully.')).toBeVisible();
     const payload = await page.evaluate(() => window.savedConsultation);
-    expect(payload).toMatchObject({ residentId: 'test-resident', clinicalFindingsDiagnosis: findings, treatmentGiven: treatment });
-    for (const field of ['followUpRequired', 'nextVisitDate', 'referralRequired', 'remarks']) {
-      expect(payload).not.toHaveProperty(field);
-    }
+    expect(payload).toMatchObject({ residentId: 'test-resident', findings: 'Normal clinical examination', diagnosis: '', treatmentGiven: treatment });
+    expect(payload).not.toHaveProperty('clinicalFindingsDiagnosis');
   });
 }
 
-test('classifies all 17 reference readings in the consultation form', async ({ page }) => {
+test('BMI immediately recalculates, invalid required measurements block submission, and edited Manila date/time survive context loading', async ({ page }) => {
+  await page.evaluate(() => { window.delayClinicalContext = true; });
+  await page.getByText('Test Resident', { exact: true }).click();
+  await page.locator('#consultation-date').fill('2026-11-20');
+  await page.locator('#consultation-time').fill('13:25');
+  await page.getByPlaceholder('e.g. Fever, headache, prenatal check-up').fill('Routine follow-up');
+  await fillRequiredClinical(page);
+  const bmi = page.locator('#vital-bmi');
+  await expect(bmi).toHaveValue('23.4');
+  await expect(bmi).toHaveAttribute('readonly', '');
+  await page.locator('#vital-height').fill('150');
+  await expect(bmi).toHaveValue('26.7');
+  await page.locator('#vital-weight').fill('50');
+  await expect(bmi).toHaveValue('22.2');
+  await page.locator('#vital-temperature').fill('101');
+  await page.getByRole('button', { name: 'Save Consultation', exact: true }).click();
+  await expect(page.getByText(/Temperature.*between/)).toBeVisible();
+  expect(await page.evaluate(() => window.savedConsultation)).toBeUndefined();
+  await page.evaluate(() => { window.delayClinicalContext = false; window.releaseClinicalContexts?.forEach(resolve => resolve()); });
+  await expect(page.locator('#consultation-date')).toHaveValue('2026-11-20');
+  await expect(page.locator('#consultation-time')).toHaveValue('13:25');
+  await page.locator('#vital-temperature').fill('36.7');
+  await page.getByRole('button', { name: 'Save Consultation', exact: true }).click();
+  await expect(page.getByText('Consultation saved successfully.')).toBeVisible();
+  expect(await page.evaluate(() => window.savedConsultation)).toMatchObject({ consultationDate: '2026-11-20', consultationTime: '13:25', height: '150', weight: '50' });
+});
+
+test('prescription dropdowns support every option, unique accessible IDs, keyboard selection and independent medication regimens', async ({ page }) => {
+  await page.getByText('Test Resident', { exact: true }).click();
+  await page.getByPlaceholder('e.g. Fever, headache, prenatal check-up').fill('Prescription review');
+  await fillRequiredClinical(page);
+  const search = page.getByRole('textbox', { name: 'Search medicine by generic or brand name', exact: true });
+  for (const medicine of ['Medicine One', 'Medicine Two']) {
+    await search.fill(medicine);
+    await page.getByRole('option', { name: new RegExp(medicine) }).click();
+  }
+  const routes = page.getByRole('combobox', { name: 'Route', exact: true });
+  const frequencies = page.getByRole('combobox', { name: 'Frequency', exact: true });
+  await routes.nth(0).focus();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await expect(routes.nth(0)).toHaveValue('Other / As prescribed');
+  await routes.nth(0).fill('invalid arbitrary route');
+  await page.keyboard.press('Tab');
+  await expect(routes.nth(0)).toHaveValue('Other / As prescribed');
+  await routes.nth(1).click();
+  await page.getByRole('option', { name: 'Ophthalmic', exact: true }).click();
+  await frequencies.nth(0).fill('Every 12 hours');
+  await page.keyboard.press('Enter');
+  await expect(frequencies.nth(0)).toHaveValue('Every 12 hours');
+  await frequencies.nth(1).focus();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await expect(frequencies.nth(1)).toHaveValue('As prescribed');
+  for (const [field, values] of [['Dose', ['1 tablet', '2 drops']], ['Duration', ['3 days', '5 days']], ['Quantity', ['6', '1']], ['Additional instructions', ['After food', 'Left eye only']]]) {
+    for (const [index, value] of values.entries()) await page.getByRole('textbox', { name: field, exact: true }).nth(index).fill(value);
+  }
+  const ids = await page.getByRole('combobox').evaluateAll(inputs => inputs.map(input => input.id));
+  expect(new Set(ids).size).toBe(ids.length);
+  await page.setViewportSize({ width: 375, height: 360 });
+  await frequencies.nth(1).scrollIntoViewIfNeeded();
+  await frequencies.nth(1).evaluate(input => window.scrollBy(0, input.getBoundingClientRect().bottom - window.innerHeight + 16));
+  await frequencies.nth(1).click();
+  const menu = page.getByRole('listbox', { name: 'Frequency', exact: true });
+  await expect(menu).toBeVisible();
+  const box = await menu.boundingBox();
+  const trigger = await frequencies.nth(1).boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(375);
+  expect(box.y + box.height).toBeLessThan(trigger.y);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Save Consultation', exact: true }).click();
+  await expect(page.getByText('Consultation saved successfully.')).toBeVisible();
+  const { medications } = await page.evaluate(() => window.savedConsultation);
+  expect(medications).toHaveLength(2);
+  expect(medications[0]).toMatchObject({ genericName: 'Medicine One', dose: '1 tablet', route: 'Other / As prescribed', frequency: 'Every 12 hours', duration: '3 days', quantity: '6', instructions: 'After food' });
+  expect(medications[1]).toMatchObject({ genericName: 'Medicine Two', dose: '2 drops', route: 'Ophthalmic', frequency: 'As prescribed', duration: '5 days', quantity: '1', instructions: 'Left eye only' });
+});
+
+test('classifies reference readings in the consultation form', async ({ page }) => {
   const bp = bloodPressureField(page);
   const readings = [
     ['110/70', normal], ['119/79', normal],
     ['120/75', elevated], ['125/79', elevated], ['129/79', elevated],
     ['120/80', stage1], ['120/89', stage1], ['130/75', stage1], ['135/85', stage1], ['139/89', stage1],
-    ['140/80', stage2], ['130/90', stage2], ['150/95', stage2], ['180/120', stage2],
+    ['140/80', stage2], ['130/90', stage2], ['150/95', stage2],
+    ['180/100', severe], ['130/120', severe], ['180/120', severe],
     ['181/80', severe], ['150/121', severe], ['185/125', severe],
   ];
 
@@ -453,8 +552,9 @@ test('keeps BP guidance below the badge and within the responsive field', async 
   const readings = [
     ['120/80', 'Stage 1 Hypertension', false],
     ['140/90', 'Stage 2 Hypertension', false],
-    ['181/90', 'Severe Hypertension', true],
-    ['220/90', 'Severe Hypertension', true],
+    ['180/100', 'Hypertensive Crisis', true],
+    ['181/90', 'Hypertensive Crisis', true],
+    ['220/90', 'Hypertensive Crisis', true],
   ];
 
   for (const viewport of [
@@ -465,7 +565,7 @@ test('keeps BP guidance below the badge and within the responsive field', async 
     await test.step(`${viewport.width}px layout`, async () => {
       await page.setViewportSize(viewport);
       const bp = bloodPressureField(page);
-      const temperatureField = page.getByText('Temperature (°C)', { exact: true }).locator('..');
+      const temperatureField = page.locator('#vital-temperature').locator('..');
 
       for (const [reading, category, hasGuidance] of readings) {
         await test.step(`${reading} layout`, async () => {
@@ -479,8 +579,8 @@ test('keeps BP guidance below the badge and within the responsive field', async 
           }
 
           await expect(bp.alert).toContainText('Arrange prompt clinical evaluation');
-          await expect(bp.alert).toContainText('Assess for emergency symptoms');
-          await expect(bp.alert).toContainText('a reading alone does not establish a hypertensive emergency');
+           await expect(bp.alert).toContainText('assess for emergency symptoms');
+           await expect(bp.alert).toContainText('not a diagnosis');
           const geometry = await Promise.all([
             bp.field.boundingBox(),
             bp.badge.boundingBox(),
@@ -523,7 +623,7 @@ test('keeps BP guidance below the badge and within the responsive field', async 
 test('chief complaint and findings update emergency status at a fixed BP', async ({ page }) => {
   const bp = bloodPressureField(page);
   const chiefComplaint = page.getByPlaceholder('e.g. Fever, headache, prenatal check-up');
-  const findings = page.getByPlaceholder(/^Enter clinical findings\./);
+  const findings = page.locator('#clinical-findings');
 
   await bp.input.fill('185/125');
   await expectBadge(bp, severe);
@@ -531,7 +631,7 @@ test('chief complaint and findings update emergency status at a fixed BP', async
 
   await chiefComplaint.fill('Chest pain');
   await expectBadge(bp, emergency);
-  await expect(bp.alert).toContainText('Immediate emergency evaluation is required');
+  await expect(bp.alert).toContainText('immediate emergency evaluation');
 
   await chiefComplaint.fill('No chest pain');
   await expectBadge(bp, severe);
@@ -539,7 +639,7 @@ test('chief complaint and findings update emergency status at a fixed BP', async
 
   await findings.fill('Shortness of breath');
   await expectBadge(bp, emergency);
-  await expect(bp.alert).toContainText('Immediate emergency evaluation is required');
+  await expect(bp.alert).toContainText('immediate emergency evaluation');
 
   await findings.fill('Denies chest pain and shortness of breath');
   await expectBadge(bp, severe);

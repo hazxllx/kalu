@@ -7,6 +7,23 @@ const routes = source("routes/AppRoutes.jsx");
 const chooser = source("features/registration/pages/RegistrationTypeSelection.jsx");
 const management = source("features/users/pages/UserManagement.jsx");
 
+test("incomplete residents are detected separately and can resume persisted registration", () => {
+  assert.match(routes, /path="\/registration-incomplete"/);
+  assert.match(routes, /resident-incomplete/);
+  const roles = source("lib/roles.js");
+  assert.match(roles, /RESIDENT_INCOMPLETE: 'resident-incomplete'/);
+  assert.match(roles, /\[ROLE\.RESIDENT_INCOMPLETE\]: '\/registration-incomplete'/);
+  const page = source("features/registration/pages/RegistrationIncomplete.jsx");
+  assert.match(page, /resident record has not been created/);
+  assert.match(page, /Continue Registration/);
+  const registration = source("features/registration/pages/NewResidentRegistration.jsx");
+  assert.match(registration, /residentRegistrationDraft/);
+  assert.match(registration, /sessionStorage\.removeItem\("residentRegistrationDraft"\)/);
+  assert.match(registration, /sessionStorage\.removeItem\("residentRegistrationResume"\)/);
+  const context = source("context/AuthContext.jsx");
+  assert.match(context, /registrationStatus: profileUser\.registrationStatus/);
+});
+
 test("public registration offers only new and transferring residents", () => {
   assert.deepEqual([...chooser.matchAll(/key:\s*"([^"]+)"/g)].map((match) => match[1]), ["resident", "transfer"]);
   assert.match(chooser, /to: "\/register\/new\/step-1"/);

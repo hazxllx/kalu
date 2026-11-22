@@ -1,14 +1,15 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Plus, Trash2, Pill } from "lucide-react";
 import { medicinesApi } from "@/services/api";
+import SearchableSelect from "@/components/common/SearchableSelect";
+import { PRESCRIPTION_ROUTES, PRESCRIPTION_FREQUENCIES } from "../../../../../shared/consultationClinical.js";
 
 const inputCls =
-  "w-full bg-white border border-brand-border rounded-btn px-2.5 py-1.5 text-sm outline-none focus:border-brand-blue";
+  "h-9 w-full rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink outline-none focus:border-brand-blue disabled:opacity-70 dark:border-border dark:bg-card dark:text-foreground";
 
-const frequencyOptions = [
-  "Once daily", "Twice daily", "Three times daily", "Every 4 hours", "Every 6 hours",
-  "Every 8 hours", "Every 12 hours", "As prescribed", "As needed (PRN)",
-];
+const recordedOptions = (options, value) => value && !options.some((option) => option.value === value)
+  ? [{ value, label: `${value} (recorded value)` }, ...options]
+  : options;
 
 const emptyMedication = (overrides = {}) => ({
   medicineId: null,
@@ -35,9 +36,10 @@ const SourceTag = ({ source }) => {
       </span>
     );
   }
+  if (source === "yakap") return null;
   return (
     <span className="rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-semibold text-brand-gray">
-      {source === "yakap" ? "YAKAP" : "Local"}
+      Local
     </span>
   );
 };
@@ -56,8 +58,7 @@ const SourceTag = ({ source }) => {
  * Custom entries are kept verbatim and never silently replaced by a catalog
  * entry. The value is an array of medication objects owned by the parent form.
  */
-export default function MedicineSelector({ value = [], onChange, errors = {} }) {
-  const frequencyListId = useId();
+export default function MedicineSelector({ value = [], onChange, errors = {}, disabled = false }) {
   const medications = Array.isArray(value) ? value : [];
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -101,6 +102,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
   }, [open]);
 
   const addMedication = (med) => {
+    if (disabled) return;
     onChange([...medications, med]);
     setQuery("");
     setResults([]);
@@ -127,10 +129,12 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
   };
 
   const updateAt = (index, patch) => {
+    if (disabled) return;
     onChange(medications.map((m, i) => (i === index ? { ...m, ...patch } : m)));
   };
 
   const removeAt = (index) => {
+    if (disabled) return;
     onChange(medications.filter((_, i) => i !== index));
   };
 
@@ -146,16 +150,14 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
 
   return (
     <div>
-      <datalist id={frequencyListId}>
-        {frequencyOptions.map((option) => <option key={option} value={option} />)}
-      </datalist>
+      {errors.medications && <p role="alert" className="mb-2 text-xs text-brand-danger">{errors.medications}</p>}
       {/* Added medicines */}
       {medications.length > 0 && (
         <ul className="mb-3 space-y-2">
           {medications.map((m, i) => (
             <li
               key={`${m.medicineId || "custom"}-${i}`}
-              className="rounded-btn border border-brand-border bg-brand-bg/40 p-3"
+              className="rounded-btn border border-brand-border bg-brand-bg/40 p-3 dark:border-border dark:bg-card/40"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
@@ -170,6 +172,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
                 </div>
                 <button
                   type="button"
+                  disabled={disabled}
                   onClick={() => removeAt(i)}
                   className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-brand-gray transition-colors hover:text-brand-danger"
                   aria-label={`Remove ${m.genericName || "medicine"}`}
@@ -190,6 +193,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
                   <>
                     <input
                       aria-label="Generic name"
+                      disabled={disabled}
                       value={m.genericName}
                       onChange={(e) => updateAt(i, { genericName: e.target.value })}
                       placeholder="Generic name"
@@ -197,6 +201,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
                     />
                     <input
                       aria-label="Strength"
+                      disabled={disabled}
                       value={m.strength}
                       onChange={(e) => updateAt(i, { strength: e.target.value })}
                       placeholder="Strength (e.g. 500 mg)"
@@ -204,6 +209,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
                     />
                     <input
                       aria-label="Dosage form"
+                      disabled={disabled}
                       value={m.dosageForm}
                       onChange={(e) => updateAt(i, { dosageForm: e.target.value })}
                       placeholder="Form (e.g. Tablet)"
@@ -215,51 +221,32 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
                     {[m.strength, m.dosageForm].filter(Boolean).join(" \u00b7 ") || "No strength/form on file"}
                   </p>
                 )}
-                <input
-                  aria-label="Dose"
-                  value={m.dose}
-                  onChange={(e) => updateAt(i, { dose: e.target.value })}
-                  placeholder="Dose (e.g. 1 tab)"
-                  className={inputCls}
+                <label className="text-xs text-brand-gray">Dose <span className="text-brand-danger">*</span>
+                  <input aria-label="Dose" disabled={disabled} value={m.dose} onChange={(e) => updateAt(i, { dose: e.target.value })} placeholder="e.g. 1 tablet" className={`${inputCls} mt-1.5`} />
+                </label>
+                <SearchableSelect
+                  label="Route" ariaLabel="Route" value={m.route || ""} required
+                  onChange={(route) => updateAt(i, { route })}
+                  options={recordedOptions(PRESCRIPTION_ROUTES, m.route)} placeholder="Select route"
+                  error={errors[`medications[${i}].route`] || ""} disabled={disabled} compact portalDropdown
                 />
-                <input
-                  aria-label="Route"
-                  value={m.route}
-                  onChange={(e) => updateAt(i, { route: e.target.value })}
-                  placeholder="Route (e.g. Oral)"
-                  className={inputCls}
+                <SearchableSelect
+                  label="Frequency" ariaLabel="Frequency" value={m.frequency || ""} required
+                  onChange={(frequency) => updateAt(i, { frequency })}
+                  options={recordedOptions(PRESCRIPTION_FREQUENCIES, m.frequency)} placeholder="Select frequency"
+                  error={errors[`medications[${i}].frequency`] || ""} disabled={disabled} compact portalDropdown
                 />
-                <input
-                  aria-label="Frequency"
-                  list={frequencyListId}
-                  value={m.frequency}
-                  onChange={(e) => updateAt(i, { frequency: e.target.value })}
-                  placeholder="Frequency (e.g. TID)"
-                  className={inputCls}
-                />
-                <input
-                  aria-label="Duration"
-                  value={m.duration}
-                  onChange={(e) => updateAt(i, { duration: e.target.value })}
-                  placeholder="Duration (e.g. 7 days)"
-                  className={inputCls}
-                />
-                <input
-                  aria-label="Quantity"
-                  value={m.quantity}
-                  onChange={(e) => updateAt(i, { quantity: e.target.value })}
-                  placeholder="Quantity (e.g. 21)"
-                  className={inputCls}
-                />
-                <input
-                  aria-label="Additional instructions"
-                  value={m.instructions}
-                  onChange={(e) => updateAt(i, { instructions: e.target.value })}
-                  placeholder="Instructions"
-                  className={`${inputCls} col-span-2 sm:col-span-3`}
-                />
+                <label className="text-xs text-brand-gray">Duration <span className="text-brand-danger">*</span>
+                  <input aria-label="Duration" disabled={disabled} value={m.duration} onChange={(e) => updateAt(i, { duration: e.target.value })} placeholder="e.g. 7 days" className={`${inputCls} mt-1.5`} />
+                </label>
+                <label className="text-xs text-brand-gray">Quantity <span className="text-brand-danger">*</span>
+                  <input aria-label="Quantity" inputMode="numeric" disabled={disabled} value={m.quantity} onChange={(e) => updateAt(i, { quantity: e.target.value })} placeholder="e.g. 21" className={`${inputCls} mt-1.5`} />
+                </label>
+                <label className="col-span-2 text-xs text-brand-gray sm:col-span-3">Instructions
+                  <input aria-label="Additional instructions" disabled={disabled} value={m.instructions} onChange={(e) => updateAt(i, { instructions: e.target.value })} placeholder="Medicine-specific instructions" className={`${inputCls} mt-1.5`} />
+                </label>
               </div>
-              {Object.entries(errors).filter(([field]) => field.startsWith(`medications[${i}]`)).map(([field, message]) => (
+              {Object.entries(errors).filter(([field]) => field.startsWith(`medications[${i}]`) && !["route", "frequency"].includes(field.split(".").pop())).map(([field, message]) => (
                 <p key={field} className="mt-1 text-xs text-brand-danger" role="alert">{field.split(".").pop()}: {String(message)}</p>
               ))}
             </li>
@@ -269,10 +256,11 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
 
       {/* Search / add */}
       <div ref={wrapRef} className="relative">
-        <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 focus-within:border-brand-blue">
+        <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 focus-within:border-brand-blue dark:border-border dark:bg-card">
           <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
           <input
             value={query}
+            disabled={disabled}
             onChange={(e) => {
               setQuery(e.target.value);
               setOpen(true);
@@ -280,12 +268,12 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
             onFocus={() => setOpen(true)}
             placeholder="Search medicine by generic or brand name (e.g. paracetamol or Biogesic)..."
             aria-label="Search medicine by generic or brand name"
-            className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70"
+            className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70 dark:text-foreground"
           />
         </div>
 
-        {open && query.trim() && (
-          <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-btn border border-brand-border bg-white shadow-float">
+        {open && !disabled && query.trim() && (
+          <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-btn border border-brand-border bg-white shadow-float dark:border-border dark:bg-card">
             <ul role="listbox" className="max-h-64 overflow-y-auto py-1">
               {loading && (
                 <li className="px-3 py-2 text-sm text-brand-gray">Searching...</li>
@@ -296,10 +284,10 @@ export default function MedicineSelector({ value = [], onChange, errors = {} }) 
                     <button
                       type="button"
                       onClick={() => addFromCatalog(m)}
-                      className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-brand-bg"
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-brand-bg dark:hover:bg-muted/50"
                     >
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-brand-ink">
+                        <span className="block truncate text-sm font-medium text-brand-ink dark:text-foreground">
                           {m.brandName || m.genericName}
                         </span>
                         <span className="block truncate text-xs text-brand-gray">

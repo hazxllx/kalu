@@ -143,6 +143,10 @@ const RegistrationSuccess = publicPage(
     )
 );
 
+const RegistrationIncomplete = appPage(
+  () => import('@/features/registration/pages/RegistrationIncomplete')
+);
+
 const StaffResidentRegistration = appPage(
   () =>
     import(
@@ -714,6 +718,11 @@ const AppRoutes = () => (
       path="/registration-success"
       element={<RegistrationSuccess />}
     />
+    <Route
+      element={<ProtectedRoute allow={ROUTE_ROLES['resident-incomplete']} />}
+    >
+      <Route path="/registration-incomplete" element={<RegistrationIncomplete />} />
+    </Route>
     <Route
       path="/verification-status"
       element={<VerificationStatus />}

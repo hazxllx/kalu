@@ -20,7 +20,7 @@ import { api, consultationsApi, residentsApi, healthServicesApi } from "@/servic
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import DateRangePicker from "@/features/consultations/components/DateRangePicker";
 import { formatLongDate } from "@/lib/dateUtils";
-import { classifyBloodPressure as classifyBp, formatBloodPressureInput, parseBloodPressure } from "@/features/consultations/utils/bpClassification";
+import { bloodPressureBadgeClassName, classifyBloodPressure as classifyBp, formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
 import {
   saveConsultationOffline,
   submitConsultationDraft,
@@ -36,8 +36,16 @@ import { captureOwnerGuard } from "@/services/offline/db";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
 import ResidentHealthHistory from "@/features/consultations/components/ResidentHealthHistory";
+import SearchableSelect from "@/components/common/SearchableSelect";
 import { loadServerRows } from "@/lib/serverRows";
-import { consultationRiskLevel } from "@/features/consultations/lib/consultationRisk";
+import { consultationRiskLevel, consultationAssessment, consultationServiceName, consultationHealthServiceLabel, consultationTemperatureWarningVisible, consultationRiskReasons, consultationFollowUp, savedConsultationBloodPressureClassification, consultationBloodPressureClassification } from "@/features/consultations/lib/consultationRisk";
+import ButtonSelectGroup from "@/components/system/ButtonSelectGroup";
+import {
+  getManilaDateTime, calculateConsultationBmi, validateConsultationVitals,
+  validateConsultationDateTime, normalizeConsultationClinicalText,
+  clinicalTextIndicatesPregnancy,
+  validateConsultationMedications,
+} from "../../../../../shared/consultationClinical.js";
 
 function ConsultationActionMenu({ anchor, onClose, onView, onEdit }) {
   const menuRef = useRef(null);
@@ -115,32 +123,9 @@ function ConsultationActionMenu({ anchor, onClose, onView, onEdit }) {
 }
 
 const inputCls = (error) =>
-  `w-full bg-white border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue ${
-    error ? "border-brand-danger bg-red-50/40" : "border-brand-border"
+  `w-full rounded-btn border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card dark:text-foreground dark:border-border ${
+    error ? "border-brand-danger bg-red-50/40 dark:border-brand-danger dark:bg-red-950/20" : "border-brand-border"
   }`;
-
-/** A value is a valid, positive measurement, or empty (the field is optional). */
-const isPositiveOrEmpty = (value) => {
-  if (value === "" || value == null) return true;
-  const n = Number.parseFloat(value);
-  return Number.isFinite(n) && n > 0;
-};
-
-/**
- * UI-only BMI = weight(kg) / heightMeters². Returns a 2-decimal string, or ""
- * when either input is missing or invalid. Guards against NaN/Infinity/division
- * by zero and negative values so "NaN"/"Infinity" never reach the field. BMI is
- * never persisted from this form — the server owns any stored BMI value.
- */
-const computeBmiDisplay = (heightCm, weightKg) => {
-  const h = Number.parseFloat(heightCm);
-  const w = Number.parseFloat(weightKg);
-  if (!Number.isFinite(h) || !Number.isFinite(w) || h <= 0 || w <= 0) return "";
-  const heightM = h / 100;
-  const bmi = w / (heightM * heightM);
-  if (!Number.isFinite(bmi)) return "";
-  return bmi.toFixed(2);
-};
 
 /**
  * Map a failed save to a clear, status-appropriate message. The backend's
@@ -171,8 +156,8 @@ const submitErrorMessage = (err) => {
 };
 
 const emptyForm = (now = new Date()) => ({
-  consultationDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
-  consultationTime: "",
+  consultationDate: getManilaDateTime(now).date,
+  consultationTime: getManilaDateTime(now).time,
   chiefComplaint: "",
   bloodPressure: "",
   temperature: "",
@@ -181,30 +166,38 @@ const emptyForm = (now = new Date()) => ({
   height: "",
   weight: "",
   oxygenSaturation: "",
-  clinicalFindingsDiagnosis: "",
+  findings: "",
+  diagnosis: "",
   treatmentGiven: "",
   medicationPrescribed: "",
   medications: [],
   adviceGiven: "",
   serviceId: "",
   serviceName: "",
+  serviceCategory: "",
   followUpId: "",
+  followUpRequired: "No",
+  nextVisitDate: "",
+  referralRequired: "No",
+  remarks: "",
+  clinicalIndicators: {},
+  clinicalContext: { existingConditions: [] },
+  maternal: { careType: "prenatal", pregnancyId: null, lmpDate: "", eddDate: "", gestationalAgeWeeks: "" },
 });
 
-/**
- * @typedef {Object} FormErrors
- * @property {string} [resident]
- * @property {string} [consultationDate]
- * @property {string} [chiefComplaint]
- * @property {string} [bloodPressure]
- * @property {string} [temperature]
- * @property {string} [pulseRate]
- * @property {string} [respiratoryRate]
- * @property {string} [height]
- * @property {string} [weight]
- * @property {string} [oxygenSaturation]
- * @property {string} [submit]
- */
+/** @typedef {Record<string, string>} FormErrors */
+
+const conditionValue = (condition) => typeof condition === "string"
+  ? { name: condition, status: "stable", significant: false }
+  : { ...condition, name: condition.name || condition.condition || condition.diagnosis || "", status: condition.status || "stable", significant: condition.significant === true };
+
+const hasMaternalInformation = (maternal) => Boolean(maternal && [
+  "careType", "pregnancyId", "maternalRecordId", "lmpDate", "eddDate", "gestationalAgeWeeks",
+].some((field) => maternal[field] != null && String(maternal[field]).trim() !== ""));
+const hasMaternalDetails = (maternal) => Boolean(maternal && (
+  maternal.pregnancyId || maternal.maternalRecordId || maternal.lmpDate || maternal.eddDate
+  || String(maternal.gestationalAgeWeeks ?? "").trim() || ["prenatal", "postpartum"].includes(maternal.careType)
+));
 
 const toResidentOption = (r) => ({
   id: r.id,
@@ -219,6 +212,7 @@ const toResidentOption = (r) => ({
   // `contact` as a fallback for any already-normalized source. Only show the
   // placeholder when a contact number is genuinely absent.
   contact: r.contact || r.cellphoneNo || "—",
+  birthDate: r.birthDate || "",
 });
 
 /** Keep the record list readable: strip time for the table. */
@@ -257,7 +251,10 @@ const parseVitals = (value) => {
   }
 };
 
-const consultationRisk = (record) => consultationRiskLevel(record) || "Unassessed";
+const consultationRisk = (record) => {
+  const level = consultationRiskLevel(record);
+  return level === "Moderate" ? "Medium" : level || "Unassessed";
+};
 
 /** Two-letter initials for the resident avatar (local — no external store). */
 const initialsOf = (name) =>
@@ -292,7 +289,7 @@ export default function TreatmentConsultation() {
   const ownerId = user?.id || null;
   const historyScopeKey = JSON.stringify([user?.role, user?.municipalityId || user?.municipality_id,
     user?.barangayId || user?.barangay_id]);
-  const [savedHistory, setSavedHistory] = useState(null);
+  const [, setSavedHistory] = useState(null);
   const [offlineDrafts, setOfflineDrafts] = useState([]);
   const [draftBusyId, setDraftBusyId] = useState(null);
   const [reviewLocalId, setReviewLocalId] = useState(null);
@@ -305,6 +302,7 @@ export default function TreatmentConsultation() {
   const [editingId, setEditingId] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
   const [editingRisk, setEditingRisk] = useState(null);
+  const [editingMedications, setEditingMedications] = useState([]);
   const [openActionMenu, setOpenActionMenu] = useState(null);
   const recordRequest = useRef(0);
 
@@ -347,7 +345,11 @@ export default function TreatmentConsultation() {
   const [recordSort, setRecordSort] = useState("newest");
   const [recordPage, setRecordPage] = useState(1);
   const [recordPageSize, setRecordPageSize] = useState(8);
-  const [formData, setFormData] = useState(emptyForm());
+  const [formData, setFormData] = useState(emptyForm);
+  const [savedBpSnapshot, setSavedBpSnapshot] = useState(null);
+  const [maternalInfoCompleted, setMaternalInfoCompleted] = useState(false);
+  const [maternalInfoTouched, setMaternalInfoTouched] = useState(false);
+  const [maternalInfoProtected, setMaternalInfoProtected] = useState(false);
   const [errors, setErrors] = useState(/** @type {FormErrors} */ ({}));
   const [toast, setToast] = useState(null);
   // Active Health Services catalog records for the service selector. An
@@ -355,6 +357,10 @@ export default function TreatmentConsultation() {
   const [healthServices, setHealthServices] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [servicesError, setServicesError] = useState("");
+  const [clinicalContext, setClinicalContext] = useState(null);
+  const [contextError, setContextError] = useState("");
+  const [contextRetry, setContextRetry] = useState(0);
+  const clinicalInputResident = useRef(null);
 
   useEffect(() => {
     const start = location.state?.followUpStart;
@@ -363,23 +369,75 @@ export default function TreatmentConsultation() {
     if (!resident) return;
     setSelectedResident(resident);
     setFormData({ ...emptyForm(), chiefComplaint: start.purpose || "Follow-up consultation", followUpId: start.id });
+    setSavedBpSnapshot(null);
+    setMaternalInfoCompleted(false);
+    setMaternalInfoTouched(false);
+    setMaternalInfoProtected(false);
     setErrors({});
     setMode("form");
     navigate(location.pathname, { replace: true, state: null });
   }, [location.state, location.pathname, residentOptions, navigate]);
 
   // Read-only BMI, recomputed immediately whenever height or weight changes.
-  const bmiDisplay = useMemo(
-    () => computeBmiDisplay(formData.height, formData.weight),
-    [formData.height, formData.weight],
-  );
-  const bloodPressureCategory = useMemo(
-    () => classifyBp(formData.bloodPressure, {
+  const bmi = calculateConsultationBmi(formData.height, formData.weight);
+  const bmiDisplay = bmi === null ? "" : bmi.toFixed(1);
+  const bloodPressureCategory = useMemo(() => {
+    const savedContextMatches = savedBpSnapshot
+      && savedBpSnapshot.bloodPressure === formData.bloodPressure
+      && savedBpSnapshot.chiefComplaint === formData.chiefComplaint
+      && savedBpSnapshot.findings === formData.findings
+      && JSON.stringify(savedBpSnapshot.clinicalIndicators) === JSON.stringify(formData.clinicalIndicators);
+    if (savedContextMatches) {
+      return { ...savedBpSnapshot.classification, badgeClassName: bloodPressureBadgeClassName(savedBpSnapshot.classification) };
+    }
+    return classifyBp(formData.bloodPressure, {
       chiefComplaint: formData.chiefComplaint,
-      findings: formData.clinicalFindingsDiagnosis,
-    }),
-    [formData.bloodPressure, formData.chiefComplaint, formData.clinicalFindingsDiagnosis],
-  );
+      findings: formData.findings,
+      indicators: formData.clinicalIndicators,
+    });
+  }, [formData.bloodPressure, formData.chiefComplaint, formData.findings, formData.clinicalIndicators, savedBpSnapshot]);
+
+  const selectedService = healthServices.find((service) => service.id === formData.serviceId);
+  const maternalService = /\b(maternal|prenatal)\b/i.test(selectedService?.category || formData.serviceCategory || "");
+  const confirmedPregnancy = clinicalContext?.pregnancy;
+  const pregnancyClinicalTextIndicator = clinicalTextIndicatesPregnancy(`${formData.chiefComplaint}\n${formData.findings}`);
+
+  useEffect(() => {
+    if (mode !== "form" || !selectedResident?.id || !ownerId || reviewLocalId
+      || validateConsultationDateTime({ consultationDate: formData.consultationDate }, { required: false }).consultationDate) return;
+    let active = true;
+    const guard = captureOwnerGuard(ownerId);
+    const controller = new AbortController();
+    const residentId = selectedResident.id;
+    setContextError("");
+    consultationsApi.clinicalContext({ residentId, consultationDate: formData.consultationDate }, { ownerId, signal: controller.signal })
+      .then((context) => {
+        if (!active || !guard()) return;
+        if (!context || typeof context !== "object") throw new Error("The resident clinical context was not returned.");
+        setClinicalContext(context);
+        if (clinicalInputResident.current !== residentId) {
+          clinicalInputResident.current = residentId;
+          setFormData((current) => ({
+            ...current,
+            clinicalContext: {
+              existingConditions: (context.existingConditions || []).map(conditionValue),
+            },
+            maternal: {
+              ...current.maternal,
+              careType: context.pregnancy?.isPostpartum ? "postpartum" : "prenatal",
+              pregnancyId: context.pregnancy?.id || null,
+              lmpDate: context.pregnancy?.lmpDate || "",
+              eddDate: context.pregnancy?.eddDate || "",
+              gestationalAgeWeeks: context.pregnancy?.gestationalAgeWeeks ?? "",
+            },
+          }));
+        }
+      })
+      .catch((error) => {
+        if (active && guard()) setContextError(error?.message || "Could not confirm resident clinical context.");
+      });
+    return () => { active = false; controller.abort(); };
+  }, [mode, selectedResident?.id, formData.consultationDate, ownerId, reviewLocalId, contextRetry]);
 
   const load = useCallback(() => {
     if (!ownerId) return Promise.resolve();
@@ -423,8 +481,15 @@ export default function TreatmentConsultation() {
     setMode("list");
     setEditingId(null);
     setSelectedResident(null);
+    clinicalInputResident.current = null;
+    setClinicalContext(null);
+    setEditingMedications([]);
     setSavedHistory(null);
     setFormData(emptyForm());
+    setSavedBpSnapshot(null);
+    setMaternalInfoCompleted(false);
+    setMaternalInfoTouched(false);
+    setMaternalInfoProtected(false);
     setSearchQuery("");
     setErrors({});
     setBusy(false);
@@ -500,9 +565,16 @@ export default function TreatmentConsultation() {
     if (!canConductConsultation) return;
     recordRequest.current += 1;
     setEditingId(null);
+    setEditingMedications([]);
+    clinicalInputResident.current = null;
+    setClinicalContext(null);
     setReviewLocalId(null);
     setSelectedResident(null);
     setFormData(emptyForm());
+    setSavedBpSnapshot(null);
+    setMaternalInfoCompleted(false);
+    setMaternalInfoTouched(false);
+    setMaternalInfoProtected(false);
     setErrors({});
     setSearchQuery("");
     setMode("form");
@@ -533,18 +605,30 @@ export default function TreatmentConsultation() {
     }
     setEditingId(record.id);
     setEditingRisk(consultationRisk(record));
+    setEditingMedications(record.medications || []);
     setReviewLocalId(null);
     setSelectedResident(record.resident || null);
+    clinicalInputResident.current = record.resident?.id || null;
+    setClinicalContext(null);
     // Vitals are returned nested under record.vitals (bp/temperature/hr/rr/
     // heightCm/weightKg/o2sat); map them back to the flat form fields so an
     // edited consultation shows its saved vitals instead of blanks.
     const v = record.vitals || {};
-    // Merge findings and diagnosis for the combined field
-    const mergedClinicalData = [
-      record.findings || "",
-      record.diagnosis ? `Diagnosis: ${record.diagnosis}` : ""
-    ].filter(Boolean).join("\n");
+    const savedClinicalIndicators = record.clinicalIndicators || record.consultationDetails?.clinicalIndicators || { dangerSignsReviewed: false };
+    const savedBpClassification = savedConsultationBloodPressureClassification(record);
+    setSavedBpSnapshot(savedBpClassification ? {
+      classification: savedBpClassification,
+      bloodPressure: v.bp ?? record.bloodPressure ?? "",
+      chiefComplaint: record.chiefComplaint || "",
+      findings: record.findings || "",
+      clinicalIndicators: savedClinicalIndicators,
+    } : null);
+    const savedMaternal = record.maternal || record.consultationDetails?.maternal || null;
+    setMaternalInfoCompleted(hasMaternalInformation(savedMaternal));
+    setMaternalInfoTouched(false);
+    setMaternalInfoProtected(hasMaternalInformation(savedMaternal));
     setFormData({
+      ...emptyForm(),
       consultationDate: record.consultationDate || "",
       consultationTime: record.consultationTime || "",
       chiefComplaint: record.chiefComplaint || "",
@@ -555,13 +639,22 @@ export default function TreatmentConsultation() {
       height: v.heightCm ?? record.height ?? "",
       weight: v.weightKg ?? record.weight ?? "",
       oxygenSaturation: v.o2sat ?? record.oxygenSaturation ?? "",
-      clinicalFindingsDiagnosis: mergedClinicalData,
+      findings: record.findings || "",
+      diagnosis: record.diagnosis || "",
       treatmentGiven: record.treatmentGiven || "",
       medicationPrescribed: record.medicationPrescribed || "",
       medications: Array.isArray(record.medications) ? record.medications : [],
       adviceGiven: record.adviceGiven || "",
       serviceId: record.serviceId || "",
-      serviceName: record.serviceName || "",
+      serviceName: consultationServiceName(record),
+      serviceCategory: record.serviceCategory || record.consultationDetails?.healthServiceCategory || "",
+      followUpRequired: record.followUpRequired || "No",
+      nextVisitDate: record.nextVisitDate || "",
+      referralRequired: record.referralRequired || "No",
+      remarks: record.remarks || "",
+      clinicalIndicators: savedClinicalIndicators,
+      clinicalContext: { ...emptyForm().clinicalContext, ...(record.clinicalContext || record.consultationDetails?.clinicalContext || {}) },
+      maternal: { ...emptyForm().maternal, ...(savedMaternal || {}) },
     });
     setErrors({});
     setSearchQuery("");
@@ -573,22 +666,87 @@ export default function TreatmentConsultation() {
     recordRequest.current += 1;
     setMode("list");
     setEditingId(null);
+    setEditingMedications([]);
+    clinicalInputResident.current = null;
+    setClinicalContext(null);
     setReviewLocalId(null);
     setSelectedResident(null);
     setFormData(emptyForm());
+    setSavedBpSnapshot(null);
+    setMaternalInfoCompleted(false);
+    setMaternalInfoTouched(false);
+    setMaternalInfoProtected(false);
     setErrors({});
   };
 
-  const validate = () => {
+  const updateVital = (field, value) => {
+    const updated = { ...formData, [field]: value };
+    const validation = validateConsultationVitals(updated);
+    setFormData(updated);
+    setErrors((previous) => {
+      const next = { ...previous };
+      if (String(value ?? "").trim() || previous[field]) next[field] = validation[field] || "";
+      if (["height", "weight"].includes(field) || previous.bmi) {
+        if ((String(updated.height ?? "").trim() && String(updated.weight ?? "").trim()) || previous.bmi) {
+          next.bmi = validation.bmi || "";
+        }
+      }
+      return next;
+    });
+  };
+
+  const validateMaternalInformation = () => {
     const next = {};
-    if (!selectedResident) next.resident = "Please select a resident.";
-    if (!formData.consultationDate) next.consultationDate = "Consultation date is required.";
-    if (!formData.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
-    if (String(formData.bloodPressure ?? "").trim() && !parseBloodPressure(formData.bloodPressure)) {
-      next.bloodPressure = "Enter a complete, valid systolic/diastolic reading (e.g. 120/80).";
+    if (!maternalService) return next;
+    if (formData.maternal.careType === "prenatal" && !confirmedPregnancy?.isPregnant && !pregnancyClinicalTextIndicator) {
+      next["maternal.careType"] = "Record pregnancy-related terms in the Chief Complaint or Clinical Findings, or use a confirmed same-resident pregnancy episode for prenatal care.";
     }
-    if (!isPositiveOrEmpty(formData.height)) next.height = "Height must be a number greater than 0.";
-    if (!isPositiveOrEmpty(formData.weight)) next.weight = "Weight must be a number greater than 0.";
+    for (const field of ["lmpDate", "eddDate"]) {
+      const value = formData.maternal[field];
+      if (value && validateConsultationDateTime({ consultationDate: value }, { required: false }).consultationDate) {
+        next[`maternal.${field}`] = "Enter a valid calendar date.";
+      }
+    }
+    if (formData.maternal.lmpDate && formData.maternal.eddDate && formData.maternal.eddDate <= formData.maternal.lmpDate) {
+      next["maternal.eddDate"] = "Estimated delivery must be after the last menstrual period.";
+    }
+    const weeks = formData.maternal.gestationalAgeWeeks;
+    if (weeks !== "" && weeks != null && (!/^\d+(?:\.\d+)?$/.test(String(weeks)) || Number(weeks) > 45)) {
+      next["maternal.gestationalAgeWeeks"] = "Enter a gestational age between 0 and 45 weeks.";
+    }
+    return next;
+  };
+
+  const completeMaternalInformation = () => {
+    const maternalErrors = validateMaternalInformation();
+    setErrors((previous) => ({
+      ...Object.fromEntries(Object.entries(previous).filter(([field]) => !field.startsWith("maternal."))),
+      ...maternalErrors,
+    }));
+    if (Object.keys(maternalErrors).length) return;
+    setMaternalInfoCompleted(true);
+  };
+
+  const validate = () => {
+    /** @type {Record<string, string>} */
+    const next = { ...validateConsultationDateTime(formData), ...validateConsultationVitals(formData),
+      ...validateConsultationMedications(formData.medications, { previous: editingMedications }) };
+    if (!selectedResident) next.resident = "Please select a resident.";
+    if (!maternalService && ((maternalInfoTouched && hasMaternalDetails(formData.maternal))
+      || (maternalInfoProtected && hasMaternalInformation(formData.maternal)))) {
+      next.serviceId = "Select a Prenatal / Maternal health service to save the entered maternal information.";
+    }
+    if (!formData.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
+    if (!formData.findings.trim()) next.findings = "Record the clinical findings from this consultation.";
+    if (formData.treatmentGiven.length > 10000) next.treatmentGiven = "Use 10,000 characters or fewer for treatment provided.";
+    if (formData.adviceGiven.length > 10000) next.adviceGiven = "Use 10,000 characters or fewer for recommendations.";
+    if (formData.followUpRequired === "Yes" && !formData.nextVisitDate) next.nextVisitDate = "Select the follow-up date.";
+    if (formData.nextVisitDate && formData.nextVisitDate < formData.consultationDate) next.nextVisitDate = "Follow-up cannot be earlier than the consultation.";
+    Object.assign(next, validateMaternalInformation());
+    if (formData.riskReview && (!formData.riskReview.reason?.trim() || !formData.riskReview.reassessmentConfirmed)) next.riskReview = "A clinical reason and confirmed reassessment are required to review the classification.";
+    for (const [index, condition] of (formData.clinicalContext.existingConditions || []).entries()) {
+      if (!String(condition.name || "").trim()) next[`clinicalContext.existingConditions[${index}].name`] = "Enter the recorded condition or remove the empty row.";
+    }
     return next;
   };
 
@@ -603,6 +761,9 @@ export default function TreatmentConsultation() {
     }
     const payload = {
       ...formData,
+      riskReview: formData.riskReview || undefined,
+      clinicalContext: { existingConditions: formData.clinicalContext.existingConditions || [] },
+      maternal: maternalService ? { ...formData.maternal, pregnancyId: formData.maternal.pregnancyId || confirmedPregnancy?.id || null } : undefined,
       residentId: selectedResident.id,
       followUpId: formData.followUpId || undefined,
     };
@@ -636,9 +797,9 @@ export default function TreatmentConsultation() {
       const referralDraft = {
         residentId: selectedResident.id,
         resident: selectedResident.name,
-        reason: formData.clinicalFindingsDiagnosis || formData.chiefComplaint || "",
+        reason: formData.findings || formData.chiefComplaint || "",
         riskLevel: consultationRisk(saved),
-        findings: formData.clinicalFindingsDiagnosis || "",
+        findings: formData.findings || "",
         chiefComplaints: formData.chiefComplaint || "",
         clinicalHistory: "",
         vitals: {
@@ -650,7 +811,7 @@ export default function TreatmentConsultation() {
           weightKg: formData.weight,
           o2sat: formData.oxygenSaturation,
         },
-        impression: formData.clinicalFindingsDiagnosis || "",
+        impression: formData.diagnosis || formData.findings || "",
         recommendations: formData.adviceGiven || "",
         clinicalNotes: saved?.remarks || "",
         treatmentVisitId: saved?.id || "",
@@ -670,10 +831,10 @@ export default function TreatmentConsultation() {
         setConsultations((current) => current.map((item) => (item.id === editingId ? saved : item)));
         void load();
         if (focusedId === editingId) void focusedRecord.refresh();
-        showToast(saved.clinicalAssessment?.referralEvaluationRequired
+        showToast(consultationAssessment(saved)?.referralEvaluationRequired
           ? "Consultation updated. High risk: referral evaluation is required."
           : "Consultation updated successfully.");
-        if (saved.clinicalAssessment?.referralEvaluationRequired === true && editingRisk !== "High" && !saved.referrals?.length) {
+        if (consultationAssessment(saved)?.referralEvaluationRequired === true && editingRisk !== "High" && !saved.referrals?.length) {
           openReferral(saved);
           return;
         }
@@ -694,10 +855,10 @@ export default function TreatmentConsultation() {
       if (res.source === "server") {
         const saved = res.record;
         setConsultations((current) => [saved, ...current.filter((row) => row.id !== saved.id)]);
-        showToast(saved.clinicalAssessment?.referralEvaluationRequired
+        showToast(consultationAssessment(saved)?.referralEvaluationRequired
           ? "Consultation saved. High risk: referral evaluation is required."
           : "Consultation saved successfully.");
-        if (saved?.clinicalAssessment?.referralEvaluationRequired === true) {
+        if (consultationAssessment(saved)?.referralEvaluationRequired === true) {
           openReferral(saved);
           return;
         }
@@ -757,21 +918,22 @@ export default function TreatmentConsultation() {
       const resident =
         residentOptions.find((r) => r.id === data.residentId) ||
         (data.residentId ? { id: data.residentId, name: data.residentId, barangay: "" } : null);
-      // Merge findings and diagnosis for the combined field
-      const mergedClinicalData = [
-        data.findings || data.clinicalFindingsDiagnosis || "",
-        data.diagnosis ? `Diagnosis: ${data.diagnosis}` : ""
-      ].filter(Boolean).join("\n");
+      const clinical = normalizeConsultationClinicalText(data);
       setEditingId(null);
+      setSavedBpSnapshot(null);
+      setMaternalInfoCompleted(false);
+      setMaternalInfoTouched(false);
+      setMaternalInfoProtected(hasMaternalInformation(data.maternal));
       setReviewLocalId(localId);
       setSelectedResident(resident);
+      clinicalInputResident.current = resident?.id || null;
       setFormData({ 
         ...emptyForm(),
         ...data,
-        clinicalFindingsDiagnosis: mergedClinicalData,
-        // Clear old separate fields if they exist
-        findings: undefined,
-        diagnosis: undefined,
+        ...clinical,
+        clinicalIndicators: data.clinicalIndicators || { dangerSignsReviewed: false },
+        clinicalContext: { ...emptyForm().clinicalContext, ...(data.clinicalContext || {}) },
+        maternal: { ...emptyForm().maternal, ...(data.maternal || {}) },
       });
       setErrors(restored.lastError ? { submit: restored.lastError.message } : {});
       setSearchQuery("");
@@ -804,16 +966,17 @@ export default function TreatmentConsultation() {
         record.health_record_no,
         record.id,
         record.consultationId,
-        record.serviceName,
+        consultationServiceName(record),
         record.consultationDate,
         record.chiefComplaint,
         record.diagnosis,
       ].filter(Boolean).join(" ").toLowerCase().includes(query);
       const dateMatches = (!recordDateFrom || date >= recordDateFrom) && (!recordDateTo || date <= recordDateTo);
       const riskMatches = recordRisk === "All" || risk === recordRisk;
+      const hasFollowUp = consultationFollowUp(record).has;
       const followUpMatches = recordFollowUp === "All"
-        || recordFollowUp === "With Follow-up" && record.followUpRequired === "Yes"
-        || recordFollowUp === "Without Follow-up" && record.followUpRequired !== "Yes";
+        || recordFollowUp === "With Follow-up" && hasFollowUp
+        || recordFollowUp === "Without Follow-up" && !hasFollowUp;
       return searchMatches && dateMatches && riskMatches && followUpMatches;
     });
     return filtered.sort((left, right) => {
@@ -876,6 +1039,15 @@ export default function TreatmentConsultation() {
                 key={resident.id}
                 onClick={() => {
                    if (busy || reviewLocalId || editingId) return;
+                  if (selectedResident?.id !== resident.id) {
+                    clinicalInputResident.current = null;
+                    setClinicalContext(null);
+                    setFormData((current) => ({ ...current, clinicalContext: emptyForm().clinicalContext, maternal: emptyForm().maternal, clinicalIndicators: {} }));
+                    setSavedBpSnapshot(null);
+                    setMaternalInfoCompleted(false);
+                    setMaternalInfoTouched(false);
+                    setMaternalInfoProtected(false);
+                  }
                   setSelectedResident(resident);
                   if (errors.resident) setErrors((prev) => ({ ...prev, resident: "" }));
                 }}
@@ -913,7 +1085,6 @@ export default function TreatmentConsultation() {
           <h3 className="font-semibold text-brand-ink">
             {reviewLocalId ? "Review Queued Consultation" : editingId ? "Edit Treatment Consultation" : "Treatment Consultation Form"}
           </h3>
-          {editingId && <RiskBadge level={editingRisk} />}
           {!editingId && !reviewLocalId && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-3 py-1 text-xs font-medium text-brand-blue">
               <Plus className="w-3.5 h-3.5" /> New Consultation
@@ -971,62 +1142,138 @@ export default function TreatmentConsultation() {
         {/* Consultation Information */}
         <div className="mb-5">
           <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Consultation Information</h4>
+          {contextError && <p role="alert" className="mb-3 text-xs text-brand-danger">{contextError} <button type="button" onClick={() => setContextRetry((value) => value + 1)} className="font-medium text-brand-blue hover:underline">Retry</button></p>}
           <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3 mb-3">
             <div>
-              <p className="text-xs text-brand-gray mb-1">Consultation Date <span className="text-brand-danger">*</span></p>
+              <label htmlFor="consultation-date" className="block text-xs text-brand-gray mb-1">Consultation Date <span className="text-brand-danger">*</span></label>
               <input
+                id="consultation-date"
                 type="date"
+                required
                 value={formData.consultationDate}
                 onChange={(e) => setFormData({ ...formData, consultationDate: e.target.value })}
                 className={inputCls(errors.consultationDate)}
+                aria-invalid={Boolean(errors.consultationDate)}
               />
               {errors.consultationDate && <p className="mt-1 text-xs text-brand-danger">{errors.consultationDate}</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Consultation Time</p>
+              <label htmlFor="consultation-time" className="block text-xs text-brand-gray mb-1">Consultation Time <span className="text-brand-danger">*</span></label>
               <input
+                id="consultation-time"
                 type="time"
+                required
                 value={formData.consultationTime}
                 onChange={(e) => setFormData({ ...formData, consultationTime: e.target.value })}
-                className={inputCls()}
+                className={inputCls(errors.consultationTime)}
+                aria-invalid={Boolean(errors.consultationTime)}
               />
+              {errors.consultationTime && <p className="mt-1 text-xs text-brand-danger">{errors.consultationTime}</p>}
             </div>
             <div className="sm:col-span-2">
-              <label htmlFor="consult-service" className="text-xs text-brand-gray mb-1 block">Health Service Provided</label>
-              <select
-                id="consult-service"
+              <SearchableSelect
+                id="consult-service" label="Health Service Provided" ariaLabel="Health Service Provided"
                 value={formData.serviceId}
-                onChange={(e) => {
-                  setFormData({ ...formData, serviceId: e.target.value });
+                onChange={(serviceId) => {
+                  const service = healthServices.find((item) => item.id === serviceId);
+                  setFormData({ ...formData, serviceId, serviceName: service?.name || "", serviceCategory: service?.category || "" });
                   if (errors.serviceId) setErrors((prev) => ({ ...prev, serviceId: "" }));
                 }}
-                className={inputCls(errors.serviceId)}
-                disabled={servicesLoading}
-              >
-                <option value="">General consultation (no specific service)</option>
-                  {formData.serviceId && !healthServices.some((s) => s.id === formData.serviceId) && (
-                    <option value={formData.serviceId} disabled>
-                      {formData.serviceName || "Previously selected health service"} (inactive or unavailable)
-                  </option>
-                  )}
-                  {healthServices.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}{s.category ? ` — ${s.category}` : ""}
-                    </option>
-                  ))}
-                </select>
+                options={[
+                  ...(formData.serviceId && !healthServices.some((service) => service.id === formData.serviceId)
+                    ? [{ value: formData.serviceId, label: consultationHealthServiceLabel({
+                      name: formData.serviceName || "Previously selected service", category: formData.serviceCategory,
+                    }) }] : []),
+                  ...healthServices.map((service) => ({ value: service.id, label: consultationHealthServiceLabel(service) })),
+                ]}
+                error={errors.serviceId || ""} disabled={servicesLoading || Boolean(reviewLocalId)} compact portalDropdown
+                placeholder="Select a registered health service"
+              />
                 {servicesLoading ? (
                   <p className="mt-1 text-xs text-brand-gray">Loading health services…</p>
                 ) : servicesError ? (
                   <p className="mt-1 text-xs text-brand-danger" role="alert">{servicesError}</p>
-                ) : errors.serviceId ? (
-                  <p className="mt-1 text-xs text-brand-danger">{errors.serviceId}</p>
                 ) : healthServices.length === 0 ? (
-                  <p className="mt-1 text-xs text-brand-gray">No active health services are available. General consultations can be saved without a service.</p>
+                   <p className="mt-1 text-xs text-brand-gray">No active registered services are available. An unlinked record does not create a new service category.</p>
                 ) : (
                 <p className="mt-1 text-xs text-brand-gray">Select the registered health service this consultation belongs to.</p>
               )}
             </div>
+            {maternalService && <section aria-label="Maternal Information" className="rounded-btn border border-brand-border bg-brand-bg/40 p-3 dark:border-border dark:bg-card/40 sm:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h5 className="text-xs font-semibold text-brand-ink dark:text-foreground">Maternal Information</h5>
+                {maternalInfoCompleted && <div className="flex items-center gap-2">
+                  <StatusBadge value="Completed" className="whitespace-nowrap px-2 py-0.5 text-[10px]" />
+                  <button type="button" aria-controls="maternal-information-fields" aria-expanded="false"
+                    disabled={Boolean(reviewLocalId)} onClick={() => setMaternalInfoCompleted(false)}
+                    className="rounded-btn px-2 py-1 text-xs font-medium text-brand-blue hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-60">
+                    Edit Maternal Information
+                  </button>
+                </div>}
+              </div>
+              {maternalInfoCompleted && <dl className="mt-2 grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+                {[
+                  ["Maternal care", formData.maternal.careType === "prenatal" ? "Prenatal consultation"
+                    : formData.maternal.careType === "postpartum" ? "Postpartum consultation" : formData.maternal.careType],
+                  ["Gestational age", formData.maternal.gestationalAgeWeeks !== "" && formData.maternal.gestationalAgeWeeks != null
+                    ? `${formData.maternal.gestationalAgeWeeks} weeks` : ""],
+                  ["LMP", formData.maternal.lmpDate ? formatDate(formData.maternal.lmpDate) : ""],
+                  ["EDD", formData.maternal.eddDate ? formatDate(formData.maternal.eddDate) : ""],
+                ].filter(([, value]) => value).map(([label, value]) => <div key={label} className="min-w-0">
+                  <dt className="text-brand-gray">{label}</dt>
+                  <dd className="break-words font-medium text-brand-ink dark:text-foreground" style={{ overflowWrap: "anywhere" }}>{value}</dd>
+                </div>)}
+              </dl>}
+              <div id="maternal-information-fields" aria-hidden={maternalInfoCompleted}
+                className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-200 ease-out ${maternalInfoCompleted ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"}`}>
+                <div className="min-h-0 overflow-hidden">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <SearchableSelect label="Maternal Care Recorded" ariaLabel="Maternal care type" compact portalDropdown
+                      value={formData.maternal.careType} disabled={Boolean(reviewLocalId) || maternalInfoCompleted}
+                      options={[{ value: "prenatal", label: "Prenatal consultation" }, { value: "postpartum", label: "Postpartum consultation" }]}
+                      onChange={(careType) => {
+                        setMaternalInfoTouched(true);
+                        setFormData((current) => ({ ...current, maternal: { ...current.maternal, careType } }));
+                      }} />
+                    <label className="text-xs text-brand-gray">Gestational Age (weeks)
+                      <input aria-label="Gestational age in weeks" inputMode="decimal" disabled={Boolean(reviewLocalId) || maternalInfoCompleted}
+                        value={formData.maternal.gestationalAgeWeeks ?? ""}
+                        onChange={(event) => {
+                          setMaternalInfoTouched(true);
+                          setFormData((current) => ({ ...current, maternal: { ...current.maternal, gestationalAgeWeeks: event.target.value } }));
+                        }}
+                        className={`${inputCls(errors["maternal.gestationalAgeWeeks"])} mt-1.5`} placeholder="Confirmed age, if available" />
+                    </label>
+                    <label className="text-xs text-brand-gray">Last Menstrual Period
+                      <input aria-label="Last menstrual period" type="date" disabled={Boolean(reviewLocalId) || maternalInfoCompleted}
+                        value={formData.maternal.lmpDate || ""}
+                        onChange={(event) => {
+                          setMaternalInfoTouched(true);
+                          setFormData((current) => ({ ...current, maternal: { ...current.maternal, lmpDate: event.target.value } }));
+                        }}
+                        className={`${inputCls(errors["maternal.lmpDate"])} mt-1.5`} />
+                    </label>
+                    <label className="text-xs text-brand-gray">Estimated Delivery Date
+                      <input aria-label="Estimated delivery date" type="date" disabled={Boolean(reviewLocalId) || maternalInfoCompleted}
+                        value={formData.maternal.eddDate || ""}
+                        onChange={(event) => {
+                          setMaternalInfoTouched(true);
+                          setFormData((current) => ({ ...current, maternal: { ...current.maternal, eddDate: event.target.value } }));
+                        }}
+                        className={`${inputCls(errors["maternal.eddDate"])} mt-1.5`} />
+                    </label>
+                  </div>
+                  {Object.entries(errors).filter(([field]) => field.startsWith("maternal.")).map(([field, message]) => <p key={field} role="alert" className="mt-1 text-xs text-brand-danger">{message}</p>)}
+                  <div className="mt-3 flex justify-end">
+                    <button type="button" aria-controls="maternal-information-fields" aria-expanded="true"
+                      disabled={Boolean(reviewLocalId) || maternalInfoCompleted} onClick={completeMaternalInformation}
+                      className="min-h-9 rounded-btn bg-brand-blue px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
+                      Complete Maternal Information
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>}
           </div>
           <div className="mb-3">
             <p className="text-xs text-brand-gray mb-1">Chief Complaint <span className="text-brand-danger">*</span></p>
@@ -1046,23 +1293,31 @@ export default function TreatmentConsultation() {
           <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Vital Signs</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-3">
             <div className="min-w-0">
-              <label htmlFor="vital-blood-pressure" className="mb-1.5 block text-xs font-medium text-slate-600">Blood Pressure (mmHg)</label>
-              <div className="flex w-full min-w-0 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+              <label htmlFor="vital-blood-pressure" className="mb-1 block text-xs text-brand-gray">Blood Pressure (mmHg) <span className="text-brand-danger">*</span></label>
+              <div className={`flex w-full min-w-0 items-center rounded-btn border bg-white px-3 py-2 focus-within:border-brand-blue dark:bg-card ${errors.bloodPressure ? "border-brand-danger dark:border-brand-danger" : "border-brand-border dark:border-border"}`}>
                 <input
                   id="vital-blood-pressure"
+                  aria-label="Blood Pressure (mmHg)"
                   type="text"
                   inputMode="numeric"
+                  required
                   placeholder="120/80"
                   value={formData.bloodPressure}
                   onChange={(e) => {
                     const input = e.currentTarget;
+                    if (/[^\d\s/]/.test(input.value)) {
+                      const bloodPressure = input.value;
+                      setFormData((prev) => ({ ...prev, bloodPressure }));
+                      setErrors((prev) => ({ ...prev, bloodPressure: validateConsultationVitals({ ...formData, bloodPressure }).bloodPressure }));
+                      return;
+                    }
                     const formatted = formatBloodPressureInput(input.value, input.selectionStart, input.selectionEnd, e.nativeEvent.inputType);
                     if (formatted) {
                       input.value = formatted.value;
                       input.setSelectionRange(formatted.caret, formatted.caret);
                     }
                     const bloodPressure = input.value;
-                    setFormData((prev) => ({ ...prev, bloodPressure }));
+                    updateVital("bloodPressure", bloodPressure);
                   }}
                   aria-invalid={Boolean(errors.bloodPressure)}
                   className="min-w-0 flex-1 bg-transparent text-sm font-medium text-slate-900 outline-none placeholder:text-slate-400"
@@ -1071,47 +1326,47 @@ export default function TreatmentConsultation() {
               {bloodPressureCategory && (
                 <div className="mt-1 min-w-0">
                   <span
-                    className={`inline-flex max-w-full shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight ${bloodPressureCategory.badgeClassName}`}
+                    className={`inline-flex max-w-full shrink-0 whitespace-normal rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight ${bloodPressureCategory.badgeClassName}`}
                     aria-label={`Blood pressure category: ${bloodPressureCategory.category}`}
                   >
                     {bloodPressureCategory.category}
                   </span>
-                  {bloodPressureCategory.referralEvaluationRequired && (
-                    <p className="mt-1 max-w-full min-w-0 break-words text-[11px] leading-4 text-red-800" role="alert" aria-live="assertive">
+                    <p className={`mt-1 max-w-full min-w-0 break-words text-[11px] leading-4 ${bloodPressureCategory.referralEvaluationRequired ? "text-brand-danger" : "text-brand-gray"}`} role={bloodPressureCategory.referralEvaluationRequired ? "alert" : "status"} aria-live={bloodPressureCategory.referralEvaluationRequired ? "assertive" : "polite"}>
                       {bloodPressureCategory.message}
                     </p>
-                  )}
+                  {confirmedPregnancy?.isPregnant && <p className="mt-1 text-[11px] leading-4 text-brand-blue">Adult BP screening does not replace maternal assessment. Pregnancy with high BP requires prompt professional assessment.</p>}
                 </div>
               )}
               {errors.bloodPressure && <p className="mt-1 text-xs text-brand-danger">{errors.bloodPressure}</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Temperature (°C)</p>
-              <input type="text" placeholder="e.g. 36.7" value={formData.temperature} onChange={(e) => setFormData({ ...formData, temperature: e.target.value })} className={inputCls(errors.temperature)} />
+              <label htmlFor="vital-temperature" className="block text-xs text-brand-gray mb-1">Temperature (°C) <span className="text-brand-danger">*</span></label>
+              <input id="vital-temperature" type="text" inputMode="decimal" required aria-invalid={Boolean(errors.temperature)} placeholder="e.g. 36.7" value={formData.temperature} onChange={(e) => updateVital("temperature", e.target.value)} className={inputCls(errors.temperature)} />
               {errors.temperature && <p className="mt-1 text-xs text-brand-danger">{errors.temperature}</p>}
+              {consultationTemperatureWarningVisible(formData.temperature) && <p className="mt-1 text-xs font-semibold text-brand-danger" role="alert">Abnormal body temperature requires clinical review.</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Pulse Rate (bpm)</p>
-              <input type="text" placeholder="e.g. 74" value={formData.pulseRate} onChange={(e) => setFormData({ ...formData, pulseRate: e.target.value })} className={inputCls(errors.pulseRate)} />
+              <label htmlFor="vital-pulse" className="block text-xs text-brand-gray mb-1">Pulse Rate (bpm) <span className="text-brand-danger">*</span></label>
+              <input id="vital-pulse" type="text" inputMode="numeric" required aria-invalid={Boolean(errors.pulseRate)} placeholder="e.g. 74" value={formData.pulseRate} onChange={(e) => updateVital("pulseRate", e.target.value)} className={inputCls(errors.pulseRate)} />
               {errors.pulseRate && <p className="mt-1 text-xs text-brand-danger">{errors.pulseRate}</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Respiratory Rate (breaths/min)</p>
-              <input type="text" placeholder="e.g. 18" value={formData.respiratoryRate} onChange={(e) => setFormData({ ...formData, respiratoryRate: e.target.value })} className={inputCls(errors.respiratoryRate)} />
+              <label htmlFor="vital-respiratory" className="block text-xs text-brand-gray mb-1">Respiratory Rate (breaths/min) <span className="text-brand-danger">*</span></label>
+              <input id="vital-respiratory" type="text" inputMode="numeric" required aria-invalid={Boolean(errors.respiratoryRate)} placeholder="e.g. 18" value={formData.respiratoryRate} onChange={(e) => updateVital("respiratoryRate", e.target.value)} className={inputCls(errors.respiratoryRate)} />
               {errors.respiratoryRate && <p className="mt-1 text-xs text-brand-danger">{errors.respiratoryRate}</p>}
             </div>
             <div>
-              <label htmlFor="vital-height" className="block text-xs text-brand-gray mb-1">Height (cm)</label>
-              <input id="vital-height" type="text" placeholder="e.g. 158" value={formData.height} onChange={(e) => setFormData({ ...formData, height: e.target.value })} className={inputCls(errors.height)} />
+              <label htmlFor="vital-height" className="block text-xs text-brand-gray mb-1">Height (cm) <span className="text-brand-danger">*</span></label>
+              <input id="vital-height" type="text" inputMode="decimal" required aria-invalid={Boolean(errors.height)} placeholder="e.g. 158" value={formData.height} onChange={(e) => updateVital("height", e.target.value)} className={inputCls(errors.height)} />
               {errors.height && <p className="mt-1 text-xs text-brand-danger">{errors.height}</p>}
             </div>
             <div>
-              <label htmlFor="vital-weight" className="block text-xs text-brand-gray mb-1">Weight (kg)</label>
-              <input id="vital-weight" type="text" placeholder="e.g. 62" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} className={inputCls(errors.weight)} />
+              <label htmlFor="vital-weight" className="block text-xs text-brand-gray mb-1">Weight (kg) <span className="text-brand-danger">*</span></label>
+              <input id="vital-weight" type="text" inputMode="decimal" required aria-invalid={Boolean(errors.weight)} placeholder="e.g. 62" value={formData.weight} onChange={(e) => updateVital("weight", e.target.value)} className={inputCls(errors.weight)} />
               {errors.weight && <p className="mt-1 text-xs text-brand-danger">{errors.weight}</p>}
             </div>
             <div>
-              <label htmlFor="vital-bmi" className="block text-xs text-brand-gray mb-1">BMI (auto)</label>
+              <label htmlFor="vital-bmi" className="block text-xs text-brand-gray mb-1">BMI (auto) <span className="text-brand-danger">*</span></label>
               <input
                 id="vital-bmi"
                 type="text"
@@ -1122,12 +1377,13 @@ export default function TreatmentConsultation() {
                 tabIndex={-1}
                 value={bmiDisplay}
                 placeholder="—"
-                className={`${inputCls()} bg-brand-bg text-brand-blue font-medium cursor-default`}
+                className={`${inputCls(errors.bmi)} bg-brand-bg text-brand-blue font-medium cursor-default`}
               />
+              {errors.bmi && <p className="mt-1 text-xs text-brand-danger">{errors.bmi}</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Oxygen Saturation (%)</p>
-              <input type="text" placeholder="e.g. 98" value={formData.oxygenSaturation} onChange={(e) => setFormData({ ...formData, oxygenSaturation: e.target.value })} className={inputCls(errors.oxygenSaturation)} />
+              <label htmlFor="vital-oxygen" className="block text-xs text-brand-gray mb-1">Oxygen Saturation (%) <span className="text-brand-danger">*</span></label>
+              <input id="vital-oxygen" type="text" inputMode="decimal" required aria-invalid={Boolean(errors.oxygenSaturation)} placeholder="e.g. 98" value={formData.oxygenSaturation} onChange={(e) => updateVital("oxygenSaturation", e.target.value)} className={inputCls(errors.oxygenSaturation)} />
               {errors.oxygenSaturation && <p className="mt-1 text-xs text-brand-danger">{errors.oxygenSaturation}</p>}
             </div>
           </div>
@@ -1135,26 +1391,18 @@ export default function TreatmentConsultation() {
 
         {/* Clinical Assessment */}
         <div className="mb-5">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Clinical Assessment</h4>
+          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Clinical Findings</h4>
           <div className="space-y-3">
             <div>
-              <p className="text-xs text-brand-gray mb-1">Clinical Findings &amp; Optional Diagnosis</p>
+              <label htmlFor="clinical-findings" className="block text-xs text-brand-gray mb-1">Clinical Findings <span className="text-brand-danger">*</span></label>
               <textarea
-                rows={4}
-                value={formData.clinicalFindingsDiagnosis}
-                onChange={(e) => setFormData({ ...formData, clinicalFindingsDiagnosis: e.target.value })}
-                placeholder="Enter clinical findings. If applicable, add a new line starting with Diagnosis:"
-                className={`${inputCls()} resize-none w-full`}
+                id="clinical-findings" required rows={3}
+                value={formData.findings}
+                onChange={(e) => setFormData({ ...formData, findings: e.target.value })}
+                placeholder="Record examination findings, observed symptoms and relevant clinical information."
+                aria-invalid={Boolean(errors.findings)} className={`${inputCls(errors.findings)} resize-y w-full`}
               />
-            </div>
-            <div>
-              <p className="text-xs text-brand-gray mb-1">Treatment Provided</p>
-              <textarea
-                rows={2}
-                value={formData.treatmentGiven}
-                onChange={(e) => setFormData({ ...formData, treatmentGiven: e.target.value })}
-                className={`${inputCls()} resize-none`}
-              />
+              {errors.findings && <p className="mt-1 text-xs text-brand-danger">{errors.findings}</p>}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
@@ -1162,16 +1410,46 @@ export default function TreatmentConsultation() {
                 value={formData.medications}
                 onChange={(medications) => setFormData((prev) => ({ ...prev, medications }))}
                 errors={errors}
+                disabled={Boolean(reviewLocalId)}
               />
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Recommendations / Instructions</p>
+              <label htmlFor="treatment-recommendations" className="text-xs text-brand-gray mb-1 block">Recommendations / Instructions</label>
               <textarea
+                id="treatment-recommendations"
                 rows={2}
                 value={formData.adviceGiven}
-                onChange={(e) => setFormData({ ...formData, adviceGiven: e.target.value })}
-                className={`${inputCls()} resize-none`}
+                onChange={(e) => {
+                  const adviceGiven = e.target.value;
+                  setFormData({ ...formData, adviceGiven });
+                  if (adviceGiven.length <= 10000) setErrors((previous) => ({ ...previous, adviceGiven: "" }));
+                }}
+                placeholder="Record follow-up care, self-care guidance, referral instructions or recommendations."
+                aria-invalid={Boolean(errors.adviceGiven)}
+                className={`${inputCls(errors.adviceGiven)} resize-y`}
               />
+              {errors.adviceGiven && <p role="alert" className="mt-1 text-xs text-brand-danger">{errors.adviceGiven}</p>}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-xs text-brand-gray">Follow-up Required</p>
+                <ButtonSelectGroup ariaLabel="Follow-up Required" disabled={Boolean(reviewLocalId)} value={formData.followUpRequired}
+                  options={["Yes", "No"]}
+                  onChange={(followUpRequired) => setFormData((current) => ({ ...current, followUpRequired, nextVisitDate: followUpRequired === "No" ? "" : current.nextVisitDate }))} />
+              </div>
+              {formData.followUpRequired === "Yes" && <label className="text-xs text-brand-gray">Follow-up Date <span className="text-brand-danger">*</span>
+                <input type="date" aria-label="Follow-up date" required min={formData.consultationDate} value={formData.nextVisitDate} onChange={(event) => setFormData((current) => ({ ...current, nextVisitDate: event.target.value }))} className={`${inputCls(errors.nextVisitDate)} mt-1.5`} />
+                {errors.nextVisitDate && <p role="alert" className="mt-1 text-xs text-brand-danger">{errors.nextVisitDate}</p>}
+              </label>}
+              <div>
+                <p className="text-xs text-brand-gray">Referral Requested</p>
+                <ButtonSelectGroup ariaLabel="Referral Requested" disabled={Boolean(reviewLocalId)} value={formData.referralRequired}
+                  options={["Yes", "No"]}
+                  onChange={(referralRequired) => setFormData((current) => ({ ...current, referralRequired }))} />
+              </div>
+              {(formData.followUpRequired === "Yes" || formData.referralRequired === "Yes") && <label className="text-xs text-brand-gray sm:col-span-2">Clinical History / Remarks
+                <textarea rows={2} aria-label="Clinical history or remarks" value={formData.remarks} onChange={(event) => setFormData((current) => ({ ...current, remarks: event.target.value }))} className={`${inputCls(errors.remarks)} mt-1.5 resize-y`} />
+              </label>}
             </div>
           </div>
         </div>
@@ -1222,9 +1500,14 @@ export default function TreatmentConsultation() {
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-brand-border pt-3"><p className="text-ui font-medium text-brand-ink">{focusedRecord.data.resident?.name || "Resident name unavailable"}</p><StatusBadge className="capitalize" value={String(focusedRecord.data.status || "Not recorded").replace(/_/g, " ")} /></div>
           <dl className="mt-3 grid gap-x-5 gap-y-3 text-ui sm:grid-cols-2">{[
             ["Consultation Date", formatDate(focusedRecord.data.consultationDate)],
-            ["Health Service", focusedRecord.data.serviceName],
+            ["Health Service", consultationServiceName(focusedRecord.data)],
+            ["Blood Pressure Classification", consultationBloodPressureClassification(focusedRecord.data)?.category
+              || consultationBloodPressureClassification(focusedRecord.data)?.label],
             ["Chief Complaint", focusedRecord.data.chiefComplaint],
-            ["Clinical Findings & Diagnosis", focusedRecord.data.findings],
+            ["Clinical Findings", focusedRecord.data.findings],
+            ["Diagnosis", focusedRecord.data.diagnosis],
+            ["Risk Level", consultationRisk(focusedRecord.data)],
+            ["Risk Reasons", consultationRiskReasons(focusedRecord.data)],
             ["Treatment Given", focusedRecord.data.treatmentGiven],
             ["Advice", focusedRecord.data.adviceGiven],
             ["Remarks", focusedRecord.data.remarks],
@@ -1243,27 +1526,24 @@ export default function TreatmentConsultation() {
         <StatCard
           variant="ledger"
           label="THIS MONTH"
-          value={recordRows.filter((c) => (c.consultationDate || "").startsWith(new Date().toISOString().slice(0, 7))).length}
+          value={recordRows.filter((c) => (c.consultationDate || "").startsWith(getManilaDateTime().date.slice(0, 7))).length}
           description="Current month count"
           tone="blue"
         />
         <StatCard
           variant="ledger"
           label="WITH FOLLOW-UP"
-          value={recordRows.filter((c) => c.followUpRequired === "Yes").length}
-          description="Requiring follow-up"
+          value={recordRows.filter((c) => consultationFollowUp(c).has).length}
+          description="Records with follow-up"
           tone="danger"
         />
       </div>
 
-      <Card className="p-6">
+      <Card className="p-4 sm:p-5">
         {/* Filter Controls */}
         <div className="mb-5">
           {/* Unified Filter Row: Search + Date Range + Risk + Follow-up + Sort */}
-          <div className="mb-3 grid gap-3" style={{ 
-            gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1.2fr) minmax(0, 0.75fr) minmax(0, 0.75fr) minmax(0, 0.8fr)',
-            minWidth: 0 
-          }}>
+          <div className="mb-3 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {/* Search - 30% */}
             <div style={{ minWidth: 0 }}>
               <label htmlFor="filter-search" className="block text-xs text-brand-gray mb-1.5 font-medium">Search</label>
@@ -1311,9 +1591,9 @@ export default function TreatmentConsultation() {
               >
                 <option value="All">All</option>
                 <option value="High">High</option>
-                <option value="Moderate">Moderate</option>
+                <option value="Medium">Medium</option>
                 <option value="Low">Low</option>
-                <option value="Unassessed">Not Assessed</option>
+                <option value="Unassessed">Unassessed</option>
               </select>
             </div>
 
@@ -1442,6 +1722,8 @@ export default function TreatmentConsultation() {
               className="consultation-records-table"
               tableClassName="consultation-records-grid"
               fitContainer
+              compact={isHealthSupervisor}
+              mobileBreakpoint={isHealthSupervisor ? "lg" : "md"}
               columns={columns}
               rows={displayedRecords}
               dense={isHealthSupervisor}
@@ -1453,34 +1735,32 @@ export default function TreatmentConsultation() {
                         {initialsOf(row.resident?.name)}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-medium text-brand-ink truncate">{row.resident?.name || "—"}</p>
+                        <p className="break-words font-medium text-brand-ink" title={row.resident?.name}>{row.resident?.name || "Name not recorded"}</p>
                         <p className="text-xs text-brand-gray">{row.resident?.barangay || ""}</p>
                       </div>
                     </div>
                   );
-                if (key === "date") return <span className="text-brand-ink">{formatDate(row.consultationDate)}</span>;
+                if (key === "date") return <span className="whitespace-nowrap text-xs tabular-nums text-brand-ink">{formatDate(row.consultationDate)}</span>;
                 if (key === "service") {
                   const service = healthServices.find((s) => s.id === row.serviceId);
-                  const label = row.serviceName || service?.name || "";
+                  const label = consultationServiceName(row) || service?.name || "";
                   return label ? (
                     <span className="inline-flex max-w-[180px] items-center truncate rounded-full bg-brand-light px-2.5 py-1 text-xs font-medium text-brand-blue" title={label}>
                       {label}
                     </span>
                   ) : (
-                    <span className="text-brand-gray">—</span>
+                    <span className="text-xs text-brand-gray">{row.serviceId || row.healthServiceId ? "Registered service unavailable" : "No service recorded"}</span>
                   );
                 }
                 if (key === "risk") {
-                   return <RiskBadge level={consultationRisk(row)} />;
+                  return <div title={consultationRiskReasons(row)}>
+                    <RiskBadge level={consultationRisk(row)} mediumLabel="Medium" />
+                  </div>;
                 }
-                if (key === "followUp")
-                  return row.followUpRequired === "Yes" ? (
-                    <span className="inline-flex rounded-full bg-brand-accent/10 text-brand-accent px-2.5 py-1 text-xs font-medium">
-                      {row.nextVisitDate ? formatDate(row.nextVisitDate) : "Yes"}
-                    </span>
-                  ) : (
-                    <span className="inline-flex rounded-full bg-slate-100 text-slate-600 px-2.5 py-1 text-xs font-medium">No</span>
-                  );
+                if (key === "followUp") {
+                  const followUp = consultationFollowUp(row);
+                  return <StatusBadge value={followUp.status} className="whitespace-nowrap px-2 py-0.5 text-[11px]" />;
+                }
                 if (key === "actions")
                   return (
                     <div className="flex justify-center">
@@ -1524,20 +1804,24 @@ export default function TreatmentConsultation() {
               {[
                 ["Consultation Information", [
                   ["Resident Name", detailRecord.resident?.name],
-                  ["Consultation Date", formatDate(detailRecord.consultationDate)],
-                  ["Health Service", detailRecord.serviceName],
+                   ["Consultation Date", formatDate(detailRecord.consultationDate)],
+                   ["Consultation Time", detailRecord.consultationTime ? `${detailRecord.consultationTime} (Asia/Manila)` : "Not recorded"],
+                   ["Health Service", consultationServiceName(detailRecord)],
                   ["Chief Complaint", detailRecord.chiefComplaint],
                 ]],
                 ["Clinical Information", [
-                   ["Clinical Findings & Diagnosis", [detailRecord.findings, detailRecord.diagnosis].filter(Boolean).join("\n")],
-                    ["Risk Level", consultationRisk(detailRecord)],
+                    ["Clinical Findings", detailRecord.findings],
+                    ["Diagnosis", detailRecord.diagnosis],
+                     ["Risk Level", consultationRisk(detailRecord)],
+                    ["Risk Reasons", consultationRiskReasons(detailRecord)],
+                    ["Risk Review", consultationAssessment(detailRecord)?.review?.reason],
                    ["Vital Signs", parseVitals(detailRecord.vitals)],
                 ]],
                 ["Treatment and Care", [
                   ["Treatment", detailRecord.treatmentGiven],
-                  ["Medicines", (detailRecord.medications || []).length ? detailRecord.medications.map((medicine) => typeof medicine === "string" ? medicine : [medicine.genericName || medicine.name, medicine.strength, medicine.dose || medicine.dosage, medicine.frequency, medicine.route, medicine.duration, medicine.instructions].filter(Boolean).join(" · ")).join("\n") : detailRecord.medicationPrescribed],
+                   ["Medicines", (detailRecord.medications || []).length ? detailRecord.medications.map((medicine) => typeof medicine === "string" ? medicine : [medicine.genericName || medicine.name, medicine.strength, medicine.dose || medicine.dosage, medicine.frequency, medicine.route, medicine.duration, medicine.quantity != null && medicine.quantity !== "" ? `Quantity: ${medicine.quantity}` : "", medicine.instructions].filter(Boolean).join(" / ")).join("\n") : detailRecord.medicationPrescribed],
                   ["Recommendations", [detailRecord.adviceGiven, ...(detailRecord.referrals || []).map((referral) => ["Referral:", referral.destination_facility || referral.receiving_facility, referral.reason, referral.status, referral.resolution_notes].filter(Boolean).join(" "))].filter(Boolean).join("\n")],
-                  ["Follow-up", [(detailRecord.followUpRequired === "Yes" ? (detailRecord.nextVisitDate ? `Required — ${formatDate(detailRecord.nextVisitDate)}` : "Required") : "Not required"), ...(detailRecord.followUps || []).map((followUp) => [followUp.scheduled_date, followUp.status, followUp.outcome, followUp.notes].filter(Boolean).join(" · "))].join("\n")],
+                  ["Follow-up", [consultationFollowUp(detailRecord).status, ...(detailRecord.followUps || []).map((followUp) => [followUp.scheduled_date || followUp.scheduledDate, followUp.status, followUp.outcome, followUp.notes].filter(Boolean).join(" / "))].join("\n")],
                 ]],
                 ["Recording Information", [
                   ["Recording Personnel", [detailRecord.recordedByName || detailRecord.personnelName, detailRecord.consultingPersonnel && `Attending: ${detailRecord.consultingPersonnel}`].filter(Boolean).join("\n")],

@@ -10,6 +10,8 @@ import { DEFAULT_CLINICAL_ASSESSMENT_CONFIG } from '../src/utils/clinicalAssessm
 
 const staff = { id: 'staff', role: 'health_supervisor', name: 'Recording Nurse', municipalityId: 'm1', barangayId: 'b1', barangay: 'Test Barangay' };
 const phn = { id: 'phn', role: 'phn', municipalityId: 'm1' };
+const completeClinical = { consultationTime: '09:00', temperature: '36.8', pulseRate: '72', respiratoryRate: '18',
+  height: '170', weight: '65', oxygenSaturation: '98', clinicalIndicators: { dangerSignsReviewed: true } };
 const residentUser = { id: 'account-1', role: 'resident' };
 const originalPersist = store.persist;
 const resident = (id, extra = {}) => ({ id, firstName: id, lastName: 'Resident', municipalityId: 'm1', barangayId: 'b1', barangay: 'Test Barangay', verificationStatus: 'approved', ...extra });
@@ -36,7 +38,8 @@ test('historical risk is read from saved assessments and only reassessed through
   };
   const supabase = { from(table) {
     const query = {
-      select: () => query, eq: () => query, lte: () => query, order: () => query, limit: () => query,
+      select: () => query, eq: () => query, lte: () => query, order: () => query, limit: () => query, range: () => query,
+      then: (resolve, reject) => Promise.resolve({ data: [], error: null }).then(resolve, reject),
       maybeSingle: async () => ({ data: table === 'clinical_assessment_protocols' ? protocol : null }),
     };
     return query;
@@ -53,7 +56,7 @@ test('historical risk is read from saved assessments and only reassessed through
     visit('absent', 'r2', '2026-11-05'),
   ];
   const args = { user: staff, repo: repository, supabase };
-  const expected = { low: 'Unassessed', medium: 'Unassessed', high: 'High', 'legacy-medium': 'Moderate',
+  const expected = { low: 'Unassessed', medium: 'Unassessed', high: 'High', 'legacy-medium': 'Medium',
     unassessed: 'Unassessed', absent: 'Unassessed' };
   const before = await list(args);
   assert.deepEqual(Object.fromEntries(before.rows.map(({ id, riskLevel }) => [id, riskLevel])), expected);
@@ -66,16 +69,21 @@ test('historical risk is read from saved assessments and only reassessed through
   assert.equal((await repository.getVisit('low')).consultationDetails, undefined);
   const first = await update({ ...args, id: 'medium', payload: { adviceGiven: 'Test update' },
     persistRisk: async () => {}, notify: async () => {} });
-  assert.equal(first.riskLevel, 'Moderate');
-  assert.equal(first.clinicalAssessment.level, 'Medium');
+  assert.equal(first.riskLevel, 'Unassessed');
+  assert.equal(first.clinicalAssessment, null);
   assert.equal(first.vitals.bp, '143/92');
   assert.equal(first.treatmentGiven, 'Rest');
-  assert.equal(first.consultationDetails.clinicalAssessmentHistory.length, 1);
+  assert.equal(first.consultationDetails.clinicalAssessmentHistory, undefined);
   const second = await update({ ...args, id: 'medium', payload: { adviceGiven: 'Another update' },
     persistRisk: async () => {}, notify: async () => {} });
   assert.deepEqual(second.consultationDetails.clinicalAssessmentHistory, first.consultationDetails.clinicalAssessmentHistory);
-  assert.equal((await get({ ...args, id: 'medium' })).riskLevel, 'Moderate');
-  const reassessedLow = await update({ ...args, id: 'low', payload: { adviceGiven: 'Reviewed with approved protocol' },
+  assert.equal((await get({ ...args, id: 'medium' })).riskLevel, 'Unassessed');
+  await assert.rejects(update({ ...args, id: 'medium', payload: { findings: 'Clinical edit without complete vitals' } }), { statusCode: 422 });
+  const reassessedMedium = await update({ ...args, user: phn, id: 'medium', payload: { ...completeClinical, bloodPressure: '143/92', findings: 'Stable chronic blood pressure; danger signs reviewed.',
+    riskReview: { level: 'Medium', reason: 'Clinical reassessment confirms stable primary-care management.', reassessmentConfirmed: true } }, persistRisk: async () => {}, notify: async () => {} });
+  assert.equal(reassessedMedium.riskLevel, 'Medium');
+  assert.equal(reassessedMedium.consultationDetails.riskReviewHistory.length, 1);
+  const reassessedLow = await update({ ...args, id: 'low', payload: { ...completeClinical, bloodPressure: '110/70', adviceGiven: 'Reviewed with approved protocol' },
     persistRisk: async () => {}, notify: async () => {} });
   assert.equal(reassessedLow.riskLevel, 'Low');
   assert.equal(reassessedLow.clinicalAssessmentHistory, undefined);
@@ -150,7 +158,7 @@ test('source referral and terminal follow-up remain attached to their original e
   }));
   store.data.followUps.push({ id: 'scheduled-followup', resident_id: 'r1', consultation_id: 'follow-up-only', status: 'Pending' });
   const followUpOnly = await get({ user: residentUser, id: 'follow-up-only', repo: repository });
-  assert.equal(followUpOnly.riskLevel, 'Moderate');
+  assert.equal(followUpOnly.riskLevel, 'Medium');
   assert.equal(followUpOnly.referralRequired, 'No');
   assert.equal(followUpOnly.referrals.length, 0);
   assert.deepEqual(followUpOnly.followUps.map((row) => row.id), ['scheduled-followup']);
@@ -171,9 +179,9 @@ test('resident identity comes from the session for list, detail and completed se
 test('a newly completed canonical visit appears with full prescription, vitals, follow-up, referral and personnel context', async () => {
   const created = await create({ user: staff, repo: repository, supabase: null,
     persistRisk: async () => {},
-    payload: { residentId: 'r1', clientOperationKey: '11111111-1111-4111-8111-111111111111', consultationDate: '2026-11-19', consultationTime: '08:45',
+    payload: { ...completeClinical, residentId: 'r1', clientOperationKey: '11111111-1111-4111-8111-111111111111', consultationDate: '2026-11-19', consultationTime: '08:45',
       chiefComplaint: 'Cough', findings: 'Clear chest', diagnosis: 'Viral illness', treatmentGiven: 'Rest', adviceGiven: 'Hydrate', remarks: 'Improving',
-      medications: [{ genericName: 'Paracetamol', strength: '500 mg', dose: '1 tablet', route: 'Oral', frequency: 'As needed', duration: '3 days', instructions: 'With food' }],
+      medications: [{ genericName: 'Paracetamol', strength: '500 mg', dose: '1 tablet', route: 'Oral', frequency: 'As needed', duration: '3 days', quantity: '6', instructions: 'With food' }],
       bloodPressure: '120/80', pulseRate: '70', respiratoryRate: '18', oxygenSaturation: '99', temperature: '36.5', height: '170', weight: '65',
       followUpRequired: 'Yes', nextVisitDate: '2026-11-25', referralRequired: 'Yes' } });
   store.data.referrals.push({ id: 'ref-1', residentId: 'r1', visitId: created.id, reason: 'Review', status: 'Completed' },
@@ -201,14 +209,14 @@ test('a newly completed canonical visit appears with full prescription, vitals, 
 });
 
 test('server saves symptom-aware BP, recomputes edits and preserves assessment history and snapshot display', async () => {
-  const payload = { residentId: 'r1', clientOperationKey: '22222222-2222-4222-8222-222222222222',
+  const payload = { ...completeClinical, residentId: 'r1', clientOperationKey: '22222222-2222-4222-8222-222222222222',
     consultationDate: '2026-11-20', chiefComplaint: 'Chest pain', findings: 'Alert', bloodPressure: '190 / 125',
     bloodPressureClassification: { code: 'normal', label: 'Forged normal' },
     consultationDetails: { clinicalIndicators: { chestPain: false }, clinicalAssessmentHistory: [{ level: 'Forged' }] } };
   const deps = { user: staff, repo: repository, supabase: null, persistRisk: async () => {} };
   const created = await create({ ...deps, payload });
-  assert.equal(created.bloodPressureClassification.code, 'emergency');
-  assert.equal(created.vitals.bloodPressureCategory, 'Hypertensive Emergency');
+  assert.equal(created.bloodPressureClassification.code, 'crisis');
+  assert.equal(created.vitals.bloodPressureCategory, 'Hypertensive Crisis');
   assert.equal(created.vitals.systolic, 190);
   assert.equal(created.vitals.diastolic, 125);
   assert.equal(created.clinicalAssessment.urgency, 'immediate');
@@ -226,8 +234,9 @@ test('server saves symptom-aware BP, recomputes edits and preserves assessment h
   const indicated = await update({ ...deps, id: created.id,
     syncFollowUp: async () => {}, notify: async () => {},
     payload: { ...payload, chiefComplaint: 'Follow-up', findings: 'Alert',
+      clinicalIndicators: { dangerSignsReviewed: true, chestPain: true },
       consultationDetails: { clinicalIndicators: { chestPain: true } } } });
-  assert.equal(indicated.bloodPressureClassification.code, 'emergency');
+  assert.equal(indicated.bloodPressureClassification.code, 'crisis');
   assert.equal(indicated.clinicalAssessment.urgency, 'immediate');
   assert.equal(indicated.consultationDetails.clinicalAssessmentHistory.length, 3);
   assert.deepEqual(indicated.consultationDetails.clinicalAssessmentHistory[1], updated.clinicalAssessment);
@@ -257,7 +266,7 @@ test('BP payload validation rejects malformed values and unsupported nonboolean 
       payload: { ...payload, consultationDetails: { clinicalIndicators } } }), { statusCode: 422 });
   }
   const row = toVisit({ ...payload, clinicalIndicators: { chestPain: true } }, staff, 'r1');
-  assert.equal(row.bpClassification.code, 'emergency');
+  assert.equal(row.bpClassification.code, 'crisis');
   assert.deepEqual(row.bpClassification, classifyBloodPressure('190/125', { indicators: { chestPain: true } }));
 });
 
@@ -268,7 +277,7 @@ test('legacy BP display derives symptom context without writing classification b
   const before = structuredClone(row);
   const detail = await fromVisit(row, null);
   const own = await getOwnHealthRecords({ user: residentUser, repo: repository });
-  assert.equal(detail.bloodPressureClassification.code, 'emergency');
+  assert.equal(detail.bloodPressureClassification.code, 'crisis');
   assert.deepEqual(own.consultations[0].bloodPressureClassification, detail.bloodPressureClassification);
   assert.equal(own.consultations[0].vitals.bloodPressureCategory, detail.vitals.bloodPressureCategory);
   assert.deepEqual(row, before);
@@ -334,8 +343,8 @@ test('staff chart isolates selected residents, reads linked history, and refresh
     await assert.rejects(chart('r1', user), { statusCode: 403 });
   }
   const args = { user: staff, repo: repository, supabase: null, persistRisk: async () => {}, payload: {
-    residentId: 'r1', clientOperationKey: '44444444-4444-4444-8444-444444444444', consultationDate: '2026-11-20',
-    chiefComplaint: 'New visit', bloodPressure: '120/80', pulseRate: 72, diagnosis: 'Recorded diagnosis',
+    ...completeClinical, residentId: 'r1', clientOperationKey: '44444444-4444-4444-8444-444444444444', consultationDate: '2026-11-20',
+    chiefComplaint: 'New visit', findings: 'No acute findings', bloodPressure: '120/80', pulseRate: 72, diagnosis: 'Recorded diagnosis',
   } };
   const saved = await create(args);
   assert.equal((await create(args)).id, saved.id);

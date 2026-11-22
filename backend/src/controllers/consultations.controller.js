@@ -57,6 +57,10 @@ export const list = async (req, res) => {
  */
 export const get = async (req, res) => sendData(res, { consultation: await consultationsService.get({ user: req.user, id: req.params.id }) });
 
+export const clinicalContext = async (req, res) => sendData(res, await consultationsService.getClinicalContext({
+  user: req.user, residentId: req.query.residentId, consultationDate: req.query.consultationDate,
+}));
+
 /**
  * Create a new consultation.
  *
@@ -96,4 +100,8 @@ export const create = async (req, res) => sendCreated(res, {
  */
 export const update = async (req, res) => sendData(res, { consultation: await consultationsService.update({ user: req.user, id: req.params.id, payload: req.body?.consultation || req.body || {} }) });
 
-export default { list, get, create, update };
+export const reviewRisk = async (req, res) => sendData(res, { consultation: await consultationsService.reviewRisk({
+  user: req.user, id: req.params.id, payload: req.body?.consultation || req.body || {},
+}) });
+
+export default { list, get, clinicalContext, create, update, reviewRisk };

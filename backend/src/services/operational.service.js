@@ -3,6 +3,7 @@ import ApiError from '../utils/apiError.js';
 import { extractExpectedRevision } from '../utils/syncConcurrency.js';
 import { assignedBarangay } from '../config/scope.js';
 import { resolveHouseholdWorker } from './households.service.js';
+import { notifyHealthSupervisorsOnce } from './notifications.service.js';
 
 const TABLES = Object.freeze({
   followups: 'follow_ups',
@@ -413,9 +414,19 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
   const tableName = TABLES[normalizedKind] || TABLES[kind];
   if (!tableName && normalizedKind !== 'notifications') throw ApiError.badRequest('Unknown operational record type.');
   if (normalizedKind === 'notifications') {
-    const { data, error } = await supabase.from('notifications').select('*').eq('recipient_id', user.id).order('created_at', { ascending: false }).limit(100);
-    throwOnError(error, 'Could not load notifications');
-    return data || [];
+    const rows = [];
+    const pageSize = 200;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase.from('notifications')
+        .select('*')
+        .eq('recipient_id', user.id)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      throwOnError(error, 'Could not load notifications');
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    return rows;
   }
   const hasRange = Boolean(from) || Boolean(to);
   if (hasRange && !(normalizedKind === 'followups')) {
@@ -706,6 +717,19 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   await linkImmunization(data.id, data.status);
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
   await notifyResident(supabase, resident, normalizedKind, 'created', data);
+  if (normalizedKind === 'followups') {
+    await notifyHealthSupervisorsOnce({
+      barangayId: resident.barangay_id,
+      municipalityId: resident.municipality_id,
+      actorId: user.id,
+      title: 'Follow-up assigned',
+      message: `A follow-up was scheduled for a resident in your assigned barangay.`,
+      relatedType: 'follow_up_assigned',
+      relatedId: data.id,
+      eventKey: `follow_up_assigned:${data.id}`,
+      supabase,
+    });
+  }
   return formatOperationalRecord(normalizedKind, data);
 };
 
@@ -898,6 +922,20 @@ export const update = async ({
       });
       throwOnError(scheduleAuditError, 'Could not record follow-up schedule history');
       await notifyResident(supabase, resident, 'followups', 'rescheduled', data);
+    }
+    if (newStatus !== text(existing.status) || scheduleChanged) {
+      const versionKey = data.revision || data.updated_at || `${newStatus}:${data.scheduled_date}:${data.scheduled_time}`;
+      await notifyHealthSupervisorsOnce({
+        barangayId: resident.barangay_id,
+        municipalityId: resident.municipality_id,
+        actorId: user.id,
+        title: scheduleChanged ? 'Follow-up schedule updated' : 'Follow-up status updated',
+        message: `A follow-up was updated for a resident in your assigned barangay.`,
+        relatedType: 'follow_up_updated',
+        relatedId: id,
+        eventKey: `follow_up_updated:${id}:${versionKey}`,
+        supabase,
+      });
     }
   }
   return normalizedKind === 'followups' ? withScheduleState(data) : normalizedKind === 'tcl' ? withTclWorker(data) : data;

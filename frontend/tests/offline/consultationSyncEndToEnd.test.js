@@ -24,8 +24,9 @@ const DATA = { residentId: 'RES-TEST', consultationDate: '2026-11-05', consultat
   recordedAt: '2026-11-04T16:16:00.000Z', chiefComplaint: 'Test complaint',
   findings: 'Finding\nDiagnosis: embedded clinical text', diagnosis: 'Test assessment', treatmentGiven: 'Test treatment',
   adviceGiven: 'Test advice', remarks: 'Original clinical history', nextVisitDate: '2026-11-12', followUpRequired: 'Yes',
-  referralRequired: 'No', bloodPressure: '120/80', pulseRate: '70',
-  medications: [{ genericName: 'Test medicine', custom: true, instructions: 'Test instructions' }],
+  referralRequired: 'No', bloodPressure: '120/80', pulseRate: '70', temperature: '36.7', respiratoryRate: '18', height: '160', weight: '60', oxygenSaturation: '98',
+  clinicalIndicators: { dangerSignsReviewed: true },
+  medications: [{ genericName: 'Test medicine', custom: true, source: 'custom', dose: '1 tablet', route: 'Oral', frequency: 'Once daily', duration: '3 days', quantity: '3', instructions: 'Test instructions' }],
   consultationDetails: { physicalExam: { neurological: 'Additional clinical finding' }, allergies: 'Additional clinical history' } };
 const supabase = { from() { const query = { select() { return query; }, eq() { return query; },
   maybeSingle: async () => ({ data: null, error: null }) }; return query; } };
@@ -83,19 +84,36 @@ test('lost real backend create response replays ONE visit/follow-up and preserve
   assert.equal((await getDraft(lost.localId, USER.id)).status, 'synced');
 });
 
-test('a consultation with both optional fields empty syncs through the real backend', async () => {
+test('a consultation without a diagnosis or treatment syncs with complete required clinical data', async () => {
   const create = (data, options) => server(USER, data, options);
-  const payload = { residentId: DATA.residentId, consultationDate: DATA.consultationDate,
-    chiefComplaint: DATA.chiefComplaint, clinicalFindingsDiagnosis: '', treatmentGiven: '' };
+  const payload = { ...DATA, findings: 'Normal examination', diagnosis: '', treatmentGiven: '', adviceGiven: '', remarks: '',
+    nextVisitDate: '', followUpRequired: 'No', medications: [], consultationDetails: {} };
   const queued = await saveConsultationOffline({ ownerId: USER.id, payload, create, online: () => false });
   assert.equal(queued.source, 'local');
   const synced = await submitConsultationDraft({ ownerId: USER.id, localId: queued.localId, create, online: () => true });
   assert.equal(synced.source, 'server');
-  assert.equal(synced.record.findings, '');
+  assert.equal(synced.record.findings, 'Normal examination');
+  assert.equal(synced.record.diagnosis, '');
   assert.equal(synced.record.treatmentGiven, '');
   assert.equal((await getDraft(queued.localId, USER.id)).status, 'synced');
   assert.equal(store.data.visits.length, 1);
   assert.equal(store.data.followUps?.length ?? 0, 0);
+});
+
+test('multiline findings and the shipped Diagnosis marker use identical server/outbox parsing', async () => {
+  for (const [combined, findings, diagnosis] of [
+    ['Finding one\nFinding two', 'Finding one\nFinding two', ''],
+    ['Finding one\nDiagnosis: Clinical assessment', 'Finding one', 'Clinical assessment'],
+  ]) {
+    const { findings: _findings, diagnosis: _diagnosis, ...base } = DATA;
+    const payload = { ...base, clinicalFindingsDiagnosis: combined };
+    const result = await saveConsultationOffline({ ownerId: USER.id, payload, online: () => true,
+      create: (data, options) => server(USER, data, options) });
+    assert.equal(result.source, 'server');
+    assert.equal(result.record.findings, findings);
+    assert.equal(result.record.diagnosis, diagnosis);
+  }
+  assert.equal(store.data.visits.length, 2);
 });
 
 test('an actual backend scope rejection retains the clinical queue and never starts side effects', async () => {

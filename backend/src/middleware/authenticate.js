@@ -122,6 +122,23 @@ export const authenticate = asyncHandler(async (req, res, next) => {
 
   const mustChangePassword = passwordStatus?.mustChangePassword === true;
   const sessionUser = { ...profileToSessionUser(profile), mustChangePassword };
+  // An Auth/profile row is not proof that resident onboarding is complete.
+  // Only a linked residents row represents a complete registration. Separate
+  // this state from resident-limited, which means submitted/awaiting verification.
+  if (sessionUser.role === 'resident' || sessionUser.role === 'resident-limited') {
+    const { data: residentRow, error: residentError } = await getServiceClient()
+      .from('residents')
+      .select('id,verification_status')
+      .eq('auth_user_id', user.id)
+      .maybeSingle();
+    if (residentError) {
+      throw ApiError.forbidden('Your resident registration status could not be verified. Please try again.');
+    }
+    if (!residentRow) {
+      sessionUser.role = 'resident-incomplete';
+      sessionUser.status = 'incomplete_registration';
+    }
+  }
 
   // Barangay-scoped staff roles (Health Supervisor and BHW) must hold an active,
   // approved barangay linked to their assigned municipality before accessing any endpoint.

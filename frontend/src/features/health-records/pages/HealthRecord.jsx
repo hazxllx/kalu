@@ -10,14 +10,16 @@ import {
   Download,
 } from "lucide-react";
 import { residentsApi, visitPlansApi } from "@/services/api";
-import { downloadHealthRecordPdf } from "@/features/health-records/lib/healthRecordPdf";
+import { downloadHealthRecordPdf, medicalHistoryForRecord } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
 import { formatLongDate } from "@/lib/dateUtils";
+import RiskBadge from "@/components/common/RiskBadge";
+import { consultationBloodPressureClassification, consultationRiskLevel, consultationRiskReasons, consultationServiceName } from "@/features/consultations/lib/consultationRisk";
+import { bloodPressureBadgeClassName } from "@/features/consultations/utils/bpClassification";
 
 // Uploaded laboratory files are listed separately and are not embedded in PDF exports.
 const labs = [];
-const MEDICAL_HISTORY = {};
 
 const dash = (value) => (value === null || value === undefined || value === "" ? "—" : value);
 
@@ -36,9 +38,9 @@ const formatDate = (iso) => {
 };
 
 /** Build the vital-sign display from the consultation's backend-validated values. */
-const vitalCards = (vitals = {}) => {
+const vitalCards = (vitals = {}, bpClassification = null) => {
   const cards = [
-    { label: "Blood Pressure", value: vitals.bloodPressure, unit: "mmHg" },
+    { label: "Blood Pressure", value: vitals.bloodPressure, unit: "mmHg", category: bpClassification?.category || bpClassification?.label },
     { label: "Temperature", value: vitals.temperature, unit: "°C" },
     { label: "Pulse Rate", value: vitals.pulseRate, unit: "bpm" },
     { label: "Respiratory Rate", value: vitals.respiratoryRate, unit: "breaths/min" },
@@ -79,7 +81,8 @@ const consultationFields = (consultation) => [
     { label: "Chief Complaint", value: consultation.chiefComplaint },
     { label: "Findings", value: consultation.findings },
     { label: "Medications", value: consultation.medications, preserveLines: true },
-    { label: "Health Service", value: consultation.serviceName },
+    { label: "Health Service", value: consultationServiceName(consultation) },
+    { label: "Risk Reasons", value: consultationRiskReasons(consultation), preserveLines: true },
   ],
   [
     { label: "Diagnosis", value: consultation.diagnosis },
@@ -281,9 +284,13 @@ export default function HealthRecord() {
   };
 
   const latestVitals = useMemo(
-    () => vitalCards(latestRecord?.consultations?.[0]?.vitals),
+    () => {
+      const consultation = latestRecord?.consultations?.[0];
+      return vitalCards(consultation?.vitals, consultation ? consultationBloodPressureClassification(consultation) : null);
+    },
     [latestRecord],
   );
+  const medicalHistory = medicalHistoryForRecord(latestRecord || {});
 
   // Pregnancy Status is suppressed only for residents explicitly recorded as
   // male. Female, "Other", and missing/unknown sex keep the field visible so an
@@ -321,11 +328,9 @@ export default function HealthRecord() {
       await downloadHealthRecordPdf({
         resident: data?.resident || resident || {},
         consultations: data?.consultations || [],
-        // Laboratory and medical-history data have no resident-facing source
-        // yet; the PDF renders them as empty / "Not available".
         vaccinations: (data?.vaccinations || []).filter((item) => matchesDateRange(item.date, filters.from, filters.to)),
         labs,
-        medicalHistory: MEDICAL_HISTORY,
+        medicalHistory: medicalHistoryForRecord(data || {}),
       });
     } catch {
       setExportError("Unable to export health record. Please try again.");
@@ -598,6 +603,7 @@ export default function HealthRecord() {
                 <div className="min-w-0">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <RiskBadge level={consultationRiskLevel(c)} mediumLabel="Medium" />
                       {c.serviceCategory && (
                         <span className="rounded-full bg-slate-50 px-2.5 py-1 text-xs font-medium text-brand-gray">{c.serviceCategory}</span>
                       )}
@@ -631,13 +637,13 @@ export default function HealthRecord() {
                   </div>
                 </div>
               </div>
-              {vitalCards(c.vitals).length > 0 && (
+              {vitalCards(c.vitals, consultationBloodPressureClassification(c)).length > 0 && (
                 <div className="border-t border-brand-border bg-slate-50/60 px-4 py-3">
                   <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-brand-ink">
                     Vital Signs
                   </h3>
                   <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-4 xl:grid-cols-8">
-                    {vitalCards(c.vitals).map(({ label, value, unit, category }, index) => (
+                    {vitalCards(c.vitals, consultationBloodPressureClassification(c)).map(({ label, value, unit, category }, index) => (
                       <div
                         key={label}
                         className={`min-w-0 border-brand-border px-2 first:pl-0 xl:px-3 ${
@@ -655,6 +661,11 @@ export default function HealthRecord() {
                           </span>
                           {label === "BMI" && category && bmiBadgeClass(category) && (
                             <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${bmiBadgeClass(category)}`}>
+                              {category}
+                            </span>
+                          )}
+                          {label === "Blood Pressure" && category && (
+                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${bloodPressureBadgeClassName({ category })}`}>
                               {category}
                             </span>
                           )}
@@ -764,6 +775,7 @@ export default function HealthRecord() {
           {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : (
             <>
               <div className="mb-2 flex items-center gap-2">
+                <RiskBadge level={consultationRiskLevel(latestRecord?.consultations?.[0])} mediumLabel="Medium" />
                 <h3 className="text-lg font-semibold leading-6 text-brand-ink">
                   Latest Vitals{latestRecord?.consultations?.length ? ` — ${formatDate(latestRecord.consultations[0].date)}` : ""}
                 </h3>
@@ -778,6 +790,7 @@ export default function HealthRecord() {
                       <p className="font-sans text-lg font-bold text-brand-ink">
                         {v.value} {v.unit && <span className="text-sm font-normal text-brand-gray">{v.unit}</span>}
                       </p>
+                      {v.category && <span className={`mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${bloodPressureBadgeClassName({ category: v.category })}`}>{v.category}</span>}
                     </Card>
                   ))
                 )}
@@ -787,11 +800,11 @@ export default function HealthRecord() {
                 <Card className="rounded-lg p-5 shadow-none">
                   <h3 className="mb-4 text-base font-semibold leading-5 text-brand-ink">Medical History & Allergies</h3>
                   <div className="space-y-3 text-sm">
-                    <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Chronic Conditions</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.chronicConditions || "—"}</span></div>
-                    <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Allergies</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.allergies || "—"}</span></div>
-                    <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Current Medications</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.currentMedications || "—"}</span></div>
+                    <div className="flex flex-wrap justify-between gap-2 border-b border-brand-border pb-3"><span className="text-brand-gray">Recorded Conditions</span><span className="break-words text-brand-ink font-medium">{medicalHistory.chronicConditions || "Not recorded"}</span></div>
+                    <div className="flex flex-wrap justify-between gap-2 border-b border-brand-border pb-3"><span className="text-brand-gray">Allergies</span><span className="break-words text-brand-ink font-medium">{medicalHistory.allergies || "Not recorded"}</span></div>
+                    <div className="flex flex-wrap justify-between gap-2 border-b border-brand-border pb-3"><span className="text-brand-gray">Latest Prescriptions</span><span className="break-words text-brand-ink font-medium">{medicalHistory.currentMedications || "Not recorded"}</span></div>
                     {showPregnancyStatus && (
-                      <div className="flex justify-between"><span className="text-brand-gray">Pregnancy Status</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.pregnancyStatus || "—"}</span></div>
+                      <div className="flex flex-wrap justify-between gap-2"><span className="text-brand-gray">Recorded Pregnancy Status</span><span className="break-words text-brand-ink font-medium">{medicalHistory.pregnancyStatus || "Not recorded"}</span></div>
                     )}
                   </div>
                 </Card>

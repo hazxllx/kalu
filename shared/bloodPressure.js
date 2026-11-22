@@ -1,5 +1,7 @@
-// Screening categories, shared by entry, server validation and saved snapshots.
+// Reference categories, shared by entry, server validation and saved snapshots.
 export const DEFAULT_BP_THRESHOLDS = Object.freeze({
+  // Retained for the legacy settings payload; low readings use the Normal
+  // category and receive a separate clinical-review message.
   lowSystolicMax: 89,
   lowDiastolicMax: 59,
   elevatedSystolicMin: 120,
@@ -7,8 +9,8 @@ export const DEFAULT_BP_THRESHOLDS = Object.freeze({
   stage1DiastolicMin: 80,
   stage2SystolicMin: 140,
   stage2DiastolicMin: 90,
-  crisisSystolicMin: 181,
-  crisisDiastolicMin: 121,
+  crisisSystolicMin: 180,
+  crisisDiastolicMin: 120,
 });
 
 export const BP_READING_BOUNDS = Object.freeze({ min: 40, max: 300, diastolicMin: 20, diastolicMax: 200 });
@@ -18,9 +20,7 @@ export const BP_CATEGORIES = Object.freeze({
   elevated: { code: 'elevated', label: 'Elevated', severity: 1, alertLevel: 'monitor', message: 'Elevated reading. Recheck and monitor according to the clinical protocol.' },
   stage1: { code: 'stage1', label: 'Stage 1 Hypertension', severity: 2, alertLevel: 'assessment', message: 'High blood pressure reading. Arrange appropriate clinical assessment.' },
   stage2: { code: 'stage2', label: 'Stage 2 Hypertension', severity: 3, alertLevel: 'urgent', message: 'Very high blood pressure reading. Prompt clinical assessment is needed.' },
-  // Keep the persisted crisis code compatible with historical snapshots.
-  crisis: { code: 'crisis', label: 'Severe Hypertension', severity: 4, alertLevel: 'crisis', message: 'Arrange prompt clinical evaluation according to protocol. Assess for emergency symptoms; a reading alone does not establish a hypertensive emergency.' },
-  emergency: { code: 'emergency', label: 'Hypertensive Emergency', severity: 5, emergency: true, alertLevel: 'emergency', message: 'Immediate emergency evaluation is required. Do not delay emergency care to repeat measurements or complete this form.' },
+  crisis: { code: 'crisis', label: 'Hypertensive Crisis', severity: 4, alertLevel: 'crisis', message: 'A reading in the hypertensive crisis range requires prompt clinical evaluation. A single reading is not a diagnosis.' },
 });
 
 export function parseBloodPressure(value) {
@@ -82,14 +82,21 @@ export function classifyBloodPressure(reading, context = {}) {
     'visualDisturbance', 'acuteCardiovascularSymptoms',
   ].some((key) => symptoms[key] === true || context?.symptoms?.[key] === true
     || context?.indicators?.[key] === true || context?.[key] === true);
-  const severe = systolic > 180 || diastolic > 120;
-  const code = severe ? (emergencySymptomsPresent ? 'emergency' : 'crisis')
+  const severe = systolic >= 180 || diastolic >= 120;
+  const hypotensionPresent = systolic < 90 || diastolic < 60;
+  const code = severe ? 'crisis'
     : systolic >= 140 || diastolic >= 90 ? 'stage2'
       : systolic >= 130 || diastolic >= 80 ? 'stage1'
         : systolic >= 120 ? 'elevated' : 'normal';
   const meta = BP_CATEGORIES[code];
-  return { ...meta, ...parsed, category: meta.label, emergency: code === 'emergency',
-    emergencySymptomsPresent, referralEvaluationRequired: severe,
-    urgency: severe ? (code === 'emergency' ? 'immediate' : 'prompt') : null,
+  const emergency = severe && emergencySymptomsPresent;
+  const message = emergency
+    ? 'Crisis-range blood pressure with emergency symptoms requires immediate emergency evaluation. Do not delay care to repeat measurements or complete this form.'
+    : hypotensionPresent && code === 'normal'
+      ? 'Low reading. Recheck and assess symptoms, baseline and clinical context; this classification is not a diagnosis.'
+      : meta.message;
+  return { ...meta, ...parsed, category: meta.label, message, emergency, emergencySymptomsPresent,
+    hypotensionPresent, referralEvaluationRequired: severe,
+    urgency: severe ? (emergency ? 'immediate' : 'prompt') : null,
     source: 'default' };
 }

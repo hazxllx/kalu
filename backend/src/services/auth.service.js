@@ -46,6 +46,29 @@ const metadataUser = (user) => ({
   status: null,
 });
 
+const residentRegistrationProjection = async (profileUser) => {
+  if (!profileUser || !['resident', 'resident-limited'].includes(profileUser.role)) {
+    return profileUser;
+  }
+  const resident = await repository.getResidentByAuthUserId(profileUser.id);
+  if (!resident) {
+    return {
+      ...profileUser,
+      role: 'resident-incomplete',
+      status: 'incomplete_registration',
+      registrationStatus: 'incomplete',
+      residentId: null,
+      verificationStatus: null,
+    };
+  }
+  return {
+    ...profileUser,
+    registrationStatus: 'complete',
+    residentId: resident.residentId || resident.id,
+    verificationStatus: resident.verificationStatus || 'pending',
+  };
+};
+
 /**
  * Authenticate a user with email and password against Supabase Auth and enforce
  * KALUSAGAP's profile approval, suspension, and temporary-password expiry gates.
@@ -105,9 +128,10 @@ export const signIn = async ({ email, password }) => {
     try { await getServiceClient().auth.admin.signOut(data.session.access_token); } catch { /* best-effort revocation */ }
     throw ApiError.unauthorized('This temporary password has expired. Contact your administrator for a new one.');
   }
-  const user = profile
+  const baseUser = profile
     ? { ...profileToSessionUser(profile), mustChangePassword: passwordStatus?.mustChangePassword === true }
     : metadataUser(data.user);
+  const user = await residentRegistrationProjection(baseUser);
 
   return {
     user,
@@ -150,9 +174,10 @@ export const getCurrentUser = async (accessToken) => {
   if (passwordStatus?.temporaryPasswordExpired) {
     throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.');
   }
-  return profile
+  const baseUser = profile
     ? { ...profileToSessionUser(profile), mustChangePassword: passwordStatus?.mustChangePassword === true }
     : metadataUser(data.user);
+  return residentRegistrationProjection(baseUser);
 };
 
 /**

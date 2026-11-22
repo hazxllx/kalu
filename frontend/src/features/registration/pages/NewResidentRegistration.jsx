@@ -591,7 +591,10 @@ export default function NewResidentRegistration() {
     return null;
   }, []);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => {
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem("residentRegistrationDraft") || "null"); } catch { saved = null; }
+    const base = {
     firstName: transferData?.firstName || "",
     middleName: transferData?.middleName || "",
     lastName: transferData?.lastName || "",
@@ -630,7 +633,42 @@ export default function NewResidentRegistration() {
       identityPhoto: null,
       studentId: null,
     },
+    };
+    if (!saved) return base;
+    return {
+      ...base,
+      ...saved,
+      password: "",
+      confirmPassword: "",
+      identity: { ...base.identity, ...(saved.identity || {}), governmentIdFront: null, governmentIdBack: null, identityPhoto: null, studentId: null },
+    };
   });
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("residentRegistrationDraft");
+      if (!saved && sessionStorage.getItem("residentRegistrationResume") !== "1") return;
+      const draft = JSON.parse(saved || "null");
+      if (draft?.step && step === 1) setStep(Number(draft.step));
+    } catch { /* A corrupt draft must not block a fresh registration. */ }
+  }, []);
+
+  useEffect(() => {
+    const draft = {
+      ...form,
+      password: "",
+      confirmPassword: "",
+      identity: {
+        ...form.identity,
+        governmentIdFront: null,
+        governmentIdBack: null,
+        identityPhoto: null,
+        studentId: null,
+      },
+      step,
+    };
+    sessionStorage.setItem("residentRegistrationDraft", JSON.stringify(draft));
+  }, [form, step]);
 
   const set = (key) => (e) => {
     const val = e.target ? e.target.value : e;
@@ -1271,6 +1309,8 @@ export default function NewResidentRegistration() {
       // The account is already authenticated from the signup verification.
       // Go straight to the limited resident dashboard; the verification banner
       // there is the post-registration confirmation state.
+      sessionStorage.removeItem("residentRegistrationDraft");
+      sessionStorage.removeItem("residentRegistrationResume");
       navigate('/app/resident-limited/dashboard');
     } catch (err) {
       const status = err?.status;

@@ -20,7 +20,7 @@
  * efficient listing.
  */
 import repository from '../repositories/index.js';
-import { assessVitals, isLaterVisit } from '../utils/residentRisk.js';
+import { assessVisitRisk, isLaterVisit } from '../utils/residentRisk.js';
 import { getRiskConfig, setRecalcHandler } from './riskConfig.service.js';
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
@@ -49,8 +49,8 @@ const latestVisitMap = (visits = []) => {
 };
 
 /** Assess a single resident from a (latest) visit + config. */
-const assessFromVisit = (visit, config) => {
-  const { score, level, factors, status, missingMeasurements, reason } = assessVitals(visit?.vitals, config);
+const assessFromVisit = (visit, config, history = []) => {
+  const { score, level, factors, status, missingMeasurements, reason, ...clinical } = assessVisitRisk(visit, config, history);
   return {
     riskScore: score,
     riskLevel: level,
@@ -59,6 +59,7 @@ const assessFromVisit = (visit, config) => {
     riskAssessmentStatus: status,
     missingMeasurements,
     riskReason: reason,
+    ...clinical,
   };
 };
 
@@ -77,7 +78,7 @@ export const attachRiskToResidents = async (residents = [], { repo = repository,
     const cfg = config || (await getRiskConfig({ repo }));
     const { rows: visits } = await repo.listVisits({ limit: Number.MAX_SAFE_INTEGER });
     const latest = latestVisitMap(visits || []);
-    return residents.map((r) => ({ ...r, ...assessFromVisit(latest.get(r.id), cfg) }));
+    return residents.map((r) => ({ ...r, ...assessFromVisit(latest.get(r.id), cfg, visits) }));
   } catch {
     throw new ApiError(503, 'Resident risk assessment is unavailable. Reload the records to retry.').withCode('RISK_SOURCE_UNAVAILABLE');
   }
@@ -92,9 +93,14 @@ export const assessResidentById = async ({ id, repo = repository, config = null,
     return risk;
   }
   const cfg = config || (await getRiskConfig({ repo }));
-  const { rows: visits } = await repo.listVisits({ residentId: id, limit: 500 });
+  const visits = [];
+  for (let offset = 0; ; offset += 200) {
+    const { rows } = await repo.listVisits({ residentId: id, limit: 200, offset });
+    visits.push(...rows);
+    if (rows.length < 200) break;
+  }
   const latest = latestVisitMap(visits || []).get(id) || null;
-  return assessFromVisit(latest, cfg);
+  return assessFromVisit(latest, cfg, visits);
 };
 
 /**
@@ -162,7 +168,7 @@ export const getRiskSummary = async ({ barangay = null, municipalityId = null, r
   const counts = { Low: 0, Moderate: 0, High: 0 };
   let assessed = 0;
   for (const resident of residents) {
-    const { riskLevel } = assessFromVisit(latest.get(resident.id), cfg);
+    const { riskLevel } = assessFromVisit(latest.get(resident.id), cfg, visits);
     if (riskLevel) { counts[riskLevel] += 1; assessed += 1; }
   }
   const highPct = assessed > 0 ? Math.round((counts.High / assessed) * 100) : null;
@@ -206,7 +212,7 @@ export const getHighRiskResidents = async ({ barangay = null, municipalityId = n
   const residentIds = new Set(residents.map((r) => r.id));
   const latest = latestVisitMap((visits || []).filter((v) => residentIds.has(v.residentId)));
   const rows = residents
-    .map((r) => ({ resident: r, ...assessFromVisit(latest.get(r.id), cfg) }))
+    .map((r) => ({ resident: r, ...assessFromVisit(latest.get(r.id), cfg, visits) }))
     .filter((row) => row.riskLevel === 'High');
   return includeTotal ? { rows: rows.slice(offset, offset + limit), total: rows.length } : rows;
 };
@@ -234,7 +240,7 @@ export const recalculateAll = async ({ barangay = null, municipalityId = null, r
   const latest = latestVisitMap(visits || []);
   let updated = 0;
   for (const resident of residents) {
-    const result = assessFromVisit(latest.get(resident.id), cfg);
+    const result = assessFromVisit(latest.get(resident.id), cfg, visits);
     try {
       if (typeof repo.updateResident === 'function') {
         await repo.updateResident(resident.id, {

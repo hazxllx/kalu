@@ -68,6 +68,25 @@ const destinationFor = (notification, role) => {
   if (notification.relatedType === "consultation" && role === "resident") {
     return "/app/resident/record";
   }
+  if (["resident_registration", "resident_registration_review"].includes(notification.relatedType)
+    && role === "health_supervisor") {
+    return notification.relatedType === "resident_registration_review"
+      ? "/app/health_supervisor/verifications"
+      : "/app/health_supervisor/residents";
+  }
+  if (["follow_up_assigned", "follow_up_updated", "follow_ups"].includes(notification.relatedType)) {
+    const destinations = {
+      health_supervisor: "/app/health_supervisor/followups",
+      phn: "/app/phn/followups",
+      resident: "/app/resident/followups",
+      "resident-limited": "/app/resident-limited/follow-ups",
+    };
+    return destinations[role] || null;
+  }
+  if (notification.relatedType === "health_referral") {
+    if (role === "rhu_personnel") return "/app/rhu_personnel/incoming-referrals";
+    if (["health_supervisor", "phn", "mho"].includes(role)) return `/app/${role}/referrals`;
+  }
   // Residency transfer requests. Staff reviewers deep-link to the Resident
   // Transfer Requests queue, pre-opening the specific request; a resident is
   // taken to their profile history, including the exact historical request.
@@ -86,17 +105,19 @@ const actionLabelFor = (notification, role) => {
   if (["transfer_request", "transfer_request_resubmitted", "transfer_request_approved"].includes(notification?.relatedType)) {
     return ["resident", "resident-limited"].includes(role) ? "View submitted request" : "Open transfer request";
   }
-  return "View My Health Records";
+  if (notification?.relatedType === "health_referral") return "View referral";
+  if (["follow_up_assigned", "follow_up_updated", "follow_ups"].includes(notification?.relatedType)) return "View follow-ups";
+  if (notification?.relatedType === "resident_registration_review") return "Review registration";
+  if (notification?.relatedType === "resident_registration") return "View residents";
+  return "Open notification";
 };
 
 /**
  * Notifications (all roles).
  *
- * Reads the authenticated user's own notifications from the database
- * (`/operational/notifications`) — the resident sees exactly the notifications
- * created for their account by Health Supervisor actions (verification
- * decisions, follow-up changes, new records). "Mark as read" persists to the
- * same row so the state survives refresh and re-login.
+ * Reads only the authenticated user's notifications from the database
+ * (`/operational/notifications`). "Mark as read" updates that same row so the
+ * state survives refresh and re-login without removing notification history.
  */
 export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   const navigate = useNavigate();

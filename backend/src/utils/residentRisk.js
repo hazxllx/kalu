@@ -26,6 +26,8 @@
  */
 import { computeBMI } from './bmi.js';
 import { DEFAULT_RISK_CONFIG, DEFAULT_RISK_THRESHOLDS } from '../config/riskConfig.js';
+import { consultationAssessmentReasons, consultationChronology, isAuthorizedRiskReview, normalizeConsultationRiskLevel,
+  previousConsultationAssessment, savedConsultationAssessment } from '../../../shared/consultationClinical.js';
 
 /**
  * Coerces a raw measurement or threshold bound to a finite number, returning `null`
@@ -57,7 +59,10 @@ const FIELD_LABELS = {
 /** Match the database's deterministic latest-visit ordering across risk consumers. */
 export const isLaterVisit = (visit, current) => {
   if (!current) return true;
-  for (const field of ['visitDate', 'updatedAt', 'createdAt']) {
+  const aDate = consultationChronology(visit);
+  const bDate = consultationChronology(current);
+  if (aDate !== bDate) return aDate > bDate;
+  for (const field of ['updatedAt', 'createdAt']) {
     const a = Date.parse(visit[field] || visit.createdAt || '') || 0;
     const b = Date.parse(current[field] || current.createdAt || '') || 0;
     if (a !== b) return a > b;
@@ -218,6 +223,55 @@ export const assessHealthData = (healthData = {}, config = DEFAULT_RISK_CONFIG) 
  */
 export const assessVitals = (vitals = {}, config = DEFAULT_RISK_CONFIG) =>
   assessHealthData(healthDataFromVitals(vitals), config);
+
+/** Positive legacy evidence is sourced to recorded measurements, never to an unsourced master Low/High. */
+export const riskHistoryVisit = (visit, config = DEFAULT_RISK_CONFIG) => {
+  const details = visit?.consultationDetails || {};
+  const saved = savedConsultationAssessment(details);
+  const reviews = [...(Array.isArray(details.riskReviewHistory) ? details.riskReviewHistory : []), details.consultationRiskAssessment?.review].filter(isAuthorizedRiskReview);
+  if (details.consultationRiskAssessment || saved?.reviewStatus === 'approved'
+    || normalizeConsultationRiskLevel(saved?.level ?? saved?.riskLevel ?? saved?.risk_level) === 'High'
+    || reviews.some((review) => review.level !== 'High')) return visit;
+  const weighted = assessVitals(visit?.vitals, config);
+  if (weighted.level !== 'High' || !consultationChronology(visit)) return visit;
+  const legacy = { level: 'High', status: 'assessed', riskSource: 'legacy_weighted_measurements',
+    reviewStatus: 'professional_review_required', decisionSupport: true, missingMeasurements: weighted.missingMeasurements,
+    reasons: weighted.factors.map((factor) => ({ ruleId: factor.code, field: factor.field,
+      message: `${factor.name} (${factor.measured}): positive recorded legacy risk evidence, not an approved clinical protocol.` })),
+    sourceConfig: { updatedAt: config.updatedAt || null, thresholds: config.thresholds, matchedCriteria: weighted.factors },
+    sources: [{ type: 'legacy_recorded_vitals', id: visit.id }] };
+  return { ...visit, consultationDetails: { ...details, consultationRiskAssessment: legacy } };
+};
+
+/** Saved clinical screening overrides weighted scoring without losing an unresolved, sourced High. */
+export const assessVisitRisk = (visit, config = DEFAULT_RISK_CONFIG, history = []) => {
+  const weighted = assessVitals(visit?.vitals, config);
+  const details = visit?.consultationDetails || {};
+  const saved = savedConsultationAssessment(details);
+  const clinical = details.clinicalAssessment;
+  const screening = details.consultationRiskAssessment;
+  const eligible = saved && (saved === screening || saved.reviewStatus === 'approved'
+    || normalizeConsultationRiskLevel(saved.level ?? saved.riskLevel ?? saved.risk_level) === 'High'
+    || consultationAssessmentReasons(saved).some((reason) => ['bp_emergency', 'bp_severe'].includes(reason.ruleId)));
+  const prior = previousConsultationAssessment(history.filter((row) => row.residentId === visit?.residentId).map((row) => riskHistoryVisit(row, config)),
+    { asOf: consultationChronology(visit), excludeVisitId: visit?.id });
+  const reviewed = [...(Array.isArray(details.riskReviewHistory) ? details.riskReviewHistory : []), screening?.review].filter(isAuthorizedRiskReview).at(-1);
+  const hold = prior?.level === 'High' && (!reviewed || reviewed.level === 'High');
+  if (!eligible && !hold) return weighted;
+  const level = hold ? 'High' : normalizeConsultationRiskLevel(saved?.level ?? saved?.riskLevel ?? saved?.risk_level);
+  const reasons = consultationAssessmentReasons(saved).slice();
+  if (hold && !reasons.some((reason) => reason.ruleId === 'previous_high_held')) reasons.push({ ruleId: 'previous_high_held',
+    message: 'A previous saved High assessment is retained until an authorized professional documents a confirmed reassessment and reason.' });
+  const factors = reasons.map((reason) => ({ ...reason, code: reason.ruleId || 'clinical_assessment',
+    name: reason.message || (reason.field || reason.ruleId || 'Clinical assessment').replaceAll('_', ' '),
+    field: reason.field || null, measured: null, weight: null, source: 'consultation' }));
+  return { score: null, level: level === 'Medium' ? 'Moderate' : level, factors,
+    status: level ? 'assessed' : saved?.status || 'unavailable', missingMeasurements: Array.isArray(saved?.missingMeasurements) ? saved.missingMeasurements : weighted.missingMeasurements,
+    reason: reasons.map((reason) => reason.message || (reason.field || reason.ruleId || '').replaceAll('_', ' ')).filter(Boolean).join('; '),
+    riskSource: hold ? 'saved_high_hold' : saved === screening ? 'consultation_screening' : 'saved_clinical_assessment',
+    ...(hold ? { previousAssessment: prior } : {}),
+    ...(screening ? { consultationRiskAssessment: screening } : {}), ...(clinical ? { clinicalAssessment: clinical } : {}) };
+};
 
 export default {
   healthDataFromVitals,

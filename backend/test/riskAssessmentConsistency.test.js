@@ -131,7 +131,7 @@ test('KFT-015 selected reporting year uses the latest assessment within that Man
   const options = { repo: periodRepo, now: new Date('2026-11-19T00:00:00Z') };
   const current = await getEarlyWarning({ year: 2026 }, options);
   assert.deepEqual(current.reportingPeriod, { from: '2026-01-01', to: '2026-12-31', year: 2026 });
-  assert.deepEqual(current.reportingRiskDistribution.map((row) => row.value), [1, 0, 0, 3]);
+  assert.deepEqual(current.reportingRiskDistribution.map((row) => row.value), [0, 0, 1, 3]);
   assert.equal(current.riskDistribution.find((row) => row.name === 'High Risk').value, 1);
   const previous = await getEarlyWarning({ year: 2025 }, options);
   assert.deepEqual(previous.reportingRiskDistribution.map((row) => row.value), [0, 0, 1, 3]);
@@ -145,7 +145,7 @@ test('KFT-015 selected reporting year uses the latest assessment within that Man
   const map = await getCommunityMap({ municipalityId: 'synthetic-municipality', from: '2026-01-01', to: '2026-12-31' }, mapOptions);
   const barangay = map.barangays.find((row) => row.name === 'San Antonio');
   assert.equal(barangay.highRiskResidents, 1, 'legacy current classification remains explicit');
-  assert.equal(barangay.reportingHighRiskResidents, 0);
-  assert.equal(barangay.riskCounts.Low, 1);
+  assert.equal(barangay.reportingHighRiskResidents, 1);
+  assert.equal(barangay.riskCounts.High, 1);
   assert.equal(barangay.riskCounts.Unassessed, 1);
 });

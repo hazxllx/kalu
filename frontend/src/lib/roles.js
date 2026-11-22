@@ -16,6 +16,7 @@ export const ROLE = Object.freeze({
   RHU_PERSONNEL: 'rhu_personnel',
   BHW: 'bhw',
   RESIDENT: 'resident',
+  RESIDENT_INCOMPLETE: 'resident-incomplete',
   // Verification sub-state of a resident account (pending identity review).
   RESIDENT_LIMITED: 'resident-limited',
 });
@@ -31,6 +32,7 @@ export const ROLE_HOME = Object.freeze({
   [ROLE.RHU_PERSONNEL]: '/app/rhu_personnel/dashboard',
   [ROLE.BHW]: '/app/bhw/dashboard',
   [ROLE.RESIDENT]: '/app/resident/dashboard',
+  [ROLE.RESIDENT_INCOMPLETE]: '/registration-incomplete',
   [ROLE.RESIDENT_LIMITED]: '/app/resident-limited/dashboard',
 });
 
@@ -53,6 +55,7 @@ export const ROUTE_ROLES = Object.freeze({
   bhw: [ROLE.BHW],
   resident: [ROLE.RESIDENT],
   'resident-limited': [ROLE.RESIDENT_LIMITED],
+  'resident-incomplete': [ROLE.RESIDENT_INCOMPLETE],
 });
 
 export const homeForRole = (role) => ROLE_HOME[role] || '/login';

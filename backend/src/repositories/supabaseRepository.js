@@ -342,6 +342,8 @@ const DB_TO_RESIDENT = Object.fromEntries(Object.entries(RESIDENT_TO_DB).map(([k
 const VISIT_TO_DB = {
   id: 'id',
   residentId: 'resident_id',
+  municipalityId: 'municipality_id',
+  barangayId: 'barangay_id',
   recordedById: 'recorded_by_id',
   recordedByRole: 'recorded_by_role',
   recordedByName: 'recorded_by_name',
@@ -590,6 +592,7 @@ const visitToRow = (visit) => {
 const visitFromRow = (row) => {
   if (!row) return null;
   const out = mapBack(row, DB_TO_VISIT);
+  if (row.healthService) out.healthService = row.healthService;
   if (row.triage_snapshot !== null && row.triage_snapshot !== undefined) out.triageSnapshot = row.triage_snapshot;
   const vitals = vitalsFromRow(row);
   if (Object.keys(vitals).length) out.vitals = vitals;
@@ -1080,9 +1083,15 @@ export const supabaseRepository = {
     if (barangay) query = query.eq('households.barangay', barangay);
     if (barangayId) query = query.eq('households.barangay_id', barangayId);
     if (municipalityId) query = query.eq('households.municipality_id', municipalityId);
-    const { data, error } = await query;
-    throwOnError(error, 'Could not load verified household members');
-    return [...new Set((data || []).map((row) => row.resident_id).filter(Boolean))];
+    const ids = new Set();
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await query.order('id').range(offset, offset + 499);
+      throwOnError(error, 'Could not load verified household members');
+      if (!Array.isArray(data)) throw new ApiError(503, 'Verified household members could not be confirmed.');
+      data.forEach((row) => { if (row.resident_id) ids.add(row.resident_id); });
+      if (data.length < 500) break;
+    }
+    return [...ids];
   },
 
   /** Fetch residents by id, scope- and search-filtered. Returns mapped rows. */
@@ -2460,7 +2469,7 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from(TABLES.visits)
-      .select(`*, resident:residents(${SELECT_RESIDENT})`)
+      .select(`*, resident:residents(${SELECT_RESIDENT}), healthService:health_services(id,name,category)`)
       .eq('client_operation_key', clientOperationKey)
       .maybeSingle();
     // Fail closed if the migration is missing; never fall back to an insert
@@ -2496,7 +2505,7 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from(TABLES.visits)
-      .select(`*, resident:residents(${SELECT_RESIDENT})`)
+      .select(`*, resident:residents(${SELECT_RESIDENT}), healthService:health_services(id,name,category)`)
       .eq('id', id)
       .maybeSingle();
     throwOnError(error, 'Could not fetch submission');
@@ -2509,7 +2518,7 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.visits)
-      .select(`*, resident:residents${municipalityId || barangayId || barangay ? '!inner' : ''}(${SELECT_RESIDENT})`, { count: 'exact' })
+      .select(`*, resident:residents${municipalityId || barangayId || barangay ? '!inner' : ''}(${SELECT_RESIDENT}), healthService:health_services(id,name,category)`, { count: 'exact' })
       .order(orderBy === 'clinicalDate' ? 'consultation_date' : 'updated_at', { ascending: false, nullsFirst: false });
     if (orderBy === 'clinicalDate') query = query.order('visit_date', { ascending: false, nullsFirst: false });
     query = query.order('id', { ascending: false }).range(offset, offset + limit - 1);
@@ -2658,7 +2667,7 @@ export const supabaseRepository = {
       .eq('id', id);
       if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt);
       if (allowedStatuses) query = query.in('status', allowedStatuses);
-      return query.select(`*, resident:residents(${SELECT_RESIDENT})`).maybeSingle();
+      return query.select(`*, resident:residents(${SELECT_RESIDENT}), healthService:health_services(id,name,category)`).maybeSingle();
     };
     const { data, error } = await runUpdate(row);
     // Missing clinical migrations must fail the entire write.

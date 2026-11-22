@@ -20,9 +20,9 @@ import { loadDocumentBranding } from "@/lib/documentBranding";
  *
  * The form STRUCTURE/WORDING is a static template (`m1OfficialFormTemplate.js`).
  * The VALUES come from the live M1 aggregation API (`m1Api.monthly` → `byCode`).
- * Rows whose `code` maps to a real catalog indicator print its number (incl. 0);
- * rows with no backing data source are left blank per the form convention. No
- * value is hardcoded and no clinical information is invented.
+ * Compatible rows print recorded values (including actual zero). Incompatible
+ * legacy mappings and unavailable values stay blank with a visible limitation.
+ * No value is hardcoded and no clinical information is invented.
  */
 
 const CSS = `
@@ -47,6 +47,7 @@ const CSS = `
 .m1of-head .fields .row { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 8.5px; }
 .m1of-head .fields .row .lab { color: #334A63; }
 .m1of-head .fields .row .val { font-weight: 700; min-width: 70px; border-bottom: 1px solid #10243B; padding: 0 6px; }
+.m1of-note { border: 1px solid #7A8CA3; padding: 4px 7px; margin-bottom: 4px; font-size: 8px; break-inside: avoid; }
 
 /* ---------- section bar ---------- */
 .m1of-sec { background: #0B3D7A; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 3px 7px; margin: 7px 0 0; text-transform: uppercase; break-after: avoid; page-break-after: avoid; break-inside: avoid; }
@@ -90,16 +91,14 @@ const CSS = `
 // ---------------------------------------------------------------------------
 // value resolution: a column descriptor `get` string → cell value from a record
 //
-// Numeric cells render the aggregated value, or 0 when there is no value yet
-// (the official form prints 0, not blanks, in every applicable numeric cell).
-// Pure category-heading rows (`heading: true`) keep their numeric cells empty,
-// matching the merged heading rows on the sheet. Text columns stay blank.
+// Only an actual compatible value can render zero. Unmapped, unverified,
+// unavailable and heading cells remain blank rather than implying no services.
 // ---------------------------------------------------------------------------
 const resolveCell = (get, row, rec) => {
   if (get === "label") return row.label;
   if (get === "remarks") return row.remarks || (rec ? rec.remarks || "" : "");
   // Numeric data columns:
-  if (row.heading) return ""; // category label row → no numbers
+  if (row.heading || !row.code || row.mappingStatus === "unverified" || !rec || rec.source === "workbook_unmapped") return "";
   let v;
   if (get === "total") v = rec ? rec.total : undefined;
   else if (get.startsWith("age:")) v = rec && rec.byAge ? rec.byAge[get.slice(4)] : undefined;
@@ -108,7 +107,7 @@ const resolveCell = (get, row, rec) => {
     const [, key, band] = get.split(":");
     v = rec && rec.measures && rec.measures[key] ? rec.measures[key][band] : undefined;
   }
-  return v === undefined || v === null ? 0 : v;
+  return v === undefined || v === null ? "" : v;
 };
 
 const cls = (get) => {
@@ -251,6 +250,12 @@ export default function M1OfficialForm({ data = {}, header = {}, template = M1_F
             <span className="val">{h.barangay || ""}</span>
           </div>
         </div>
+      </div>
+
+      <div className="m1of-note" role="note">
+        Workbook mapping approval pending. The 8ANC and 4PNC values are unverified and left blank;
+        legacy four-prenatal and two-postpartum check-up totals are not substituted.
+        Unmapped or unavailable cells are blank, not zero. This is not a verified workbook submission.
       </div>
 
       <Blocks blocks={template} data={data} />

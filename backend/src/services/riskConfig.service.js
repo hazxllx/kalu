@@ -45,7 +45,18 @@ const safe = async (fn, fallback) => {
  * criteria:[...] }. Falls back to the documented defaults whenever the DB
  * configuration is unavailable or empty, so risk assessment always works.
  */
-export const getRiskConfig = async ({ repo = repository } = {}) => {
+export const getRiskConfig = async ({ repo = repository, strict = false } = {}) => {
+  if (strict && repo?.driver === 'supabase') {
+    if (typeof repo.listRiskCriteria !== 'function' || typeof repo.getRiskSettings !== 'function') throw new ApiError(503, 'Authoritative risk configuration is unavailable.');
+    try {
+      const [criteria, settings] = await Promise.all([repo.listRiskCriteria(), repo.getRiskSettings()]);
+      if (!Array.isArray(criteria)) throw new Error('Risk criteria unavailable');
+      return { thresholds: settings && num(settings.moderateMin) !== null && num(settings.highMin) !== null
+        ? { moderateMin: num(settings.moderateMin), highMin: num(settings.highMin) } : { ...DEFAULT_RISK_THRESHOLDS },
+      criteria: criteria.length ? criteria.map((c) => ({ ...c, value: num(c.value), value2: num(c.value2), weight: Number(c.weight) || 0 }))
+        : DEFAULT_RISK_CRITERIA.map((c) => ({ ...c })) };
+    } catch { throw new ApiError(503, 'Authoritative risk configuration could not be verified.'); }
+  }
   const criteria = typeof repo.listRiskCriteria === 'function'
     ? await safe(() => repo.listRiskCriteria(), null)
     : null;

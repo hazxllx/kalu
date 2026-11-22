@@ -118,7 +118,7 @@ export default function HealthSupervisorDashboard() {
   const followUps = useAuthorizedData(loadFollowUps);
   const loadResidents = useCallback(async ({ ownerId }) => !assignedBarangay || !canResidents ? null : recordsForBarangay(await loadServerRows((params) => residentsApi.list({ ...params, barangay: assignedBarangay }, { ownerId })), assignedBarangay), [assignedBarangay, canResidents]);
   const residents = useAuthorizedData(loadResidents);
-  // Attention cases include all open authorized records, regardless of encounter date.
+  // Saved clinical warnings remain actionable after encounter completion and offline sync.
   const loadConsultations = useCallback(async ({ ownerId }) => !assignedBarangay || !canConsultations ? null : recordsForBarangay(await loadServerRows((params) => consultationsApi.list(params, { ownerId }), 500), assignedBarangay), [assignedBarangay, canConsultations]);
   const consultations = useAuthorizedData(loadConsultations);
   const loadServices = useCallback(async () => !assignedBarangay || !canServices ? null : recordsForBarangay(requireDashboardRows(await healthServicesApi.listAttendance(upcomingRange), "health-service schedule"), assignedBarangay), [assignedBarangay, canServices, upcomingRange]);
@@ -135,7 +135,7 @@ export default function HealthSupervisorDashboard() {
   const prioritySources = [{ allowed: canResidents, label: "Resident assessments", state: residents }, { allowed: canReferrals, label: "Referrals", state: referrals }, { allowed: canFollowUps, label: "Follow-ups", state: followUps }, { allowed: canConsultations, label: "Consultations", state: consultations }].filter((source) => source.allowed);
   const priorityErrors = prioritySources.filter(({ state }) => state.error).map(({ label, state }) => ({ label, message: state.error, retry: state.refresh }));
   const prioritiesLoading = prioritySources.some(({ state }) => state.loading);
-  const filterAvailable = (id) => id === "all" ? priorityErrors.length ? cases.length > 0 : prioritySources.some(({ state }) => Array.isArray(state.data)) : id === "high-risk" ? canResidents && !residents.error : id === "overdue" ? canFollowUps && !followUps.error : canReferrals && !referrals.error;
+  const filterAvailable = (id) => id === "all" ? priorityErrors.length ? cases.length > 0 : prioritySources.some(({ state }) => Array.isArray(state.data)) : id === "high-risk" ? (canResidents && !residents.error) || (canConsultations && !consultations.error) : id === "overdue" ? canFollowUps && !followUps.error : canReferrals && !referrals.error;
   const registerLinks = [{ label: "Resident Directory", href: `${BASE}/residents`, allowed: canResidents, filter: "high-risk" }, { label: "Consultation Records", href: `${BASE}/consultations`, allowed: canConsultations }, { label: "Follow-up Monitoring", href: `${BASE}/followups?status=Overdue`, allowed: canFollowUps, filter: "overdue" }, { label: "Referral Register", href: `${BASE}/referrals?status=Pending`, allowed: canOpenReferrals, filter: "pending-referral" }].filter((link) => link.allowed && (attentionFilter === "all" || link.filter === attentionFilter));
   const exportCases = () => {
     try { setExportError(""); downloadCsv(`KALUSAGAP-attention-${String(assignedBarangay).replace(/[^a-z0-9]+/gi, "-")}-${today}.csv`, monitoringCasesCsv(filteredCases)); }

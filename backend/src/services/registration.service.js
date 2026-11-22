@@ -14,8 +14,9 @@ import {
   toZone,
 } from '../validators/common.js';
 import { normalizeRegistrationMobile, registrationDateReference } from '../validators/registration.validators.js';
+import { notifyHealthSupervisorsOnce } from './notifications.service.js';
 
-const SELF_ROLES = Object.freeze(['resident', 'resident-limited']);
+const SELF_ROLES = Object.freeze(['resident', 'resident-limited', 'resident-incomplete']);
 
 // Verification states that mean "registration is still in progress and may be
 // safely retried". A retry that happens after the Auth user + resident row
@@ -397,6 +398,18 @@ export const registerResident = async ({ user, payload = {} }) => {
     resident = current;
     await activateIfVerified(resident, user.id);
   }
+
+  await notifyHealthSupervisorsOnce({
+    barangayId: barangayRow.id,
+    municipalityId: barangayRow.municipalityId || user.municipalityId || null,
+    actorId: user.id,
+    category: 'reminder',
+    title: 'New resident registration needs review',
+    message: `A resident registration was submitted for ${barangayRow.name}.`,
+    relatedType: 'resident_registration_review',
+    relatedId: resident.id,
+    eventKey: `resident_registration_review:${resident.id}`,
+  });
 
   return toResidentResult(resident);
 };

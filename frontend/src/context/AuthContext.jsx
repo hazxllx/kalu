@@ -56,6 +56,9 @@ const profileToFrontendUser = (profileUser) => ({
   position: profileUser.position ?? '',
   createdAt: profileUser.createdAt ?? null,
   referenceNumber: profileUser.referenceNumber ?? profileUser.id ?? null,
+  registrationStatus: profileUser.registrationStatus ?? null,
+  residentId: profileUser.residentId ?? null,
+  verificationStatus: profileUser.verificationStatus ?? null,
 });
 
 /**

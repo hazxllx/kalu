@@ -25,6 +25,11 @@ const router = Router();
 // Authenticate every caller and attach session-derived barangay/municipality scope.
 router.use(authenticate, resolveBarangayScope);
 
+router.get('/clinical-context',
+  authorize([...FEATURE_ROLES.consultations, ROLES.MHO, ROLES.RHU_PERSONNEL], {
+    anyPermission: ['consultation.conduct', 'consultation.requests.view', 'consultation.history.view'],
+  }), asyncHandler(controller.clinicalContext));
+
 // GET /api/consultations — List consultations (scoped clinical staff or residents viewing their own history via query filters).
 router.get(
   '/',
@@ -62,8 +67,12 @@ router.get(
 // PUT /api/consultations/:id — Update clinical vitals, assessment, or treatment details on consultation `:id`.
 router.put(
   '/:id',
-  authorize(FEATURE_ROLES.consultations, { permission: 'consultation.records.update' }),
+  authorize([...FEATURE_ROLES.consultations, ROLES.MHO, ROLES.RHU_PERSONNEL], { permission: 'consultation.records.update' }),
   asyncHandler(controller.update),
 );
+
+router.put('/:id/risk-review',
+  authorize([...FEATURE_ROLES.consultations, ROLES.MHO, ROLES.RHU_PERSONNEL], { permission: 'consultation.records.update' }),
+  asyncHandler(controller.reviewRisk));
 
 export default router;

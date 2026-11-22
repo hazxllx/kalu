@@ -30,12 +30,15 @@ export default function DataTable({
   tableClassName = "", 
   fitContainer = false,
   mobileCards = true,
+  mobileBreakpoint = "md",
   compact = false,
   stickyHeader = false,
   maxHeight = null,
   emptyText = "No records found.",
   striped = false,
 }) {
+  const responsiveTableClass = mobileCards ? (mobileBreakpoint === "lg" ? "hidden lg:table" : "hidden md:table") : "";
+  const responsiveCardsClass = mobileBreakpoint === "lg" ? "lg:hidden" : "md:hidden";
   const cellValue = (column, row) => column.render ? column.render(row) : renderCell ? renderCell(column.key, row) : row[column.key];
   const alignClass = (column) => column.align === "right" ? "text-right" : column.align === "center" ? "text-center" : "text-left";
   return (
@@ -44,7 +47,7 @@ export default function DataTable({
       className={`ui-data-table table-scroll min-w-0 ${maxHeight ? "overflow-x-auto md:max-h-[var(--data-table-max-height)] md:overflow-auto" : "overflow-x-auto"} rounded-2xl border border-slate-200 bg-white dark:bg-card dark:border-border shadow-card ${className}`}
     >
       {/* Desktop Table View */}
-      <table className={`${mobileCards ? "hidden md:table" : ""} ${fitContainer ? "min-w-0 w-full" : "min-w-[640px]"} text-sm ${tableClassName}`}>
+      <table className={`${responsiveTableClass} ${fitContainer ? "min-w-0 w-full" : "min-w-[640px]"} text-sm ${tableClassName}`}>
         <thead className={stickyHeader ? "sticky top-0 z-10" : ""}>
           <tr className="bg-slate-50 dark:bg-card-nested text-left">
             {columns.map((c) => (
@@ -78,7 +81,7 @@ export default function DataTable({
 
       {/* Mobile Card View */}
       {mobileCards && (
-        <div className="md:hidden divide-y divide-slate-200 dark:divide-border">
+        <div className={`${responsiveCardsClass} divide-y divide-slate-200 dark:divide-border`}>
           {rows.map((row, i) => (
             <motion.div
               key={row.id ?? i}

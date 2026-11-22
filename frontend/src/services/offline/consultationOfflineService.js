@@ -9,6 +9,11 @@ import { isNavigatorOnline } from './connectivity.js';
 import { classifySyncError, SYNC_ERROR } from './errors.js';
 import { MUTATION_TIER, OfflineActionRequiredError } from './mutationPolicy.js';
 import { parseBloodPressure } from '../../../../shared/bloodPressure.js';
+import {
+  validateConsultationDateTime, validateConsultationVitals, normalizeConsultationClinicalText,
+  consultationVitalValues, consultationNumber, calculateConsultationBmi,
+  validateConsultationMedications,
+} from '../../../../shared/consultationClinical.js';
 
 /**
  * Additive, authorized consultation creates are SAFE_SYNC. The draft and its
@@ -22,11 +27,19 @@ const LEGACY_ENTITY = 'consultationDraft';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isNetworkFailure = (error) => classifySyncError(error).code === SYNC_ERROR.NETWORK;
 const malformed = (message) => Object.assign(new Error(message), { code: SYNC_ERROR.MALFORMED });
-const validateBloodPressure = (payload) => {
-  const reading = payload?.bloodPressure;
-  if (reading != null && (typeof reading !== 'string' || (reading.trim() && !parseBloodPressure(reading)))) {
-    throw Object.assign(malformed('Enter a complete, valid systolic/diastolic reading (e.g. 120/80).'),
-      { status: 422, payload: { error: { errors: { bloodPressure: 'Enter a complete, valid systolic/diastolic reading (e.g. 120/80).' } } } });
+const validateClinicalPayload = (payload) => {
+  const required = payload?.legacyDraftAdopted !== true;
+  const errors = { ...validateConsultationDateTime(payload, { required }), ...validateConsultationVitals(payload, { required }),
+    ...validateConsultationMedications(payload?.medications, { previous: required ? [] : payload?.medications || [] }) };
+  for (const [field, label] of [['treatmentGiven', 'Treatment provided'], ['adviceGiven', 'Recommendations']]) {
+    if (payload?.[field] != null) {
+      if (typeof payload[field] !== 'string') errors[field] = `Use text for ${label.toLowerCase()}.`;
+      else if (payload[field].length > 10000) errors[field] = `Use 10,000 characters or fewer for ${label.toLowerCase()}.`;
+    }
+  }
+  if (Object.keys(errors).length) {
+    throw Object.assign(malformed('Review the consultation date, time and required vital signs.'),
+      { status: 422, payload: { error: { errors } } });
   }
 };
 const conflict = (message) => Object.assign(new Error(message), { status: 409, code: SYNC_ERROR.CONFLICT });
@@ -48,19 +61,23 @@ export const toServerPayload = (data = {}) => Object.fromEntries(
 export const requireConfirmedConsultation = (result, op) => {
   const record = result && typeof result === 'object' && 'consultation' in result ? result.consultation : result;
   const payload = op?.payload || {};
-  // The current consultation form sends findings and diagnosis together in
-  // `clinicalFindingsDiagnosis`. Match the API's normalization exactly before
-  // checking the persisted response; comparing against absent legacy fields
-  // falsely rejected successfully saved BHS consultations.
-  const mergedClinicalText = String(payload.clinicalFindingsDiagnosis ?? '').trim();
-  const mergedParts = mergedClinicalText.includes('\n') ? mergedClinicalText.split('\n') : null;
-  const expectedFindings = mergedParts ? mergedParts.slice(0, -1).join('\n').trim() : mergedClinicalText;
-  const expectedDiagnosis = mergedParts ? String(mergedParts[mergedParts.length - 1] ?? '').trim() : '';
-  const expected = {
-    ...payload,
-    findings: payload.clinicalFindingsDiagnosis !== undefined ? expectedFindings : String(payload.findings ?? '').trim(),
-    diagnosis: payload.clinicalFindingsDiagnosis !== undefined ? expectedDiagnosis : String(payload.diagnosis ?? '').trim(),
-  };
+  // Use the server's exact normalization, including literal multiline findings
+  // and the shipped Diagnosis marker. A saved visit must not become a failed draft.
+  const expected = { ...payload, ...normalizeConsultationClinicalText(payload) };
+  const expectedVitals = consultationVitalValues(payload);
+  const savedVitals = consultationVitalValues(record?.vitals);
+  const clinicalMeasurementsMatch = ['temperature', 'pulseRate', 'respiratoryRate', 'height', 'weight', 'oxygenSaturation']
+    .every((field) => expectedVitals[field] == null || expectedVitals[field] === ''
+      ? savedVitals[field] == null || savedVitals[field] === ''
+      : consultationNumber(expectedVitals[field]) === consultationNumber(savedVitals[field]));
+  const expectedBmi = calculateConsultationBmi(expectedVitals.height, expectedVitals.weight);
+  const bmiMatches = expectedBmi === null || expectedBmi === consultationNumber(record?.vitals?.bmi);
+  const medicationsMatch = !Array.isArray(payload.medications) || !payload.medications.length || (
+    Array.isArray(record?.medications) && record.medications.length === payload.medications.length
+    && payload.medications.every((medication, index) => ['medicineId', 'genericName', 'brandName', 'strength',
+      'dosageForm', 'dose', 'route', 'frequency', 'duration', 'quantity', 'instructions'].every((field) =>
+      String(medication[field] ?? '').trim() === String(record.medications[index]?.[field] ?? '').trim()))
+  );
   const expectedBp = parseBloodPressure(payload.bloodPressure);
   const savedBp = parseBloodPressure(record?.vitals?.bp);
   const snapshotBp = parseBloodPressure(record?.bloodPressureClassification);
@@ -77,6 +94,8 @@ export const requireConfirmedConsultation = (result, op) => {
     || (record.consultationTime || '') !== (payload.consultationTime || '')
     || !['draft', 'submitted', 'received', 'in_review', 'referred', 'completed'].includes(record.status)
     || !sameBp(expectedBp, savedBp) || (expectedBp && !sameBp(expectedBp, snapshotBp))
+    || !clinicalMeasurementsMatch || !bmiMatches || !medicationsMatch
+    || String(record.serviceId ?? record.healthServiceId ?? '').trim() !== String(payload.serviceId ?? payload.service_id ?? '').trim()
     || typeof record.chiefComplaint !== 'string' || !record.chiefComplaint.trim()
     || ['chiefComplaint', 'findings', 'diagnosis', 'treatmentGiven', 'adviceGiven', 'remarks', 'nextVisitDate'].some((field) =>
       String(record[field] ?? '').trim() !== String(expected[field] ?? '').trim())
@@ -90,7 +109,7 @@ export const requireConfirmedConsultation = (result, op) => {
 /** Shared by the foreground save and the registered reconnect handler. */
 export const createConsultationSyncHandler = (create) => {
   const handler = async (op, context = {}) => {
-    validateBloodPressure(op?.payload);
+    validateClinicalPayload(op?.payload);
     if (!op?.ownerId || !UUID.test(op.payload?.clientOperationKey || '')
       || op.idempotencyKey !== op.payload.clientOperationKey || !validTimestamp(op.payload.recordedAt)) {
       throw malformed('The queued consultation has no valid original operation identity or recording timestamp.');
@@ -248,7 +267,7 @@ const refreshQueue = async (start = false) => {
 export const saveConsultationOffline = async ({ ownerId, payload, localId = null, create, online = isNavigatorOnline }) => {
   if (!ownerId) throw new Error('A signed-in user is required.');
   if (typeof create !== 'function') throw new Error('A consultation create function is required.');
-  validateBloodPressure(payload);
+  validateClinicalPayload(payload);
   const queued = await persistConsultationCreate({ ownerId, payload, localId });
   await refreshQueue();
   if (online()) return submitConsultationDraft({ ownerId, localId: queued.localId, create, online });

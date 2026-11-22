@@ -281,7 +281,9 @@ const residentPayload = {
   lastName: 'Dela Cruz',
   birthDate: '2000-09-02',
   sex: 'Female',
+  civilStatus: 'Single',
   barangay: 'San Isidro',
+  currentAddress: '1 Main Street',
 };
 
 const makeExisting = (overrides = {}) => ({
@@ -299,7 +301,7 @@ const makeExisting = (overrides = {}) => ({
 
 const installResidentDoubles = ({ existingByKey = null, insertError = null } = {}) => {
   const calls = { inserts: [], keyLookups: [], identityLookups: 0 };
-  repository.findBarangayByName = async (name) => (name === 'San Isidro' ? { name, status: 'Active' } : null);
+  repository.findBarangayByName = async (name) => (name === 'San Isidro' ? { id: 'b-1', municipalityId, name, status: 'Active' } : null);
   repository.findResidentByIdentity = async () => {
     calls.identityLookups += 1;
     // Would trip the duplicate guard if a replay ever reached it.

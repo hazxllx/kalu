@@ -23,31 +23,27 @@ import { FACILITY, SUBMISSION_STATUS, PHN_EDITABLE_STATUSES } from '../config/fa
 import { withinFacilityScope } from '../config/scope.js';
 import { canConsult } from '../config/rhuStations.js';
 import { validateVitals } from './intake.service.js';
-import { normalizeMedications } from './medicines.service.js';
 import { markCompletedFromVisit } from './referrals.service.js';
 import * as canonicalReferrals from './referrals.service.js';
 import { getServiceClient } from '../config/supabase.js';
 import { getRiskConfig } from './riskConfig.service.js';
-import { assessVitals } from '../utils/residentRisk.js';
-import { buildEncounterAssessment, validateClinicalIndicators, encounterBloodPressureContext } from './clinicalAssessment.service.js';
+import { assessVisitRisk } from '../utils/residentRisk.js';
+import { buildEncounterAssessment, validateClinicalIndicators, encounterBloodPressureContext,
+  loadEncounterClinicalContext, reconcileConsultationClinicalContext, resolveConsultationMaternal,
+  validateConsultationRiskReview } from './clinicalAssessment.service.js';
+import { resolveConsultationMedications } from './consultations.service.js';
+import { getManilaDateTime, validateConsultationVitals, validateConsultationDateTime } from '../../../shared/consultationClinical.js';
 import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
 import env from '../config/env.js';
 
 /** Preserve the configured score while distinguishing missing inputs from a negative finding. */
 export const assessPhnVisitRisk = (visit, config) => {
-  const risk = assessVitals(visit?.vitals, config);
-  const clinical = visit?.consultationDetails?.clinicalAssessment;
-  if (clinical?.reviewStatus === 'approved'
-    || clinical?.reasons?.some((reason) => ['bp_emergency', 'bp_severe'].includes(reason.ruleId))) {
-    return { ...visit, clinicalAssessment: clinical, riskLevel: clinical.level === 'Medium' ? 'Moderate' : clinical.level,
-      riskScore: null, riskFactors: clinical.reasons, riskAssessedAt: clinical.assessedAt,
-      riskAssessmentStatus: clinical.status, missingMeasurements: [],
-      riskReason: [...clinical.reasons.map((reason) => (reason.field || reason.ruleId).replaceAll('_', ' ')),
-        ...clinical.followUpRequirements.map((requirement) => requirement.replaceAll('_', ' '))].join('; ') };
-  }
-  return { ...visit, clinicalAssessment: clinical || null, riskLevel: risk.level, riskScore: risk.score,
+  const risk = assessVisitRisk(visit, config);
+  return { ...visit, clinicalAssessment: risk.clinicalAssessment || visit?.consultationDetails?.clinicalAssessment || null,
+    consultationRiskAssessment: risk.consultationRiskAssessment || null, riskLevel: risk.level, riskScore: risk.score,
     riskFactors: risk.factors, riskAssessedAt: risk.level === null ? null : visit.visitDate || visit.createdAt || null,
-    riskAssessmentStatus: risk.status, missingMeasurements: risk.missingMeasurements, riskReason: risk.reason };
+    riskAssessmentStatus: risk.status, missingMeasurements: risk.missingMeasurements, riskReason: risk.reason,
+    ...(risk.riskSource ? { riskSource: risk.riskSource } : {}) };
 };
 
 const isPHN = (user) => user?.role === 'phn';
@@ -197,7 +193,7 @@ export const normalizePhnVisit = (visit = {}) => {
   // same catalogue-aware helper the Health-Supervisor consultation uses, so the
   // PHN check-up persists prescriptions identically. Only written when the
   // client includes the field, so unrelated PHN edits never clear it.
-  if (visit.medications !== undefined) patch.medications = normalizeMedications(visit.medications);
+  if (visit.medications !== undefined) patch.medications = visit.medications;
   if (vitals) patch.vitals = vitals;
   if (visit.phn) {
     const phnPatch = {};
@@ -301,6 +297,7 @@ export const updateSubmissionForPhn = async ({
   }
 
   const normalized = normalizePhnVisit(patch);
+  if (normalized.medications !== undefined) normalized.medications = await resolveConsultationMedications({ medications: normalized.medications, previous: submission.medications || [], repo });
   if (normalized.healthServiceId !== undefined) {
     if (!normalized.healthServiceId) {
       normalized.healthServiceName = '';
@@ -345,14 +342,45 @@ export const updateSubmissionForPhn = async ({
   // cannot be overwritten after the initial read.
   const encounter = { ...submission, ...normalized, vitals,
     consultationDetails: { ...submission.consultationDetails, ...normalized.consultationDetails,
-       ...(normalized.findings !== undefined ? { findings: normalized.findings } : {}) } };
+        ...(normalized.findings !== undefined ? { findings: normalized.findings } : {}) } };
+  const clinicalChanged = complete
+    || ['findings','treatmentGiven'].some((field) => normalized[field] !== undefined && normalized[field] !== submission[field])
+    || (normalized.phn?.assessment !== undefined && normalized.phn.assessment !== submission.phn?.assessment)
+    || (normalized.medications !== undefined && JSON.stringify(normalized.medications) !== JSON.stringify(submission.medications || []))
+    || ['clinicalIndicators','clinicalContext','maternal','riskReview','consultationDate','consultationTime'].some((field) => patch[field] !== undefined);
+  if (!clinicalChanged) {
+    normalized.consultationDetails = submission.consultationDetails;
+    const updated = await repo.updateVisit(id, normalized, { expectedUpdatedAt: patch.expectedUpdatedAt || submission.updatedAt, allowedStatuses: PHN_EDITABLE_STATUSES });
+    if (!updated) throw ApiError.conflict('This consultation was updated by another reviewer. Reload and retry.');
+    return updated;
+  }
+  const clinicalDateTime = getManilaDateTime(encounter.visitDate);
+  const dateTime = { consultationDate: patch.consultationDate ?? encounter.consultationDetails.consultationDate ?? clinicalDateTime.date,
+    consultationTime: patch.consultationTime ?? encounter.consultationDetails.consultationTime ?? clinicalDateTime.time };
+  const clinicalErrors = { ...validateConsultationVitals(vitals), ...validateConsultationDateTime(dateTime) };
+  if (encounter.consultationDetails.clinicalIndicators?.dangerSignsReviewed !== true) clinicalErrors['clinicalIndicators.dangerSignsReviewed'] = 'Confirm that danger signs were reviewed.';
+  if (!String(encounter.consultationDetails.findings ?? encounter.findings ?? '').trim()) clinicalErrors.findings = 'Clinical findings are required.';
+  if (Object.keys(clinicalErrors).length) throw ApiError.unprocessable('Complete valid clinical measurements and date/time before saving consultation details.', clinicalErrors);
+  Object.assign(encounter.consultationDetails, dateTime, { clinicalIntegrityVersion: 'consultation-clinical-v1',
+    findings: encounter.consultationDetails.findings ?? encounter.findings ?? '' });
+  const clinicalClient = supabase || (env.isSupabaseConfigured && repo.driver === 'supabase' ? getServiceClient() : null);
+  const context = await loadEncounterClinicalContext({ resident: submission.resident, user, ...dateTime, repo, supabase: clinicalClient, excludeVisitId: submission.id });
+  const riskReview = validateConsultationRiskReview(patch.riskReview, user);
+  encounter.consultationDetails.clinicalContext = reconcileConsultationClinicalContext({ context,
+    submitted: patch.clinicalContext ?? submission.consultationDetails?.clinicalContext?.submitted, user, riskReview });
+  const maternal = resolveConsultationMaternal({ value: patch.maternal ?? submission.consultationDetails?.maternal, context,
+    clinicalContext: encounter.consultationDetails.clinicalContext, consultationDate: dateTime.consultationDate,
+    healthService: { id: normalized.healthServiceId ?? submission.healthServiceId,
+      category: encounter.consultationDetails.healthServiceCategory || submission.healthService?.category } });
+  if (maternal) encounter.consultationDetails.maternal = maternal;
   normalized.bpClassification = classifyBloodPressure(vitals.bp, encounterBloodPressureContext({
     chiefComplaint: encounter.chiefComplaint,
     findings: encounter.findings,
     clinicalIndicators: encounter.consultationDetails?.clinicalIndicators,
   }));
   normalized.consultationDetails = await buildEncounterAssessment({ visit: encounter, resident: submission.resident, user,
-    supabase: supabase || (env.isSupabaseConfigured && repo.driver === 'supabase' ? getServiceClient() : null), previous: submission.consultationDetails });
+    supabase: clinicalClient, previous: submission.consultationDetails, context,
+    riskReview });
   const updated = await repo.updateVisit(id, normalized, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: PHN_EDITABLE_STATUSES });
   if (!updated) throw ApiError.conflict('The consultation changed while saving. Reload its saved record before continuing.');
   return updated;
@@ -420,17 +448,7 @@ export const completeSubmission = async ({ id, user, patch, repo = repository, s
     throw ApiError.badRequest('Cannot complete: the PHN clinical assessment is incomplete.', missing);
   }
 
-  const now = new Date().toISOString();
-  const consultationDetails = await buildEncounterAssessment({ visit: submission, resident: submission.resident, user,
-    supabase: supabase || (env.isSupabaseConfigured && repo.driver === 'supabase' ? getServiceClient() : null), previous: submission.consultationDetails });
-  const updated = await repo.updateVisit(id, {
-    consultationDetails,
-    status: SUBMISSION_STATUS.COMPLETED,
-    receivedAt: submission.receivedAt || now,
-    reviewedAt: submission.reviewedAt || now,
-    completedAt: now,
-  }, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: PHN_EDITABLE_STATUSES });
-  if (!updated) throw ApiError.conflict('The consultation changed while completing. Reload the saved record.');
+  const updated = await updateSubmissionForPhn({ id, patch: {}, user, repo, supabase, complete: true });
 
   // If this RHU encounter is linked to a barangay referral, mark it completed
   // from the referral side so the Health Supervisor sees the unified stage advance.

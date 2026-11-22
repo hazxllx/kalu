@@ -23,6 +23,9 @@ export const ROLES = Object.freeze({
   RHU_PERSONNEL: 'rhu_personnel',
   BHW: 'bhw',
   RESIDENT: 'resident',
+  // A Supabase Auth/profile exists, but no residents row has been created or
+  // linked yet. This is an onboarding state, not a verification state.
+  RESIDENT_INCOMPLETE: 'resident-incomplete',
   // Verification sub-state of a resident account. `authenticate` serves a
   // resident whose profile status is `pending_verification` under this role so
   // self-service endpoints (e.g. resubmitting a registration) can recognise
@@ -173,7 +176,7 @@ export const FEATURE_ROLES = Object.freeze({
   // enforced in the service layer + Supabase RLS, not by this list). A resident
   // awaiting manual verification is served as 'resident-limited' and may view
   // their own status and resubmit their own registration.
-  residentSelf: [ROLES.RESIDENT, ROLES.RESIDENT_LIMITED],
+  residentSelf: [ROLES.RESIDENT, ROLES.RESIDENT_LIMITED, ROLES.RESIDENT_INCOMPLETE],
 });
 
 /**

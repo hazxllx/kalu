@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  list,
   update,
   markNotificationRead,
   markAllNotificationsRead,
@@ -94,4 +95,33 @@ test('markAllNotificationsRead reports 0 when nothing was unread', async () => {
   const supabase = supabaseStub({ many: [] });
   const result = await markAllNotificationsRead({ user: OWNER, supabase });
   assert.equal(result.updated, 0);
+});
+
+test('notification listing returns complete paginated history scoped to the authenticated recipient', async () => {
+  const rows = Array.from({ length: 201 }, (_, index) => ({
+    id: `notif-${index}`,
+    recipient_id: OWNER.id,
+    read_at: index % 2 ? '2026-10-11T00:00:00.000Z' : null,
+  }));
+  const calls = [];
+  const supabase = {
+    from(table) {
+      const ctx = { table, filters: {}, range: null };
+      const chain = {
+        select() { return chain; },
+        eq(column, value) { ctx.filters[column] = value; return chain; },
+        order() { return chain; },
+        range(from, to) { ctx.range = [from, to]; calls.push(ctx); return chain; },
+        then(resolve, reject) {
+          return Promise.resolve({ data: rows.slice(ctx.range[0], ctx.range[1] + 1), error: null }).then(resolve, reject);
+        },
+      };
+      return chain;
+    },
+  };
+
+  const result = await list({ user: OWNER, kind: 'notifications', supabase });
+  assert.equal(result.length, rows.length);
+  assert.deepEqual(calls.map((call) => call.range), [[0, 199], [200, 399]]);
+  assert.ok(calls.every((call) => call.table === 'notifications' && call.filters.recipient_id === OWNER.id));
 });

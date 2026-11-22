@@ -22,7 +22,7 @@
 import repository from '../repositories/index.js';
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
-import { assessVitals, isLaterVisit } from '../utils/residentRisk.js';
+import { assessVitals, assessVisitRisk, isLaterVisit } from '../utils/residentRisk.js';
 import { DEFAULT_RISK_CONFIG } from '../config/riskConfig.js';
 import { getRiskConfig } from './riskConfig.service.js';
 import { APPROVED_BARANGAYS, isApprovedBarangayName } from '../config/barangays.js';
@@ -351,9 +351,9 @@ export const getEarlyWarning = async (
   const currentRiskCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
   const reportingRiskCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
   scopedResidents.forEach((resident) => {
-    const currentLevel = riskFromVitals(latestVisitByResident.get(resident.id)?.vitals, riskConfig);
+    const currentLevel = assessVisitRisk(latestVisitByResident.get(resident.id), riskConfig, scopedVisits).level;
     currentRiskCounts[currentLevel || 'Unassessed'] += 1;
-    const periodLevel = riskFromVitals(latestPeriodVisitByResident.get(resident.id)?.vitals, riskConfig);
+    const periodLevel = assessVisitRisk(latestPeriodVisitByResident.get(resident.id), riskConfig, scopedVisits).level;
     reportingRiskCounts[periodLevel || 'Unassessed'] += 1;
   });
   const riskDistribution = [
@@ -452,18 +452,19 @@ const inDateRange = (isoDate, fromTs, toTs) => {
   return true;
 };
 
-export const communityMapRecordRisk = (visit, config = DEFAULT_RISK_CONFIG) =>
-  riskFromVitals(visit?.vitals, config) || 'Unassessed';
+export const communityMapRecordRisk = (visit, config = DEFAULT_RISK_CONFIG, history = []) =>
+  assessVisitRisk(visit, config, history).level || 'Unassessed';
 
 export const matchesCommunityMapRecord = (
   visit,
   { condition = null, status = null, riskLevel = null, fromTs = null, toTs = null } = {},
   config = DEFAULT_RISK_CONFIG,
+  history = [],
 ) => {
   if (!inDateRange(visit?.visitDate || visit?.createdAt, fromTs, toTs)) return false;
   if (condition && condition !== 'All' && classifyCondition(visit?.chiefComplaint) !== condition) return false;
   if (status && String(visit?.status || '').toLowerCase() !== status) return false;
-  if (riskLevel && communityMapRecordRisk(visit, config) !== riskLevel) return false;
+  if (riskLevel && communityMapRecordRisk(visit, config, history) !== riskLevel) return false;
   return true;
 };
 
@@ -558,6 +559,7 @@ export const getCommunityMap = async ({
         v,
         { condition: wantCondition, status, riskLevel, fromTs, toTs },
         riskConfig,
+        visits,
       );
       if (matches) {
         const updatedAt = v.updatedAt || v.createdAt || v.visitDate;
@@ -622,7 +624,7 @@ export const getCommunityMap = async ({
       if (isLaterVisit(visit, latestMatching.get(visit.residentId))) latestMatching.set(visit.residentId, visit);
     });
     latestMatching.forEach((visit) => {
-      const level = communityMapRecordRisk(visit, riskConfig);
+      const level = communityMapRecordRisk(visit, riskConfig, visits);
       riskCounts.set(level, riskCounts.get(level) + 1);
     });
     const countedVisitResidents = new Set(matching
@@ -651,8 +653,8 @@ export const getCommunityMap = async ({
     let reportingHighRiskResidents = 0;
     residents.forEach((r) => {
       const v = latestVisitByResident.get(r.id);
-      if (v && riskFromVitals(v.vitals, riskConfig) === 'High') highRiskResidents += 1;
-      if (riskFromVitals(reportingLatestByResident.get(r.id)?.vitals, riskConfig) === 'High') reportingHighRiskResidents += 1;
+      if (v && assessVisitRisk(v, riskConfig, visits).level === 'High') highRiskResidents += 1;
+      if (assessVisitRisk(reportingLatestByResident.get(r.id), riskConfig, visits).level === 'High') reportingHighRiskResidents += 1;
     });
 
     const latitude = Number(b.latitude);
@@ -805,6 +807,7 @@ export const buildCommunityMapTrends = ({
         v,
         { condition: wantCondition, status, riskLevel, fromTs, toTs },
         riskConfig,
+        visits,
       );
     });
     const monthVisits = [...rawMonthVisits.reduce((cases, visit, visitIndex) => {

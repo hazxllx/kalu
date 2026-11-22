@@ -197,8 +197,8 @@ export default function DatePicker({
           ref={triggerRef}
           className={`flex w-full items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition-all duration-200 ${
             error
-              ? "border-brand-danger bg-rose-50/50 focus-within:border-brand-danger focus-within:ring-4 focus-within:ring-brand-danger/10"
-              : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus-within:border-brand-blue focus-within:bg-white focus-within:ring-4 focus-within:ring-brand-blue/10"
+              ? "border-brand-danger bg-rose-50/50 focus-within:border-brand-blue"
+              : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus-within:border-brand-blue focus-within:bg-white"
           } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
         >
           <input
@@ -241,8 +241,8 @@ export default function DatePicker({
           aria-expanded={open}
           className={`flex w-full items-center gap-2 rounded-xl border px-4 py-2.5 text-left text-sm outline-none transition-all duration-200 ${
             error
-              ? "border-brand-danger bg-rose-50/50 focus:border-brand-danger focus:ring-4 focus:ring-brand-danger/10"
-              : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10"
+              ? "border-brand-danger bg-rose-50/50 focus:border-brand-blue"
+              : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus:border-brand-blue focus:bg-white"
           } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
         >
           <span className={`truncate ${selected ? "text-brand-ink" : "text-slate-400"}`}>

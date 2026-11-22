@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import { shouldShowPregnancyStatus } from "./pregnancyVisibility.js";
+import { consultationRiskLevel, consultationRiskReasons } from "../../consultations/lib/consultationRisk.js";
 
 /**
  * "My Health Record" PDF export (A4, portrait) — black & white / grayscale.
@@ -58,6 +59,27 @@ const str = (v) => (v === undefined || v === null ? "" : String(v).trim());
 /** Value when present, otherwise the explicit "Not available" sentinel. */
 const orNA = (v) => (str(v) === "" ? "Not available" : str(v));
 
+/** Present saved clinical context without claiming an old prescription is still active. */
+export function medicalHistoryForRecord(data = {}) {
+  const rows = [...(Array.isArray(data.consultations) ? data.consultations : [])].sort((a, b) =>
+    `${b.date || b.consultationDate || ""}T${b.time || b.consultationTime || ""}`.localeCompare(`${a.date || a.consultationDate || ""}T${a.time || a.consultationTime || ""}`));
+  const contextRow = rows.find((row) => row.clinicalContext || row.consultationDetails?.clinicalContext);
+  const context = contextRow?.clinicalContext || contextRow?.consultationDetails?.clinicalContext || {};
+  const conditions = Array.isArray(context.existingConditions) ? context.existingConditions.filter((condition) =>
+    typeof condition === "string" || (condition.active !== false && condition.status !== "resolved"))
+    .map((condition) => typeof condition === "string" ? condition : condition.name).filter(Boolean) : [];
+  const prescription = rows.find((row) => row.medicationList?.length || typeof row.medications === "string" && row.medications.trim());
+  const names = prescription?.medicationList?.map((medicine) => [medicine.genericName, medicine.strength].filter(Boolean).join(" ")).filter(Boolean).join("; ") || prescription?.medications || "";
+  const day = contextRow?.date || contextRow?.consultationDate || "";
+  const pregnancy = ({ pregnant: "Pregnant", postpartum: "Postpartum", not_pregnant: "Not pregnant" })[context.pregnancyStatus];
+  return {
+    chronicConditions: data.medicalHistory?.chronicConditions || [...new Set(conditions)].join("; ") || rows.find((row) => row.existingConditions)?.existingConditions || "",
+    allergies: data.medicalHistory?.allergies || rows.find((row) => row.allergies)?.allergies || "",
+    currentMedications: data.medicalHistory?.currentMedications || (names ? `${names}${prescription.date || prescription.consultationDate ? ` (recorded ${prescription.date || prescription.consultationDate})` : ""}` : ""),
+    pregnancyStatus: data.medicalHistory?.pregnancyStatus || (pregnancy ? `${pregnancy}${day ? ` (recorded ${day})` : ""}` : ""),
+  };
+}
+
 /** Sanitize the resident name into a safe filename fragment. */
 export const safeFilePart = (name) =>
   str(name)
@@ -106,7 +128,7 @@ export async function downloadHealthRecordPdf(data = {}, meta = {}) {
     : Array.isArray(data.labs)
       ? data.labs
       : [];
-  const medicalHistory = data.medicalHistory || {};
+  const medicalHistory = medicalHistoryForRecord(data);
 
   const residentName = str(resident.name) || str(resident.fullName) || str(meta.name) || "Resident";
   const barangay = str(resident.barangay) || str(meta.barangay);
@@ -327,14 +349,22 @@ export async function downloadHealthRecordPdf(data = {}, meta = {}) {
       y += 16;
 
       fieldRow("Date", formatLongDate(c.date));
-      fieldRow("Time", formatTime12h(c.time));
+      fieldRow("Time (Asia/Manila)", formatTime12h(c.time));
       fieldRow("Seen By", c.seenBy);
       fieldRow("Status", c.status);
+      fieldRow("Health Service", c.serviceName || c.healthServiceName);
+      const risk = consultationRiskLevel(c);
+      fieldRow("Risk Level", risk === "Moderate" ? "Medium" : risk || "Unassessed");
+      fieldRow("Risk Reasons", consultationRiskReasons(c));
+      if (risk) fieldRow("Risk Interpretation", "Clinical decision support. Professional assessment is required; this is not a diagnosis.");
       fieldRow("Chief Complaint", c.chiefComplaint);
       fieldRow("Findings", c.findings);
       fieldRow("Diagnosis", c.diagnosis);
       fieldRow("Treatment Given", c.treatmentGiven);
-      fieldRow("Medications", c.medications);
+      fieldRow("Medications", c.medicationList?.length ? c.medicationList.map((medicine) => [medicine.genericName,
+        medicine.strength, medicine.dose, medicine.route, medicine.frequency, medicine.duration,
+        medicine.quantity != null && medicine.quantity !== "" ? `Quantity: ${medicine.quantity}` : "", medicine.instructions]
+        .filter(Boolean).join(" / ")).join("\n") : c.medications);
       fieldRow("Recommendations", c.recommendations);
       fieldRow("Follow-up Required", c.followUpRequired);
       fieldRow("Next Visit Date", c.nextVisitDate ? formatLongDate(c.nextVisitDate) : "");
@@ -389,7 +419,7 @@ export async function downloadHealthRecordPdf(data = {}, meta = {}) {
   sectionHeader("Medical History & Allergies");
   fieldRow("Chronic Conditions", medicalHistory.chronicConditions);
   fieldRow("Allergies", medicalHistory.allergies);
-  fieldRow("Current Medications", medicalHistory.currentMedications);
+  fieldRow("Latest Recorded Prescriptions", medicalHistory.currentMedications);
   // Pregnancy Status mirrors the resident view: suppressed only for residents
   // explicitly recorded as male; shown for female/other/unknown sex.
   if (shouldShowPregnancyStatus(resident.sex)) {

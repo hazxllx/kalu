@@ -7,6 +7,9 @@ export { DEFAULT_BP_THRESHOLDS, parseBloodPressure };
 
 // Preserve the existing badge appearance; classification comes from shared logic.
 const badgeClasses = {
+  // Keep the legacy keys for saved historical snapshots; new classifications
+  // use the five shared reference categories only.
+  low: 'bg-amber-50 text-amber-800',
   normal: 'bg-green-100 text-green-800',
   elevated: 'bg-yellow-100 text-yellow-800',
   stage1: 'bg-orange-100 text-orange-800',
@@ -33,5 +36,8 @@ export const classifyBloodPressure = (value, context = {}) => {
   const result = classify(value, context);
   return result ? { ...result, badgeClassName: badgeClasses[result.code] } : null;
 };
+
+export const bloodPressureBadgeClassName = (classification) =>
+  classification?.badgeClassName || badgeClasses[classification?.code] || 'bg-brand-light text-brand-blue';
 
 export default { classifyBloodPressure, parseBloodPressure, DEFAULT_BP_THRESHOLDS, BP_CATEGORY_META };

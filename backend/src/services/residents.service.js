@@ -20,13 +20,19 @@ import { getServiceClient, getUserClient } from '../config/supabase.js';
 import env from '../config/env.js';
 import {
   ageFromDateOnly,
+  CIVIL_STATUSES,
+  hasControlChars,
   isFutureDateOnly,
+  isEmail,
+  NAME_SUFFIXES,
   isPhonePH,
   normalizePhone,
   parseDateOnly,
+  TEXT_LIMITS,
+  toZone,
 } from '../validators/common.js';
+import { registrationDateReference } from '../validators/registration.validators.js';
 import { computeBMI } from '../utils/bmi.js';
-import { riskFromVitals } from './analytics.service.js';
 import {
   attachRiskToResidents,
   assessResidentById,
@@ -34,6 +40,8 @@ import {
 import { getRiskConfig } from './riskConfig.service.js';
 import { withHistoryLinks } from './consultations.service.js';
 import { classifyBloodPressure } from '../config/bpThresholds.js';
+import { notifyHealthSupervisorsOnce } from './notifications.service.js';
+import { consultationAssessmentReasons, getManilaDateTime, isConsultationDate, normalizeConsultationRiskLevel, savedConsultationAssessment } from '../../../shared/consultationClinical.js';
 
 const SELF_ROLES = ['resident', 'resident-limited'];
 
@@ -209,6 +217,18 @@ export const formatMedicationText = (m = {}) => {
 export const toResidentRecord = (visit = {}) => {
   const v = visit.vitals || {};
   const details = visit.consultationDetails || {};
+  const local = visit.visitDate ? getManilaDateTime(visit.visitDate) : { date: '', time: '' };
+  const savedRisk = savedConsultationAssessment(details);
+  const riskReasons = consultationAssessmentReasons(savedRisk).map((reason) => ({
+    ruleId: reason.ruleId || '', message: reason.message || '', ...(reason.field ? { field: reason.field } : {}),
+  }));
+  const conditions = details.clinicalContext?.existingConditions;
+  const safeContext = details.clinicalContext ? {
+    pregnancyStatus: details.clinicalContext.pregnancyStatus || 'unknown',
+    existingConditions: (Array.isArray(conditions) ? conditions : []).map((condition) => ({ name: clean(condition?.name),
+      status: condition?.status || 'stable', significant: condition?.significant === true })),
+    sourceStatus: details.clinicalContext.sourceStatus || 'unavailable',
+  } : null;
   const bloodPressureClassification = visit.bpClassification && typeof visit.bpClassification === 'object'
     ? visit.bpClassification : classifyBloodPressure(v.bp, { chiefComplaint: visit.chiefComplaint,
       findings: visit.findings ?? details.findings });
@@ -266,15 +286,20 @@ export const toResidentRecord = (visit = {}) => {
 
   return {
     id: visit.id,
-    date: details.consultationDate ?? (visit.visitDate
-      ? String(visit.visitDate).slice(0, 10)
-      : ''),
-    time: details.consultationTime ?? (String(visit.visitDate || '').includes('T')
-      ? String(visit.visitDate).slice(11, 16)
-      : ''),
+    date: details.consultationDate ?? local.date,
+    time: details.consultationTime ?? local.time,
     chiefComplaint: clean(visit.chiefComplaint),
     allergies: clean(details.allergies ?? details.knownAllergies ?? visit.allergies),
-    existingConditions: clean(details.existingConditions ?? details.chronicConditions ?? details.pastMedicalHistory ?? visit.clinicalHistory),
+    existingConditions: Array.isArray(conditions) ? conditions.map((condition) => clean(condition?.name)).filter(Boolean).join(', ')
+      : clean(details.existingConditions ?? details.chronicConditions ?? details.pastMedicalHistory ?? visit.clinicalHistory),
+    clinicalContext: safeContext,
+    maternal: details.maternal ? Object.fromEntries(['careType','pregnancyId','lmpDate','eddDate','gestationalAgeWeeks'].map((field) => [field, details.maternal[field] ?? null])) : null,
+    consultationRiskAssessment: details.consultationRiskAssessment ? { level: normalizeConsultationRiskLevel(details.consultationRiskAssessment.level),
+      status: details.consultationRiskAssessment.status, reasons: riskReasons, version: details.consultationRiskAssessment.version,
+      decisionSupport: true, reviewStatus: 'professional_review_required', referralEvaluationRequired: details.consultationRiskAssessment.referralEvaluationRequired === true,
+      urgency: details.consultationRiskAssessment.urgency || null } : null,
+    riskLevel: normalizeConsultationRiskLevel(savedRisk?.level ?? savedRisk?.riskLevel ?? savedRisk?.risk_level) || 'Unassessed',
+    riskReasons,
     findings: clean(details.findings ?? findingsText),
     diagnosis: clean(details.diagnosis ?? diagnosis),
     treatmentGiven: clean(details.treatmentGiven ?? treatmentText),
@@ -347,7 +372,7 @@ export const toResidentRecord = (visit = {}) => {
  *   status      visits workflow status ('completed' is the default view)
  */
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-const isValidDateOnly = (v) => DATE_ONLY.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00`));
+const isValidDateOnly = isConsultationDate;
 
 export const parseConsultationFilters = ({ from, to, serviceId, type, status } = {}) => {
   const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
@@ -486,14 +511,16 @@ export const getStaffHealthHistory = async ({ user, residentId, repo = repositor
     profile: residentProfile ? {
       bloodType: residentProfile.bloodType ?? residentProfile.blood_type ?? '',
       allergies: residentProfile.allergies ?? residentProfile.knownAllergies ?? '',
-      existingConditions: residentProfile.existingConditions ?? residentProfile.chronicConditions ?? residentProfile.medicalConditions ?? '',
+      existingConditions: visits.find((visit) => Array.isArray(visit.consultationDetails?.clinicalContext?.existingConditions))
+        ?.consultationDetails.clinicalContext.existingConditions.map((condition) => clean(condition.name)).filter(Boolean).join(', ')
+        || (residentProfile.existingConditions ?? residentProfile.chronicConditions ?? residentProfile.medicalConditions ?? ''),
     } : {},
     consultations: visits.map((visit) => {
       const record = toResidentRecord(visit);
       return { ...record,
         diagnosis: clean(visit.consultationDetails?.diagnosis ?? clean(visit.findings).split('\nDiagnosis: ')[1]),
         vitals: { ...record.vitals, bmi: visit.vitals?.bmi ?? record.vitals.bmi },
-        serviceName: visit.healthServiceName || serviceNames.get(visit.healthServiceId) || '',
+        serviceName: visit.healthServiceName || visit.healthService?.name || serviceNames.get(visit.healthServiceId) || '',
         clinicalHistory: clean(visit.clinicalHistory),
       };
     }).sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.id.localeCompare(a.id)),
@@ -625,8 +652,8 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
       // if the catalog entry is later renamed/deactivated); fall back to the
       // live catalog row when the visit predates the snapshot column.
       record.serviceId = visit.healthServiceId || null;
-      record.serviceName = visit.healthServiceName || linked?.name || '';
-      record.serviceCategory = linked?.category || '';
+      record.serviceName = visit.healthServiceName || visit.healthService?.name || linked?.name || '';
+      record.serviceCategory = visit.consultationDetails?.healthServiceCategory || visit.healthService?.category || linked?.category || '';
       return record;
     })
     .sort((a, b) =>
@@ -635,31 +662,12 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
 
   const filteredConsultations = applyConsultationFilters(consultations, filters);
 
-  // Health risk level for the resident dashboard. It reuses the SAME
-  // KALUSAGAP risk heuristic used by the staff analytics (riskFromVitals) —
-  // no separate frontend formula — applied to the most recent completed
-  // visit's vitals. Null when there is no vitals-bearing consultation to assess.
-
-  const latestVisit =
-    visits
-      .slice()
-      .sort((a, b) =>
-        String(b.visitDate || '').localeCompare(
-          String(a.visitDate || ''),
-        ),
-      )[0] || null;
-
-  const hasVitals =
-    latestVisit?.vitals &&
-    (latestVisit.vitals.bp || latestVisit.vitals.o2sat);
-
+  // The overview is current and unfiltered, using the same saved-risk/high-hold engine as the directory.
   const riskConfig = await getRiskConfig({
     repo,
   });
-
-  const riskLevel = hasVitals
-    ? riskFromVitals(latestVisit.vitals, riskConfig)
-    : null;
+  const currentRisk = await assessResidentById({ id: resident.id, user, repo, config: riskConfig });
+  const riskLevel = currentRisk.riskLevel;
 
   const lastConsultationDate =
     consultations[0]?.date || '';
@@ -688,6 +696,8 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
     },
 
     riskLevel,
+    riskAssessmentStatus: currentRisk.riskAssessmentStatus,
+    riskReasons: (currentRisk.riskFactors || []).map((factor) => ({ ruleId: factor.ruleId || factor.code || '', message: factor.message || factor.name || '' })),
     lastConsultationDate,
     consultations: filteredConsultations,
     referrals,
@@ -1050,20 +1060,24 @@ export const listResidents = async ({
   // they are a linked member of a Verified household in the same scope.
   // The two sources are merged and de-duplicated on the canonical resident id.
 
-  const approved =
-    await repository.listResidents({
-      q: search,
-      limit: parsedLimit,
-      offset: 0,
+  const approved = [];
+  for (let offset = 0; ; offset += 200) {
+    const page = await repository.listResidents({
+        q: search,
+        limit: 200,
+        offset,
       barangay: effectiveBarangay,
       barangayId: effectiveBarangayId,
       zone: zoneFilter,
       municipalityId,
-      verificationStatuses: ['approved'],
-    });
+        verificationStatuses: ['approved'],
+      });
+    approved.push(...page.rows);
+    if (page.rows.length < 200) break;
+  }
 
   const byId = new Map(
-    approved.rows.map((r) => [r.id, r]),
+    approved.map((r) => [r.id, r]),
   );
 
   const householdVerifiedIds =
@@ -1079,9 +1093,10 @@ export const listResidents = async ({
     );
 
   if (missingIds.length) {
-    const extra =
+    for (let offset = 0; offset < missingIds.length; offset += 200) {
+      const extra =
       await repository.listResidentsByIds({
-        ids: missingIds,
+        ids: missingIds.slice(offset, offset + 200),
         q: search,
         barangay: effectiveBarangay,
         barangayId: effectiveBarangayId,
@@ -1092,13 +1107,14 @@ export const listResidents = async ({
     for (const resident of extra) {
       byId.set(resident.id, resident);
     }
+    }
   }
 
   const rows = [...byId.values()]
     .sort((a, b) =>
       String(b.createdAt || '').localeCompare(
         String(a.createdAt || ''),
-      ),
+      ) || String(b.id).localeCompare(String(a.id)),
     )
     // Apply the caller's offset for real pagination. Previously this was
     // `.slice(0, parsedLimit)`, so page 2 returned the same first page.
@@ -1204,26 +1220,55 @@ export const createResident = async ({
   const sex = text(payload.sex);
   const barangay = text(payload.barangay);
   const cellphoneNoRaw = text(payload.cellphoneNo);
-  // Preserve the exact canonical 11-digit form required by the DB CHECK and API.
-  const cellphoneNo = cellphoneNoRaw;
+  const compactMobile = normalizePhone(cellphoneNoRaw);
+  const cellphoneNo = compactMobile.startsWith('+63')
+    ? `0${compactMobile.slice(3)}`
+    : compactMobile;
+  const currentAddress = text(payload.currentAddress);
+  const permanentAddress = text(payload.permanentAddress);
+  const zone = payload.zone === undefined || text(payload.zone) === ''
+    ? null
+    : toZone(payload.zone);
+  const shouldCreateLoginAccount = Boolean(
+    payload.createLoginAccount
+      || payload.createResidentLoginAccount
+      || payload.createAccount
+      || payload.createResidentAccount,
+  );
+  const residentEmail = text(payload.email).toLowerCase();
+  const dateReference = registrationDateReference();
 
   const errors = [];
 
   if (!firstName) {
     errors.push('First name is required.');
+  } else if (firstName.length > TEXT_LIMITS.short || hasControlChars(firstName)
+    || !/^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)*$/u.test(firstName)) {
+    errors.push('First name can contain letters, spaces, hyphens, and apostrophes only (max 80 characters).');
+  }
+  if (middleName && (middleName.length > TEXT_LIMITS.short || hasControlChars(middleName)
+    || !/^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)*$/u.test(middleName))) {
+    errors.push('Middle name can contain letters, spaces, hyphens, and apostrophes only (max 80 characters).');
   }
 
   if (!lastName) {
     errors.push('Last name is required.');
+  } else if (lastName.length > TEXT_LIMITS.short || hasControlChars(lastName)
+    || !/^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)*$/u.test(lastName)) {
+    errors.push('Last name can contain letters, spaces, hyphens, and apostrophes only (max 80 characters).');
+  }
+
+  if (suffix && !NAME_SUFFIXES.includes(suffix)) {
+    errors.push('Select a valid suffix.');
   }
 
   if (!birthDate) {
     errors.push('Date of birth is required.');
   } else {
-    const age = ageFromDateOnly(birthDate);
+    const age = ageFromDateOnly(birthDate, dateReference);
     if (!parseDateOnly(birthDate)) {
       errors.push('Date of birth is invalid.');
-    } else if (isFutureDateOnly(birthDate)) {
+    } else if (isFutureDateOnly(birthDate, dateReference)) {
       errors.push(
         'Date of birth cannot be in the future.',
       );
@@ -1240,15 +1285,34 @@ export const createResident = async ({
     );
   }
 
+  const civilStatus = text(payload.civilStatus);
+  if (!civilStatus) {
+    errors.push('Civil status is required.');
+  } else if (!CIVIL_STATUSES.includes(civilStatus)) {
+    errors.push('Select a valid civil status.');
+  }
+
   if (!barangay) {
     errors.push('Barangay is required.');
   }
 
-  // Contact number is OPTIONAL, but when supplied it must be a valid PH mobile.
-  // Validate before persistence so malformed values receive a clear field error
-  // instead of an opaque database constraint failure.
-  if (cellphoneNoRaw && !/^09\d{9}$/.test(cellphoneNoRaw)) {
-    errors.push('Contact number must be exactly 11 digits and start with 09 (e.g. 09171234567).');
+  if (cellphoneNoRaw && !/^09\d{9}$/.test(cellphoneNo)) {
+    errors.push('Enter a valid PH mobile number (09XXXXXXXXX or +639XXXXXXXXX).');
+  }
+
+  if (!currentAddress) {
+    errors.push('Address is required.');
+  } else if (currentAddress.length > TEXT_LIMITS.address) {
+    errors.push(`Address is too long (max ${TEXT_LIMITS.address} characters).`);
+  }
+  if (permanentAddress.length > TEXT_LIMITS.address) {
+    errors.push(`Permanent address is too long (max ${TEXT_LIMITS.address} characters).`);
+  }
+  if (payload.zone !== undefined && text(payload.zone) !== '' && zone === null) {
+    errors.push('Zone must be a number from 1 to 8.');
+  }
+  if (shouldCreateLoginAccount && !isEmail(residentEmail)) {
+    errors.push('Enter a valid email address for the resident login account.');
   }
 
   if (errors.length) {
@@ -1337,7 +1401,7 @@ export const createResident = async ({
 
   const ids =
     await repository.nextResidentIds();
-  const age = ageFromDateOnly(birthDate);
+  const age = ageFromDateOnly(birthDate, dateReference);
   const minorVerification = age !== null && age < 18
     ? {
         minorVerificationMethod: 'staff_alternative',
@@ -1349,25 +1413,7 @@ export const createResident = async ({
       }
     : {};
 
-  const shouldCreateLoginAccount =
-    Boolean(
-      payload.createLoginAccount ||
-        payload.createResidentLoginAccount ||
-        payload.createAccount ||
-        payload.createResidentAccount,
-    );
-
   if (shouldCreateLoginAccount) {
-    const residentEmail = text(
-      payload.email,
-    );
-
-    if (!residentEmail) {
-      throw ApiError.unprocessable(
-        'An email is required when creating a resident login account.',
-      );
-    }
-
     const account =
       await createResidentAuthUser({
         email: residentEmail,
@@ -1411,9 +1457,7 @@ export const createResident = async ({
           payload.birthPlace,
         ),
         sex,
-        civilStatus: text(
-          payload.civilStatus,
-        ),
+        civilStatus,
         religion: text(
           payload.religion,
         ),
@@ -1432,13 +1476,10 @@ export const createResident = async ({
         philhealthNo: text(
           payload.philhealthNo,
         ),
-        currentAddress: text(
-          payload.currentAddress,
-        ),
-        permanentAddress: text(
-          payload.permanentAddress,
-        ),
+        currentAddress,
+        permanentAddress: permanentAddress || currentAddress,
         cellphoneNo,
+        ...(zone === null ? {} : { zone }),
         identityNo: text(
           payload.identityNo,
         ),
@@ -1458,6 +1499,17 @@ export const createResident = async ({
       throw error;
     }
 
+    await notifyHealthSupervisorsOnce({
+      barangayId: barangayRow.id,
+      municipalityId: barangayRow.municipalityId || user?.municipalityId || null,
+      actorId: user?.id,
+      title: 'New resident registered',
+      message: `A resident was added to the ${barangayRow.name} directory.`,
+      relatedType: 'resident_registration',
+      relatedId: resident.id,
+      eventKey: `resident_registration:${resident.id}`,
+    });
+
     return {
       ...resident,
       authUserId:
@@ -1466,7 +1518,7 @@ export const createResident = async ({
     };
   }
 
-  return insertResidentIdempotent(user, operationKey, {
+  const resident = await insertResidentIdempotent(user, operationKey, {
     ...ids,
 
     // Verified on creation — the staff registration in person is the
@@ -1487,9 +1539,7 @@ export const createResident = async ({
       payload.birthPlace,
     ),
     sex,
-    civilStatus: text(
-      payload.civilStatus,
-    ),
+    civilStatus,
     religion: text(
       payload.religion,
     ),
@@ -1508,13 +1558,10 @@ export const createResident = async ({
     philhealthNo: text(
       payload.philhealthNo,
     ),
-    currentAddress: text(
-      payload.currentAddress,
-    ),
-    permanentAddress: text(
-      payload.permanentAddress,
-    ),
+    currentAddress,
+    permanentAddress: permanentAddress || currentAddress,
     cellphoneNo,
+    ...(zone === null ? {} : { zone }),
     identityNo: text(
       payload.identityNo,
     ),
@@ -1523,6 +1570,19 @@ export const createResident = async ({
     createdByRole:
       user?.role || '',
   });
+
+  await notifyHealthSupervisorsOnce({
+    barangayId: barangayRow.id,
+    municipalityId: barangayRow.municipalityId || user?.municipalityId || null,
+    actorId: user?.id,
+    title: 'New resident registered',
+    message: `A resident was added to the ${barangayRow.name} directory.`,
+    relatedType: 'resident_registration',
+    relatedId: resident.id,
+    eventKey: `resident_registration:${resident.id}`,
+  });
+
+  return resident;
 };
 
 /**

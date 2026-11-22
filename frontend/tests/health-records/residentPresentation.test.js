@@ -6,6 +6,8 @@ import { act, create } from 'react-test-renderer';
 import { transformWithEsbuild } from 'vite';
 import * as serviceFormat from '../../src/features/health-services/lib/visitPlanFormat.js';
 import * as snapshotHelpers from '../../src/features/dashboards/lib/residentHealthSnapshot.js';
+import { medicalHistoryForRecord } from '../../src/features/health-records/lib/healthRecordPdf.js';
+import * as consultationRisk from '../../src/features/consultations/lib/consultationRisk.js';
 
 const Empty = () => null;
 const Container = ({ children }) => React.createElement('div', null, children);
@@ -49,7 +51,9 @@ async function healthPage(t, respond = async () => fullRecord) {
       residentsApi: { myHealthRecords: (params) => { calls.push(params); return respond(params); } },
       visitPlansApi: { directory: async () => ({ facilities: [] }) },
     },
-    '@/features/health-records/lib/healthRecordPdf': { downloadHealthRecordPdf: async (data) => { exports.push(data); } },
+    '@/features/health-records/lib/healthRecordPdf': { medicalHistoryForRecord, downloadHealthRecordPdf: async (data) => { exports.push(data); } },
+    '@/features/consultations/lib/consultationRisk': consultationRisk,
+    '@/components/common/RiskBadge': { default: ({ level, mediumLabel }) => React.createElement('span', null, level === 'Moderate' ? mediumLabel : level || 'Unassessed') },
     '@/features/health-records/lib/pregnancyVisibility': { shouldShowPregnancyStatus: () => true },
     '@/features/health-records/components/LabResultsPanel': { default: Empty },
     '@/lib/dateUtils': { formatLongDate: (value) => value },
@@ -94,6 +98,24 @@ test('range lives in history, preserves latest vitals, filters export immediatel
   assert.deepEqual(calls.at(-1), {});
   assert.equal(renderer.root.findByType(Range).props.from, '');
   assert.match(text(renderer), /120\/80/);
+});
+
+test('saved consultation risk, clinical context and dated prescriptions appear without medical-history placeholders', async (t) => {
+  const assessment = { level: 'High', reasons: [{ ruleId: 'pregnancy_elevated_bp', message: 'High BP during pregnancy requires maternal evaluation.' }] };
+  const recorded = { ...latest, serviceId: 'maternal-actual', serviceName: 'Registered Maternal Care', consultationRiskAssessment: assessment,
+    clinicalContext: { pregnancyStatus: 'pregnant', existingConditions: [{ name: 'Hypertension', status: 'stable', significant: true }] },
+    medicationList: [{ genericName: 'Recorded medicine', strength: '100 mg' }] };
+  const { renderer, exports } = await healthPage(t, async () => ({ ...fullRecord, consultations: [recorded, older] }));
+  assert.match(text(renderer), /Hypertension/);
+  assert.match(text(renderer), /Pregnant \(recorded 2026-11-20\)/);
+  assert.match(text(renderer), /Recorded medicine 100 mg \(recorded 2026-11-20\)/);
+  assert.match(text(renderer), /High/);
+  await act(async () => button(renderer, 'Consultation History').props.onClick());
+  assert.match(text(renderer), /Registered Maternal Care/);
+  assert.match(text(renderer), /High BP during pregnancy/);
+  await act(async () => { await renderer.root.findByProps({ 'aria-busy': false }).props.onClick(); });
+  assert.match(exports[0].medicalHistory.chronicConditions, /Hypertension/);
+  assert.match(exports[0].medicalHistory.pregnancyStatus, /Pregnant/);
 });
 
 test('late filtered response cannot replace reset history', async (t) => {

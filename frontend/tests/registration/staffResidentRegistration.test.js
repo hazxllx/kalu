@@ -10,7 +10,7 @@ import {
   validateStaffResidentForm,
 } from '../../src/features/registration/lib/staffResidentRegistration.js';
 
-test('P0-1: calcStaffRegistrationAge computes accurate UTC age from YYYY-MM-DD DOB', () => {
+test('P0-1: calcStaffRegistrationAge computes accurate Manila-calendar age from YYYY-MM-DD DOB', () => {
   const ref = new Date(Date.UTC(2026, 5, 15)); // 2026-06-15
   assert.equal(calcStaffRegistrationAge('2000-06-14', ref), '26');
   assert.equal(calcStaffRegistrationAge('2000-06-16', ref), '25');
@@ -80,16 +80,28 @@ test('P0-1: validateStaffResidentForm accepts valid inputs and flags invalid fie
   assert.match(invalid.gender, /required/i);
   assert.match(invalid.civilStatus, /required/i);
   assert.match(invalid.barangay, /required/i);
-  assert.match(invalid.contact, /11 digits/i);
+  assert.match(invalid.contact, /valid PH mobile/i);
   assert.match(invalid.email, /valid email/i);
 });
 
-test('contact number remains optional but requires exactly 11 digits beginning with 09', () => {
+test('contact number remains optional and accepts supported PH mobile formats', () => {
   const base = { firstName: 'Maria', lastName: 'Reyes', dob: '1995-05-10', gender: 'Female', civilStatus: 'Single', barangay: 'San Jose' };
   assert.deepEqual(validateStaffResidentForm({ ...base, contact: '' }), {});
-  for (const contact of ['0917123456', '091712345678', '08171234567', '9171234567', '09AB1234567']) {
-    assert.match(validateStaffResidentForm({ ...base, contact }).contact, /11 digits/);
+  for (const contact of ['09171234567', '+639171234567', '+63 917-123-4567']) {
+    assert.equal(validateStaffResidentForm({ ...base, contact }).contact, undefined);
   }
+  for (const contact of ['0917123456', '091712345678', '08171234567', '9171234567', '09AB1234567']) {
+    assert.match(validateStaffResidentForm({ ...base, contact }).contact, /valid PH mobile/i);
+  }
+});
+
+test('staff registration rejects invalid date, name symbols, and unrecognized option values', () => {
+  const base = { firstName: 'Maria', lastName: 'Reyes', dob: '1995-05-10', gender: 'Female', civilStatus: 'Single', barangay: 'San Jose' };
+  assert.match(validateStaffResidentForm({ ...base, firstName: 'Maria.' }).firstName, /letters/i);
+  assert.match(validateStaffResidentForm({ ...base, middleName: 'Santos_Lee' }).middleName, /letters/i);
+  assert.match(validateStaffResidentForm({ ...base, dob: '2000-02-30' }).dob, /invalid/i);
+  assert.match(validateStaffResidentForm({ ...base, gender: 'Other' }).gender, /valid sex/i);
+  assert.match(validateStaffResidentForm({ ...base, civilStatus: 'Unknown' }).civilStatus, /valid civil status/i);
 });
 
 test('P0-1: buildStaffResidentPayload builds canonical resident create payload with houseNo and zone', () => {
@@ -110,6 +122,15 @@ test('P0-1: buildStaffResidentPayload builds canonical resident create payload w
   });
 
   assert.equal(payload.firstName, 'Maria');
+  assert.equal(buildStaffResidentPayload({
+    firstName: 'Maria',
+    lastName: 'Reyes',
+    dob: '1995-05-10',
+    gender: 'Female',
+    civilStatus: 'Single',
+    barangay: 'San Jose',
+    contact: '+63 917-123-4567',
+  }).cellphoneNo, '09171234567');
   assert.equal(payload.zone, 4);
   assert.match(payload.currentAddress, /^88, Mabini St\., Purok 4, San Jose/);
   assert.equal(payload.permanentAddress, payload.currentAddress);

@@ -8,8 +8,8 @@ import { ROLES } from '../src/config/roles.js';
 // ResidentsPage and the service enforce the same rules; we verify the service
 // rejection behaviour that underpins the UI's 422 field errors.
 
-const barangayRow = { name: 'San Isidro', status: 'Active' };
 const municipalityId = 'm-1';
+const barangayRow = { id: 'b-1', municipalityId, name: 'San Isidro', status: 'Active' };
 
 let inserted = null;
 
@@ -38,6 +38,7 @@ import repository from '../src/repositories/index.js';
 const userHS = { id: 'hs-1', role: ROLES.HEALTH_SUPERVISOR, barangay: 'San Isidro', municipalityId };
 const userPHN = { id: 'phn-1', role: ROLES.PHN, municipalityId };
 const userBHW = { id: 'bhw-1', role: ROLES.BHW, barangay: 'San Isidro', municipalityId };
+const validRegistrationFields = { civilStatus: 'Single', currentAddress: '1 Main Street' };
 
 const installRepositoryDoubles = ({ scenario = 'clean' } = {}) => {
   inserted = null;
@@ -54,10 +55,58 @@ test('Health Supervisor may create a resident within their assigned barangay', a
   installRepositoryDoubles();
   const result = await residentsService.createResident({
     user: userHS,
-    payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female', barangay: 'San Isidro' },
+    payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female', barangay: 'San Isidro' },
   });
   assert.ok(result.id);
   assert.equal(inserted.barangay, 'San Isidro');
+});
+
+test('staff resident creation enforces names, selections, address, and contact format server-side', async () => {
+  for (const [field, value] of [
+    ['firstName', 'Maria2'],
+    ['middleName', 'Santos.'],
+    ['lastName', 'Dela_Cruz'],
+    ['suffix', 'Senior'],
+    ['civilStatus', 'Unknown'],
+    ['currentAddress', ''],
+    ['cellphoneNo', '+63917123456'],
+  ]) {
+    installRepositoryDoubles();
+    await assert.rejects(
+      () => residentsService.createResident({
+        user: userHS,
+        payload: {
+          ...validRegistrationFields,
+          firstName: 'Maria',
+          lastName: 'Dela Cruz',
+          birthDate: '2000-09-02',
+          sex: 'Female',
+          barangay: 'San Isidro',
+          [field]: value,
+        },
+      }),
+      (error) => error.statusCode === 422,
+      `${field}=${value} should be rejected`,
+    );
+    assert.equal(inserted, null);
+  }
+});
+
+test('staff resident creation normalizes supported +63 mobile values before persistence', async () => {
+  installRepositoryDoubles();
+  await residentsService.createResident({
+    user: userHS,
+    payload: {
+      ...validRegistrationFields,
+      firstName: 'Maria',
+      lastName: 'Dela Cruz',
+      birthDate: '2000-09-02',
+      sex: 'Female',
+      barangay: 'San Isidro',
+      cellphoneNo: '+63 917-123-4567',
+    },
+  });
+  assert.equal(inserted.cellphoneNo, '09171234567');
 });
 
 test('BHW (data-collection only) may not register a resident through the clinical resident endpoint', async () => {
@@ -65,7 +114,7 @@ test('BHW (data-collection only) may not register a resident through the clinica
   await assert.rejects(
     () => residentsService.createResident({
       user: userBHW,
-      payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female', barangay: 'San Isidro' },
+      payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female', barangay: 'San Isidro' },
     }),
     (err) => {
       assert.equal(err.statusCode, 403);
@@ -79,7 +128,7 @@ test('Health Supervisor cannot register a resident in another barangay (403)', a
   await assert.rejects(
     () => residentsService.createResident({
       user: userHS,
-      payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female', barangay: 'San Antonio' },
+      payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female', barangay: 'San Antonio' },
     }),
     (err) => {
       // Branch: either thebarangay validation (422 unknown barangay) or the scope 403.
@@ -94,7 +143,7 @@ test('rejects five-digit year Date of Birth (20000-09-02) with 422', async () =>
   await assert.rejects(
     () => residentsService.createResident({
       user: userPHN,
-      payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '20000-09-02', sex: 'Female', barangay: 'San Isidro' },
+      payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '20000-09-02', sex: 'Female', barangay: 'San Isidro' },
     }),
     (err) => {
       assert.equal(err.statusCode, 422);
@@ -109,7 +158,7 @@ test('rejects slash-form Date of Birth 09/02/20000 with 422', async () => {
   await assert.rejects(
     () => residentsService.createResident({
       user: userPHN,
-      payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '09/02/20000', sex: 'Female', barangay: 'San Isidro' },
+      payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '09/02/20000', sex: 'Female', barangay: 'San Isidro' },
     }),
     (err) => {
       assert.equal(err.statusCode, 422);
@@ -123,7 +172,7 @@ test('rejects impossible calendar date (2000-02-30) with 422', async () => {
   await assert.rejects(
     () => residentsService.createResident({
       user: userPHN,
-      payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-02-30', sex: 'Female', barangay: 'San Isidro' },
+      payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-02-30', sex: 'Female', barangay: 'San Isidro' },
     }),
     (err) => { assert.equal(err.statusCode, 422); return true; },
   );
@@ -134,7 +183,7 @@ test('rejects incomplete date (2000-09) with 422', async () => {
   await assert.rejects(
     () => residentsService.createResident({
       user: userPHN,
-      payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09', sex: 'Female', barangay: 'San Isidro' },
+      payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09', sex: 'Female', barangay: 'San Isidro' },
     }),
     (err) => { assert.equal(err.statusCode, 422); return true; },
   );
@@ -148,7 +197,7 @@ test('rejects a future birth date with 422', async () => {
   await assert.rejects(
     () => residentsService.createResident({
       user: userPHN,
-      payload: { firstName: 'Maria', lastName: 'Dela Cruz', birthDate: iso, sex: 'Female', barangay: 'San Isidro' },
+      payload: { ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: iso, sex: 'Female', barangay: 'San Isidro' },
     }),
     (err) => {
       assert.equal(err.statusCode, 422);
@@ -166,7 +215,7 @@ test('createResident respects barangay scope for the optional login-account path
     () => residentsService.createResident({
       user: userHS,
       payload: {
-        firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female',
+        ...validRegistrationFields, firstName: 'Maria', lastName: 'Dela Cruz', birthDate: '2000-09-02', sex: 'Female',
         barangay: 'San Antonio', createLoginAccount: true, email: 'r@example.com',
       },
     }),

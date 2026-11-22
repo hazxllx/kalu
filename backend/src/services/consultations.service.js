@@ -11,7 +11,17 @@ import { normalizeMedications } from './medicines.service.js';
 import { classifyWithConfig } from './bpConfig.service.js';
 import { classifyBloodPressure as classifyBpWithThresholds, parseBloodPressure } from '../config/bpThresholds.js';
 import { requestFingerprint } from '../middleware/idempotency.js';
-import { buildEncounterAssessment, encounterBloodPressureContext, validateClinicalIndicators } from './clinicalAssessment.service.js';
+import {
+  buildEncounterAssessment, encounterBloodPressureContext, validateClinicalIndicators,
+  loadEncounterClinicalContext, reconcileConsultationClinicalContext, resolveConsultationMaternal,
+  validateConsultationClinicalContext, validateConsultationRiskReview, canReviewConsultationRisk,
+} from './clinicalAssessment.service.js';
+import {
+  calculateConsultationBmi, consultationAssessmentReasons, consultationNumber, consultationVitalValues,
+  getManilaDateTime, isConsultationDate, normalizeConsultationClinicalText,
+  PRESCRIPTION_ROUTES, PRESCRIPTION_FREQUENCIES, savedConsultationAssessment,
+  validateConsultationDateTime, validateConsultationVitals, validateConsultationMedications,
+} from '../../../shared/consultationClinical.js';
 
 /**
  * KALUSAGAP — Clinical Consultations Service (`consultations.service.js`).
@@ -46,9 +56,7 @@ const STAFF_ROLES = new Set(['health_supervisor', 'phn']);
 const text = (value) => String(value ?? '').trim();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const serviceClientFor = (repo = repository) => repo.driver === 'file' ? null : getServiceClient();
-const dateOnly = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
-  && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
-  && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+const dateOnly = isConsultationDate;
 
 /** Consultation statuses the list endpoint can filter by (visits workflow). */
 export const CONSULTATION_STATUSES = Object.freeze([
@@ -62,8 +70,7 @@ export const CONSULTATION_STATUSES = Object.freeze([
 
 /** Validate + normalize the consultation list filter parameters. */
 export const parseListFilters = ({ from, to, serviceId, residentId, status } = {}) => {
-  const dateIsDateOnly = (v) =>
-    typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00`));
+  const dateIsDateOnly = isConsultationDate;
   const filters = {};
   const errors = [];
   if (residentId !== undefined && residentId !== null && residentId !== '') {
@@ -114,10 +121,6 @@ const referralIsRequired = (payload = {}) => {
  * be a plausible clinical value. This is data-integrity validation, not medical
  * diagnosis. Pure + exported for unit testing; returns a list of error strings.
  */
-const inRange = (value, lo, hi) => {
-  const n = Number(value);
-  return Number.isFinite(n) && n >= lo && n <= hi;
-};
 const present = (value) => value !== undefined && value !== null && String(value).trim() !== '';
 
 /**
@@ -141,41 +144,7 @@ export const classifyBloodPressure = (bloodPressure) => {
  * @param {Object} [payload] - Consultation request payload containing vital sign fields.
  * @returns {Object} Map of `{ [fieldName]: errorMessage }` for any out-of-range or malformed vital.
  */
-const validateVitalsByField = (payload = {}) => {
-  const errors = {};
-  const check = (field, label, lo, hi) => {
-    if (!present(payload[field])) return;
-    if (!inRange(payload[field], lo, hi)) errors[field] = `${label} must be between ${lo} and ${hi}.`;
-  };
-  // Body-temperature plausibility range for data integrity (NOT a diagnosis).
-  // The previous hardcoded 30–45 °C floor wrongly rejected genuine, clinically
-  // recorded severe-hypothermia readings (survival is documented below 20 °C).
-  // Aligned with the app's clinically reviewed vital range already used at RHU
-  // triage/intake (see intake.service.js: 25–46 °C) so the same reading is
-  // accepted everywhere in °C.
-  check('temperature', 'Temperature (°C)', 25, 46);
-  check('pulseRate', 'Pulse rate (bpm)', 20, 250);
-  check('respiratoryRate', 'Respiratory rate (breaths/min)', 5, 80);
-  check('height', 'Height (cm)', 30, 250);
-  check('weight', 'Weight (kg)', 1, 400);
-  check('oxygenSaturation', 'Oxygen saturation (%)', 50, 100);
-
-  if (payload.bloodPressure != null && typeof payload.bloodPressure !== 'string') {
-    errors.bloodPressure = 'Blood pressure must be in the form systolic/diastolic (e.g. 120/80).';
-  } else if (present(payload.bloodPressure)) {
-    const m = text(payload.bloodPressure).match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
-    if (!m) {
-      errors.bloodPressure = 'Blood pressure must be in the form systolic/diastolic (e.g. 120/80).';
-    } else {
-      const sys = Number(m[1]);
-      const dia = Number(m[2]);
-      if (!inRange(sys, 40, 300)) errors.bloodPressure = 'Systolic blood pressure must be between 40 and 300.';
-      else if (!inRange(dia, 20, 200)) errors.bloodPressure = 'Diastolic blood pressure must be between 20 and 200.';
-      else if (sys <= dia) errors.bloodPressure = 'Systolic blood pressure must be greater than diastolic.';
-    }
-  }
-  return errors;
-};
+const validateVitalsByField = (payload = {}, options = { required: false }) => validateConsultationVitals(payload, options);
 
 /**
  * Validate optional clinical vitals and return a flat list of human-readable error strings.
@@ -346,7 +315,7 @@ export const resolveConsultationService = async ({
   }
   const { data: service, error } = await supabase
     .from('health_services')
-    .select('id, name, active, municipality_id, barangay_id')
+    .select('id, name, category, active, municipality_id, barangay_id')
     .eq('id', id)
     .maybeSingle();
   if (error) {
@@ -392,7 +361,7 @@ export const resolveConsultationService = async ({
       serviceId: `"${service.name}" is no longer offered. Select an active health service.`,
     });
   }
-  return { id: service.id, name: service.name || '' };
+  return { id: service.id, name: service.name || '', category: service.category || '' };
 };
 
 const CLINICAL_TEXT_FIELDS = [
@@ -405,27 +374,61 @@ const CLINICAL_TEXT_FIELDS = [
  * Supports both new merged format (clinicalFindingsDiagnosis) and legacy separate fields.
  * Returns an object with normalized findings and diagnosis.
  */
-const normalizeClinicalFindings = (payload = {}) => {
-  if (payload.clinicalFindingsDiagnosis !== undefined) {
-    const merged = text(payload.clinicalFindingsDiagnosis);
-    const marker = /^[ \t]*Diagnosis:[ \t]*/im.exec(merged);
-    if (marker) {
-      return {
-        findings: merged.slice(0, marker.index).trim(),
-        diagnosis: merged.slice(marker.index + marker[0].length).trim(),
-      };
-    }
-    // No newline, treat entire content as findings with no separate diagnosis
-    return {
-      findings: merged,
-      diagnosis: text(payload.diagnosis),
-    };
+const normalizeClinicalFindings = normalizeConsultationClinicalText;
+
+const SERVER_DETAIL_KEYS = new Set([
+  'clinicalAssessment', 'clinical_assessment', 'clinicalAssessmentHistory', 'riskAssessment', 'risk_assessment',
+  'riskLevel', 'risk_level', 'riskScore', 'risk_score', 'riskReview', 'riskReviewHistory',
+  'consultationRiskAssessment', 'consultationRiskAssessmentHistory', 'clinicalContext', 'maternal',
+  'healthServiceCategory', 'clinicalIntegrityVersion', 'reportingScope',
+]);
+const clientClinicalDetails = (details = {}) => Object.fromEntries(Object.entries(details || {}).filter(([key]) => !SERVER_DETAIL_KEYS.has(key)));
+
+/** New/changed prescriptions are strict; untouched shipped rows remain byte-for-byte snapshots. */
+export const resolveConsultationMedications = async ({ medications = [], previous = [], repo = repository } = {}) => {
+  if (!Array.isArray(medications) || medications.length > 50) {
+    throw ApiError.unprocessable('Please correct the prescription entries.', { medications: 'Use a list of up to 50 prescriptions.' });
   }
-  // Fallback to legacy separate fields
-  return {
-    findings: text(payload.findings || ''),
-    diagnosis: text(payload.diagnosis || ''),
-  };
+  const fieldErrors = validateConsultationMedications(medications, { previous });
+  if (Object.keys(fieldErrors).length) throw ApiError.unprocessable('Please correct the prescription entries.', fieldErrors);
+  const errors = {};
+  const used = new Set();
+  const fields = ['genericName', 'brandName', 'strength', 'dosageForm', 'dose', 'route', 'frequency', 'duration', 'quantity', 'instructions', 'medicineId'];
+  const comparable = (row) => Object.fromEntries(fields.map((field) => [field, row?.[field] ?? (field === 'medicineId' ? null : '')]));
+  const output = [];
+  for (const [index, raw] of medications.entries()) {
+    const prefix = `medications[${index}]`;
+    const oldIndex = previous.findIndex((row, position) => !used.has(position) && (isDeepStrictEqual(raw, row)
+      || isDeepStrictEqual(comparable(raw), comparable(row))));
+    if (oldIndex >= 0) { used.add(oldIndex); output.push(structuredClone(previous[oldIndex])); continue; }
+    let entry;
+    try { [entry] = normalizeMedications([raw]); }
+    catch (error) {
+      if (error.statusCode !== 422) throw error;
+      for (const [field, message] of Object.entries(error.details || {})) errors[field.replace('medications[0]', prefix)] = message;
+      continue;
+    }
+    for (const field of ['dose', 'route', 'frequency', 'duration', 'quantity']) if (!text(entry[field])) errors[`${prefix}.${field}`] = 'This prescription field is required.';
+    if (!PRESCRIPTION_ROUTES.some(({ value }) => value === text(entry.route))) errors[`${prefix}.route`] = 'Choose a predefined prescription route.';
+    if (!PRESCRIPTION_FREQUENCIES.some(({ value }) => value === text(entry.frequency))) errors[`${prefix}.frequency`] = 'Choose a predefined prescription frequency.';
+    if (!/^[1-9]\d{0,4}$/.test(text(entry.quantity)) || Number(entry.quantity) > 10000) errors[`${prefix}.quantity`] = 'Quantity must be a whole number from 1 to 10000.';
+    if (raw.custom !== undefined && raw.custom !== !entry.medicineId) errors[`${prefix}.custom`] = 'Custom/catalog choice must agree with the selected medicine.';
+    if (entry.medicineId) {
+      if (!UUID.test(entry.medicineId)) errors[`${prefix}.medicineId`] = 'Select a valid catalog medicine.';
+      else {
+        let medicine;
+        try {
+          if (!repo.getMedicine) throw new Error('Catalog unavailable');
+          medicine = await repo.getMedicine(entry.medicineId);
+        } catch { throw new ApiError(503, 'The medicine catalog could not be verified. Retry without changing the prescription.'); }
+        if (!medicine || medicine.active === false) errors[`${prefix}.medicineId`] = 'Select an active catalog medicine or explicitly enter a custom medicine.';
+        else Object.assign(entry, Object.fromEntries(['genericName', 'brandName', 'strength', 'dosageForm', 'source'].map((field) => [field, medicine[field] || (field === 'source' ? 'local' : '')])));
+      }
+    }
+    output.push(entry);
+  }
+  if (Object.keys(errors).length) throw ApiError.unprocessable('Please correct the prescription entries.', errors);
+  return output;
 };
 
 /**
@@ -439,7 +442,7 @@ const clinicalDetails = (payload) => {
   const { findings, diagnosis } = normalizeClinicalFindings(payload);
   const bp = parseBloodPressure(payload.bloodPressure);
   return ({
-    ...(payload.consultationDetails || {}),
+    ...clientClinicalDetails(payload.consultationDetails),
     ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => {
       if (field === 'findings') return [field, findings];
       if (field === 'diagnosis') return [field, diagnosis];
@@ -453,14 +456,14 @@ const clinicalDetails = (payload) => {
   });
 };
 
-const numericVital = (value) => present(value) ? Number(value) : null;
+const numericVital = consultationNumber;
 const VITAL_FIELDS = {
   bloodPressure: 'bp', temperature: 'temperature', pulseRate: 'hr', respiratoryRate: 'rr',
   height: 'heightCm', weight: 'weightKg', oxygenSaturation: 'o2sat',
 };
 
 const ENCOUNTER_RISK_LEVELS = new Map(Object.entries({
-  low: 'Low', medium: 'Moderate', moderate: 'Moderate', high: 'High',
+  low: 'Low', medium: 'Medium', moderate: 'Medium', high: 'High',
 }));
 const encounterRiskLevel = (assessment) => ENCOUNTER_RISK_LEVELS.get(
   String(assessment?.level ?? assessment?.riskLevel ?? assessment?.risk_level ?? '').trim().toLowerCase().replace(/\s+risk$/, ''),
@@ -492,6 +495,7 @@ const bpContext = (payload) => encounterBloodPressureContext({ chiefComplaint: p
  * @returns {Object} Visit record ready for `insertVisit` or `updateVisit`.
  */
 export const toVisit = (payload = {}, user, residentId, extra = {}) => {
+  payload = { ...payload, ...Object.fromEntries(Object.entries(consultationVitalValues(payload)).filter(([, value]) => value !== undefined)) };
   const { findings, diagnosis } = normalizeClinicalFindings(payload);
   const bp = parseBloodPressure(payload.bloodPressure);
   const context = bpContext(payload);
@@ -512,7 +516,8 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => {
     recordedAt: extra.recordedAt ?? payload.recordedAt ?? new Date().toISOString(),
     // Keep the individual form fields: clinical text can itself contain the
     // legacy Diagnosis/Medication/Next visit delimiters.
-    consultationDetails: clinicalDetails(payload),
+    consultationDetails: { ...clinicalDetails(payload), healthServiceCategory: extra.healthServiceCategory || '',
+      ...(extra.clinicalIntegrityRequired ? { clinicalIntegrityVersion: 'consultation-clinical-v1' } : {}) },
     chiefComplaint: text(payload.chiefComplaint),
     clinicalHistory: text(payload.remarks),
     findings: [findings, diagnosis].filter(Boolean).join('\nDiagnosis: '),
@@ -524,7 +529,7 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => {
     healthServiceName: extra.healthServiceName ?? '',
     // Structured, non-lossy prescription storage (by value, so a later catalog
     // change never alters an already-recorded consultation).
-    medications: normalizeMedications(payload.medications),
+    medications: extra.medications ?? normalizeMedications(payload.medications),
     // Previously-dropped field, now persisted.
     referralRequired: referralIsRequired(payload),
     // Blood-pressure classification SNAPSHOT recorded at the time of the
@@ -542,11 +547,11 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => {
       weightKg: numericVital(payload.weight),
       o2sat: numericVital(payload.oxygenSaturation),
       ...(() => {
-        const { bmi, category } = computeBMI(payload.height, payload.weight);
+        const { category } = computeBMI(payload.height, payload.weight);
         // `visits.bmi_category` is NOT NULL (default ''), so a consultation saved
         // without both height and weight must store '' here, not null — otherwise
         // the insert fails with a NOT-NULL violation. `bmi` itself is nullable.
-        return { bmi, bmiCategory: category || '' };
+        return { bmi: calculateConsultationBmi(payload.height, payload.weight), bmiCategory: category || '' };
       })(),
     },
     phn: {
@@ -581,6 +586,8 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
   const nextVisitDate = details.nextVisitDate ?? (visit.recommendation?.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '');
   const followUpRequired = details.followUpRequired ?? (nextVisitDate ? 'Yes' : 'No');
   const clinicalAssessment = savedEncounterAssessment(details);
+  const displayAssessment = savedConsultationAssessment(details);
+  const localDateTime = visit.visitDate ? getManilaDateTime(visit.visitDate) : { date: '', time: '' };
 
   let attendingPersonnel = visit.recordedById || visit.recordedByName ? {
     id: visit.recordedById || null,
@@ -649,12 +656,13 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
       age: resident.birthDate ? Math.max(0, new Date().getFullYear() - new Date(resident.birthDate).getFullYear()) : '',
       program: 'General',
     },
-    consultationDate: details.consultationDate ?? (visit.visitDate ? String(visit.visitDate).slice(0, 10) : ''),
-    consultationTime: details.consultationTime ?? (visit.visitDate?.includes('T') ? String(visit.visitDate).slice(11, 16) : ''),
+    consultationDate: details.consultationDate ?? localDateTime.date,
+    consultationTime: details.consultationTime ?? localDateTime.time,
     // Health service provided (id + name snapshot recorded at save time, so a
     // later rename/deactivation in the catalog never changes history).
     serviceId: visit.healthServiceId || null,
-    serviceName: visit.healthServiceName || '',
+    serviceName: visit.healthServiceName || visit.healthService?.name || '',
+    healthServiceCategory: details.healthServiceCategory || visit.healthService?.category || '',
     chiefComplaint: visit.chiefComplaint || '',
     findings: clinicalFindings,
     diagnosis: clinicalDiagnosis,
@@ -667,7 +675,12 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
     nextVisitDate,
     referralRequired: visit.referralRequired || visit.referralId || visit.referrals?.length ? 'Yes' : 'No',
     clinicalAssessment,
-    riskLevel: encounterRiskLevel(clinicalAssessment),
+    consultationRiskAssessment: details.consultationRiskAssessment || null,
+    clinicalContext: details.clinicalContext || null,
+    maternal: details.maternal || null,
+    riskLevel: encounterRiskLevel(displayAssessment),
+    riskAssessmentStatus: displayAssessment?.status || 'unavailable',
+    riskReasons: consultationAssessmentReasons(displayAssessment),
     bloodPressureClassification,
     vitals: {
       ...(visit.vitals || {}),
@@ -708,7 +721,8 @@ export const withHistoryLinks = async (visits, repo = repository) => {
     visits.map((visit) => visit.referralId).filter(Boolean));
   return visits.map((visit) => ({
     ...visit,
-    followUps: followUps.filter((row) => row.consultation_id === visit.id && row.resident_id === visit.residentId),
+    followUps: followUps.filter((row) => row.consultation_id === visit.id && row.resident_id === visit.residentId)
+      .map((row) => operational.withScheduleState(row)),
     referrals: referrals.filter((row) => (row.treatment_visit_id === visit.id || row.id === visit.referralId)
       && row.resident_id === visit.residentId),
   }));
@@ -961,25 +975,36 @@ export const get = async ({ user, id, repo = repository, supabase = serviceClien
  * @param {Object} [options] - Validation options (`requireResident`: require `residentId` on create).
  * @returns {Object} Field-keyed validation error map (empty when valid).
  */
-const consultationFieldErrors = (payload = {}, { requireResident = false } = {}) => {
-  const errors = validateVitalsByField(payload);
+export const consultationFieldErrors = (payload = {}, { requireResident = false, requireClinical = true } = {}) => {
+  const errors = { ...validateVitalsByField(payload, { required: requireClinical }),
+    ...validateConsultationDateTime(payload, { required: requireClinical }) };
   const required = (field, message) => {
     if (!text(payload[field])) errors[field] = message;
   };
   if (requireResident) required('residentId', 'Please select a resident.');
-  required('consultationDate', 'Consultation date is required.');
-  if (payload.consultationDate && !dateOnly(payload.consultationDate)) {
-    errors.consultationDate = 'Consultation date is invalid.';
-  }
-  if (present(payload.consultationTime) && !/^([01]\d|2[0-3]):[0-5]\d$/.test(text(payload.consultationTime))) {
-    errors.consultationTime = 'Consultation time must be a valid time (HH:MM).';
-  }
   if (present(payload.recordedAt) && (typeof payload.recordedAt !== 'string'
     || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(payload.recordedAt)
+    || !dateOnly(payload.recordedAt.slice(0, 10))
     || !Number.isFinite(Date.parse(payload.recordedAt)))) {
     errors.recordedAt = 'The original recording timestamp is invalid.';
   }
-  required('chiefComplaint', 'Chief complaint is required.');
+  if (requireClinical) {
+    required('chiefComplaint', 'Chief complaint is required.');
+    if (!normalizeClinicalFindings(payload).findings) errors.findings = 'Clinical findings are required.';
+  }
+  for (const [field, label] of [
+    ['treatmentGiven', 'Treatment provided'],
+    ['adviceGiven', 'Recommendations'],
+  ]) {
+    if (payload[field] !== undefined && payload[field] !== null) {
+      if (typeof payload[field] !== 'string') errors[field] = `Use text for ${label.toLowerCase()}.`;
+      else if (payload[field].length > 10000) errors[field] = `Use 10,000 characters or fewer for ${label.toLowerCase()}.`;
+    }
+  }
+  for (const field of CLINICAL_TEXT_FIELDS) if (payload[field] !== undefined && payload[field] !== null && typeof payload[field] !== 'string') {
+    errors[field] = 'Use a text value.';
+  }
+  if (payload.clinicalFindingsDiagnosis !== undefined && payload.clinicalFindingsDiagnosis !== null && typeof payload.clinicalFindingsDiagnosis !== 'string') errors.findings = 'Use a text value for clinical findings.';
   if (payload.consultationDetails !== undefined && (!payload.consultationDetails
     || typeof payload.consultationDetails !== 'object' || Array.isArray(payload.consultationDetails))) {
     errors.consultationDetails = 'Additional clinical details must be a JSON object.';
@@ -987,6 +1012,24 @@ const consultationFieldErrors = (payload = {}, { requireResident = false } = {})
   const { errors: followUpErrors } = validateFollowUp(payload);
   if (followUpErrors.length) errors.nextVisitDate = followUpErrors.join(' ');
   return errors;
+};
+
+/** Scope/permission gates run before any maternal, NCD or encounter history query. */
+export const getClinicalContext = async ({ user, residentId, consultationDate, repo = repository, supabase = serviceClientFor(repo) }) => {
+  if (!STAFF_ROLES.has(user?.role) && !canReviewConsultationRisk(user)) assertStaff(user);
+  if (!user?.municipalityId || (user.role === 'health_supervisor' && !user.barangayId && !assignedBarangay(user))) throw ApiError.forbidden('Your account has no assigned clinical context scope.');
+  if (typeof residentId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(residentId) || !dateOnly(consultationDate)) {
+    throw ApiError.unprocessable('Please select a resident and valid consultation date.', {
+      ...(!/^[a-zA-Z0-9_-]{1,100}$/.test(String(residentId ?? '')) ? { residentId: 'Select a valid resident.' } : {}),
+      ...(!dateOnly(consultationDate) ? { consultationDate: 'Use a real calendar date (YYYY-MM-DD).' } : {}),
+    });
+  }
+  const resident = await repo.getResident(residentId);
+  assertResidentScope(user, resident);
+  const context = await loadEncounterClinicalContext({ resident, residentId, user, consultationDate, repo, supabase });
+  if (context.sourceStatus === 'unavailable') throw new ApiError(503, 'Clinical context could not be verified. No absence of pregnancy or conditions has been assumed.').withCode('CLINICAL_CONTEXT_UNAVAILABLE');
+  const { episodes, currentAssessment, ...response } = context;
+  return { ...response, canReviewRisk: canReviewConsultationRisk(user) };
 };
 
 /**
@@ -1068,7 +1111,7 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
   // recorder is immutable, including when another staff member edits the visit.
   let visit = await repo.findVisitByOperationKey(key);
   if (visit) assertOperationOwner(visit, user, payload, hash);
-  const fieldErrors = consultationFieldErrors(payload, { requireResident: true });
+  const fieldErrors = consultationFieldErrors(payload, { requireResident: true, requireClinical: !visit });
   if (Object.keys(fieldErrors).length) {
     throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
   }
@@ -1080,7 +1123,8 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
   await assertResidentEligibleForConsultation(resident, repo);
   const { errors: followUpErrors, normalized } = validateFollowUp(payload);
   if (followUpErrors.length) throw ApiError.unprocessable('Please correct the consultation fields shown below.', { nextVisitDate: followUpErrors.join(' ') });
-  const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate };
+  const cleanPayload = { ...payload, ...Object.fromEntries(Object.entries(consultationVitalValues(payload)).filter(([, value]) => value !== undefined)),
+    nextVisitDate: normalized.nextVisitDate };
   // Validate the selected health service against the database (new consultation:
   // an inactive service is rejected; the association must be a real, in-scope
   // service row — never a free-text name).
@@ -1088,6 +1132,11 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
     user, serviceId: payload.serviceId ?? payload.service_id, existingServiceId: visit?.healthServiceId, supabase,
   });
   if (!visit) {
+    const riskReview = validateConsultationRiskReview(payload.riskReview, user);
+    validateConsultationClinicalContext(payload.clinicalContext);
+    const medications = await resolveConsultationMedications({ medications: payload.medications, repo });
+    const context = await loadEncounterClinicalContext({ resident, user, consultationDate: payload.consultationDate,
+      consultationTime: payload.consultationTime, repo, supabase });
     // A keyless historical write cannot be correlated with an old response-loss
     // draft. Never guess a clinical match or silently create a second visit.
     if (payload.legacyDraftAdopted === true && await repo.hasUnkeyedVisitsForResident(resident.id)) {
@@ -1097,8 +1146,18 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
     const bpClassification = await classifyBp(cleanPayload.bloodPressure, { context: bpContext(cleanPayload) });
     const encounter = toVisit(cleanPayload, user, resident.id, {
       bpClassification, healthServiceId: healthService.id, healthServiceName: healthService.name,
+      healthServiceCategory: healthService.category, medications, clinicalIntegrityRequired: true,
     });
-    encounter.consultationDetails = await buildEncounterAssessment({ visit: encounter, resident, user, supabase });
+    encounter.municipalityId = resident.municipalityId || null;
+    encounter.barangayId = resident.barangayId || null;
+    encounter.consultationDetails.reportingScope = { municipalityId: resident.municipalityId || null, barangayId: resident.barangayId || null };
+    encounter.id = ids.id;
+    encounter.consultationDetails.clinicalContext = reconcileConsultationClinicalContext({ context, submitted: payload.clinicalContext, user, riskReview });
+    const maternal = resolveConsultationMaternal({ value: payload.maternal, context, clinicalContext: encounter.consultationDetails.clinicalContext,
+      consultationDate: payload.consultationDate, healthService,
+      clinicalText: [text(payload.chiefComplaint), normalizeClinicalFindings(payload).findings].filter(Boolean).join('\n') });
+    if (maternal) encounter.consultationDetails.maternal = maternal;
+    encounter.consultationDetails = await buildEncounterAssessment({ visit: encounter, resident, user, supabase, context, riskReview });
     try {
       visit = await repo.insertVisit({
         id: ids.id,
@@ -1134,7 +1193,7 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
   }
   // Recorded health data changed -> recompute + persist the resident's risk
   // (backend-authoritative; best-effort so a save is never blocked by it).
-  await persistRisk({ residentId: resident.id });
+  await persistRisk({ residentId: resident.id, repo });
   const completed = await repo.getVisit(visit.id);
   if (!completed?.consultationEffectsCompletedAt) {
     throw new ApiError(503, 'The consultation completion could not be confirmed. Retry the original operation.');
@@ -1157,8 +1216,15 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
  */
 export const update = async ({ user, id, payload = {}, repo = repository, supabase = serviceClientFor(repo),
   classifyBp = classifyWithConfig, persistRisk = persistResidentRisk,
-  syncFollowUp = syncConsultationFollowUp, notify = notifyResidentOfConsultation }) => {
-  assertStaff(user);
+  syncFollowUp = syncConsultationFollowUp, notify = notifyResidentOfConsultation, riskReviewOnly = false }) => {
+  payload = { ...payload, ...Object.fromEntries(CLINICAL_TEXT_FIELDS.filter((field) => payload[field] === undefined
+    && payload.consultationDetails?.[field] !== undefined).map((field) => [field, payload.consultationDetails[field]])) };
+  if (riskReviewOnly) {
+    if (!canReviewConsultationRisk(user) || !user.municipalityId) throw ApiError.forbidden('Only a scoped clinical professional may review risk.');
+    if (Object.keys(payload).some((key) => key !== 'riskReview') || payload.riskReview === undefined) throw ApiError.unprocessable('This endpoint accepts only a confirmed riskReview.');
+  } else if (!STAFF_ROLES.has(user?.role) && payload.riskReview !== undefined && canReviewConsultationRisk(user) && user.municipalityId) {
+    // Licensed reassessment still requires route-level clinical update permission and resident scope.
+  } else assertStaff(user);
   const visit = await repo.getVisit(id);
   if (!visit) throw ApiError.notFound('Consultation not found.');
   assertResidentScope(user, visit.resident);
@@ -1171,61 +1237,92 @@ export const update = async ({ user, id, payload = {}, repo = repository, supaba
   if (visit.clientOperationKey && !visit.consultationEffectsCompletedAt) {
     throw ApiError.conflict('This consultation is still being completed. Retry its original create operation first.');
   }
+  if (payload.expectedUpdatedAt && payload.expectedUpdatedAt !== visit.updatedAt) throw ApiError.conflict('This consultation changed after it was opened. Reload the saved record before editing.');
+  if (riskReviewOnly && user.role === 'rhu_personnel' && visit.facilityId && visit.facilityId !== user.facilityId) throw ApiError.notFound('Consultation not found.');
   const existing = await fromVisit(visit, null);
+  const previous = visit.consultationDetails || {};
+  const submittedVitals = Object.fromEntries(Object.entries(consultationVitalValues(payload)).filter(([, value]) => value !== undefined));
+  const clinicalText = normalizeClinicalFindings(payload);
   const cleanPayload = {
     ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => [field, existing[field]])),
     ...Object.fromEntries(Object.entries(VITAL_FIELDS).map(([field, key]) => [field, existing.vitals[key]])),
     medications: existing.medications,
     ...payload,
+    ...submittedVitals,
+    ...(payload.clinicalFindingsDiagnosis !== undefined && payload.findings === undefined ? clinicalText : {}),
+    clinicalIndicators: payload.clinicalIndicators ?? payload.consultationDetails?.clinicalIndicators ?? previous.clinicalIndicators ?? {},
     residentId: visit.residentId,
   };
+  const clinicalChanged = ['chiefComplaint', 'findings', 'diagnosis', 'consultationDate', 'consultationTime', 'treatmentGiven', 'medicationPrescribed']
+    .some((field) => text(cleanPayload[field]) !== text(existing[field]))
+    || Object.keys(submittedVitals).some((field) => field !== 'bmi' && (field === 'bloodPressure'
+      ? !isDeepStrictEqual(parseBloodPressure(submittedVitals[field]), parseBloodPressure(existing.vitals.bp))
+      : String(submittedVitals[field] ?? '') !== String(existing.vitals[VITAL_FIELDS[field]] ?? '')))
+    || !isDeepStrictEqual(cleanPayload.clinicalIndicators, previous.clinicalIndicators || {})
+    || (payload.medications !== undefined && !isDeepStrictEqual(payload.medications, existing.medications))
+    || (payload.clinicalContext !== undefined && !isDeepStrictEqual(payload.clinicalContext, previous.clinicalContext?.submitted))
+    || (payload.maternal !== undefined && !isDeepStrictEqual(payload.maternal, previous.maternal)) || payload.riskReview !== undefined;
   const updatesFollowUp = payload.followUpRequired !== undefined || payload.nextVisitDate !== undefined;
   if (!updatesFollowUp) delete cleanPayload.nextVisitDate;
   else if (payload.nextVisitDate === undefined) cleanPayload.nextVisitDate = existing.nextVisitDate;
-  const fieldErrors = consultationFieldErrors(cleanPayload);
+  const fieldErrors = consultationFieldErrors(clinicalChanged ? cleanPayload : payload, { requireClinical: clinicalChanged });
   if (Object.keys(fieldErrors).length) {
     throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
   }
   cleanPayload.nextVisitDate = updatesFollowUp ? validateFollowUp(cleanPayload).normalized.nextVisitDate : existing.nextVisitDate;
   cleanPayload.referralRequired = payload.referralRequired ?? (visit.referralRequired ? 'Yes' : 'No');
-  cleanPayload.consultationDetails = { ...visit.consultationDetails, ...payload.consultationDetails };
-  delete cleanPayload.consultationDetails.clinicalAssessment;
-  delete cleanPayload.consultationDetails.clinicalAssessmentHistory;
+  cleanPayload.consultationDetails = { ...clientClinicalDetails(previous), ...clientClinicalDetails(payload.consultationDetails) };
   // Validate the (possibly changed) health service. `existingServiceId` keeps an
   // association with a since-deactivated service valid when the editor leaves it
   // untouched, while a NEWLY selected inactive service is rejected.
-  const healthService = await resolveConsultationService({
+  const healthService = clinicalChanged || payload.serviceId !== undefined || payload.service_id !== undefined ? await resolveConsultationService({
     user,
     serviceId: payload.serviceId ?? payload.service_id ?? visit.healthServiceId,
     existingServiceId: visit.healthServiceId,
     supabase,
-  });
+  }) : { id: visit.healthServiceId || null, name: visit.healthServiceName || existing.serviceName,
+    category: previous.healthServiceCategory || visit.healthService?.category || '' };
+  const medications = clinicalChanged ? await resolveConsultationMedications({ medications: cleanPayload.medications, previous: existing.medications, repo }) : visit.medications || [];
   const encounter = toVisit(cleanPayload, user, visit.residentId, {
     healthServiceId: healthService.id,
     healthServiceName: healthService.id === visit.healthServiceId ? visit.healthServiceName || healthService.name : healthService.name,
+    healthServiceCategory: healthService.category, medications,
     status: visit.status || 'completed', recordedAt: visit.recordedAt || visit.createdAt,
+    clinicalIntegrityRequired: clinicalChanged,
   });
-  const previous = visit.consultationDetails || {};
+  encounter.id = visit.id;
   if (!updatesFollowUp) encounter.consultationDetails.followUpRequired = existing.followUpRequired;
   if (encounter.consultationDetails.consultationDate === existing.consultationDate
     && encounter.consultationDetails.consultationTime === existing.consultationTime) encounter.visitDate = visit.visitDate;
-  const clinicalChanged = ['chiefComplaint', 'findings', 'diagnosis', 'consultationDate', 'followUpRequired']
-    .some((field) => text(encounter.consultationDetails[field]) !== text(existing[field]))
-    || Object.values(VITAL_FIELDS).some((key) => String(encounter.vitals[key] ?? '') !== String(existing.vitals[key] ?? ''))
-    || !isDeepStrictEqual(encounter.consultationDetails.clinicalIndicators, previous.clinicalIndicators || {});
-  encounter.bpClassification = clinicalChanged || !visit.bpClassification
-    ? await classifyBp(cleanPayload.bloodPressure, { context: bpContext(cleanPayload) })
-    : visit.bpClassification;
-  const previousAssessment = savedEncounterAssessment(previous);
-  if (clinicalChanged || encounterRiskLevel(previousAssessment) === 'Unassessed') {
-    const evaluated = await buildEncounterAssessment({ visit: encounter, resident: visit.resident, user, supabase, previous });
-    if (clinicalChanged || !previousAssessment || encounterRiskLevel(evaluated.clinicalAssessment) !== 'Unassessed') {
-      encounter.consultationDetails = evaluated;
+  if (clinicalChanged) {
+    const riskReview = validateConsultationRiskReview(payload.riskReview, user);
+    const submitted = payload.clinicalContext ?? previous.clinicalContext?.submitted;
+    validateConsultationClinicalContext(submitted);
+    const context = await loadEncounterClinicalContext({ resident: visit.resident, user,
+      consultationDate: cleanPayload.consultationDate, consultationTime: cleanPayload.consultationTime, repo, supabase, excludeVisitId: visit.id });
+    if (Object.hasOwn(previous, 'reportingScope')) encounter.consultationDetails.reportingScope = previous.reportingScope;
+    encounter.consultationDetails.clinicalContext = reconcileConsultationClinicalContext({ context, submitted, user, previous, riskReview });
+    const pregnancySourceChanged = text(cleanPayload.chiefComplaint) !== text(existing.chiefComplaint)
+      || text(cleanPayload.findings) !== text(existing.findings);
+    const maternal = payload.maternal === undefined && previous.maternal && cleanPayload.consultationDate === existing.consultationDate
+      && healthService.id === visit.healthServiceId && !pregnancySourceChanged
+      ? previous.maternal : resolveConsultationMaternal({ value: payload.maternal ?? previous.maternal, context,
+      clinicalContext: encounter.consultationDetails.clinicalContext, consultationDate: cleanPayload.consultationDate, healthService,
+      clinicalText: [text(cleanPayload.chiefComplaint), normalizeClinicalFindings(cleanPayload).findings].filter(Boolean).join('\n') });
+    if (maternal) encounter.consultationDetails.maternal = maternal;
+    encounter.bpClassification = await classifyBp(cleanPayload.bloodPressure, { context: bpContext(cleanPayload) });
+    encounter.consultationDetails = await buildEncounterAssessment({ visit: encounter, resident: visit.resident, user, supabase, previous, context, riskReview });
+  } else {
+    // Historical partial encounters remain partial. Metadata edits never create measurements or reassess risk.
+    encounter.consultationDetails = { ...previous, ...clientClinicalDetails(payload.consultationDetails),
+      ...Object.fromEntries(CLINICAL_TEXT_FIELDS.filter((field) => payload[field] !== undefined).map((field) => [field, text(cleanPayload[field])])) };
+    if (updatesFollowUp) Object.assign(encounter.consultationDetails, { nextVisitDate: cleanPayload.nextVisitDate,
+      followUpRequired: cleanPayload.nextVisitDate ? 'Yes' : 'No' });
+    if (payload.serviceId !== undefined || payload.service_id !== undefined) encounter.consultationDetails.healthServiceCategory = healthService.category || '';
+    for (const field of ['vitals', 'bpClassification', 'findings', 'treatmentGiven', 'phn', 'visitDate', 'chiefComplaint']) {
+      if (visit[field] === undefined) delete encounter[field]; else encounter[field] = visit[field];
     }
-  }
-  if (!encounter.consultationDetails.clinicalAssessment) {
-    encounter.consultationDetails.clinicalAssessment = previousAssessment;
-    if (previous.clinicalAssessmentHistory) encounter.consultationDetails.clinicalAssessmentHistory = previous.clinicalAssessmentHistory;
+    encounter.medications = visit.medications;
   }
   // Preserve the existing visit status (draft / in_review / referred / etc.) —
   // only a NEW consultation defaults to 'completed'. This stops an update from
@@ -1239,7 +1336,7 @@ export const update = async ({ user, id, payload = {}, repo = repository, supaba
   if (!updated) throw ApiError.conflict('This consultation changed while you were editing it. Reopen it and try again.');
   if (updatesFollowUp) await syncFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk.
-  await persistRisk({ residentId: visit.residentId });
+  await persistRisk({ residentId: visit.residentId, repo });
   // Only after the consultation is persisted. Idempotent per visit id, so
   // editing an existing consultation does not create a duplicate notification.
   await notify({ residentId: visit.residentId, visit: updated });
@@ -1247,4 +1344,6 @@ export const update = async ({ user, id, payload = {}, repo = repository, supaba
   return fromVisit(linkedVisit, supabase);
 };
 
-export default { list, get, create, update };
+export const reviewRisk = (params) => update({ ...params, riskReviewOnly: true });
+
+export default { list, get, getClinicalContext, create, update, reviewRisk };

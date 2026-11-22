@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, X, Check } from "lucide-react";
+import { ChevronDown, X, Check } from "lucide-react";
 
 const normalizeOptions = (options) =>
   (options || []).map((o) =>
@@ -29,8 +29,11 @@ const normalizeOptions = (options) =>
  * @param {string} [props.emptyText] Shown when the filter has no matches
  * @param {string} [props.error] Inline validation message
  * @param {boolean} [props.disabled] Prevents searching, clearing, and changing the selection
- * @param {number} [props.maxResults] Scrollable result cap (panel scrolls if exceeded)
+ * @param {number} [props.maxResults] Visible rows before the panel scrolls
  * @param {boolean} [props.portalDropdown] Render the menu outside overflow-clipped containers
+ * @param {string} [props.id] Unique input identifier
+ * @param {string} [props.ariaLabel] Accessible name when no label is shown
+ * @param {boolean} [props.compact] Match compact clinical-form input heights
  */
 export default function SearchableSelect({
   label,
@@ -44,7 +47,13 @@ export default function SearchableSelect({
   disabled = false,
   maxResults = 6,
   portalDropdown = false,
+  id,
+  ariaLabel,
+  compact = false,
 }) {
+  const generatedId = useId();
+  const inputId = id || `select-${generatedId}`;
+  const listboxId = `${inputId}-listbox`;
   const items = useMemo(() => normalizeOptions(options), [options]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -64,7 +73,9 @@ export default function SearchableSelect({
     });
   }, [items, query]);
 
-  useEffect(() => setHighlighted(0), [query, items.length]);
+  useEffect(() => {
+    setHighlighted(query ? 0 : Math.max(0, items.findIndex((item) => item.value === value)));
+  }, [query, open, items, value]);
 
   // Close the dropdown when clicking outside the field.
   useEffect(() => {
@@ -81,30 +92,43 @@ export default function SearchableSelect({
     const updatePosition = () => {
       if (!wrapRef.current) return;
       const rect = wrapRef.current.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const below = viewportHeight - rect.bottom - 12;
-      const above = rect.top - 12;
+      const viewport = window.visualViewport;
+      const viewportTop = viewport?.offsetTop || 0;
+      const viewportLeft = viewport?.offsetLeft || 0;
+      const viewportHeight = viewport?.height || window.innerHeight;
+      const viewportWidth = viewport?.width || window.innerWidth;
+      const below = viewportTop + viewportHeight - rect.bottom - 12;
+      const above = rect.top - viewportTop - 12;
       const estimatedHeight = Math.min(256, Math.max(48, Math.min(results.length, maxResults) * 44 + 8));
       const placeAbove = below < estimatedHeight && above > below;
       const availableHeight = placeAbove ? above : below;
+      const maxHeight = Math.max(0, Math.min(estimatedHeight, availableHeight));
+      const width = Math.min(rect.width, Math.max(0, viewportWidth - 16));
       setMenuPosition({
-        left: rect.left,
-        width: rect.width,
-        ...(placeAbove
-          ? { bottom: viewportHeight - rect.top + 6 }
-          : { top: rect.bottom + 6 }),
-        maxHeight: Math.max(80, Math.min(256, availableHeight)),
+        left: Math.max(viewportLeft + 8, Math.min(rect.left, viewportLeft + viewportWidth - width - 8)),
+        width,
+        top: placeAbove ? rect.top - maxHeight - 6 : rect.bottom + 6,
+        maxHeight,
         zIndex: 100,
       });
     };
     updatePosition();
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
+    window.visualViewport?.addEventListener("resize", updatePosition);
+    window.visualViewport?.addEventListener("scroll", updatePosition);
     return () => {
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
+      window.visualViewport?.removeEventListener("resize", updatePosition);
+      window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
   }, [open, portalDropdown, results.length, maxResults]);
+
+  const menuReady = open && !disabled && (!portalDropdown || Boolean(menuPosition));
+  useEffect(() => {
+    if (menuReady) menuRef.current?.querySelector(`[data-option-index="${highlighted}"]`)?.scrollIntoView?.({ block: "nearest" });
+  }, [highlighted, menuReady]);
 
   const select = (option) => {
     if (disabled) return;
@@ -128,6 +152,18 @@ export default function SearchableSelect({
         e.stopPropagation();
         setOpen(false);
       }
+      return;
+    }
+    if (e.key === "Tab") {
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+    if (!open && ["ArrowDown", "ArrowUp"].includes(e.key)) {
+      e.preventDefault();
+      setOpen(true);
+      setQuery("");
+      setHighlighted(Math.max(0, items.findIndex((item) => item.value === value)));
       return;
     }
     if (!open || results.length === 0) return;
@@ -162,25 +198,27 @@ export default function SearchableSelect({
     <div
       ref={menuRef}
       style={portalDropdown ? (menuPosition || { visibility: "hidden" }) : undefined}
-      className={`${portalDropdown ? "fixed" : "absolute left-0 right-0 top-full z-30 mt-1.5"} max-w-full overflow-hidden rounded-btn border border-brand-border bg-white shadow-float dark:border-border dark:bg-popover`}
+      className={`${portalDropdown ? "fixed" : "absolute left-0 right-0 top-full z-30 mt-1.5"} max-w-full overflow-auto rounded-btn border border-brand-border bg-white text-brand-ink shadow-float dark:border-border dark:bg-card dark:text-foreground`}
     >
       {results.length === 0 ? (
-        <p className="px-3 py-3 text-sm text-brand-gray dark:text-muted-foreground">{emptyText}</p>
+        <div id={listboxId} role="listbox" aria-label={ariaLabel || label || placeholder} className="px-3 py-3 text-sm text-brand-gray">{emptyText}</div>
       ) : (
-        <ul id="searchable-select-listbox" role="listbox" className="max-h-64 overflow-y-auto py-1">
-          {results.slice(0, maxResults).map((o, i) => (
-            <li key={o.value} role="option" aria-selected={i === highlighted} id={`searchable-option-${i}`}>
+        <ul id={listboxId} role="listbox" aria-label={ariaLabel || label || placeholder} style={{ maxHeight: portalDropdown ? Math.max(0, (menuPosition?.maxHeight ?? 256) - 2) : Math.min(256, maxResults * 44 + 8) }} className="overflow-y-auto py-1">
+          {results.map((o, i) => (
+            <li key={o.value} role="option" aria-selected={o.value === value} id={`${listboxId}-option-${i}`} data-option-index={i}>
               <button
-                type="button"
+                 type="button"
+                 tabIndex={-1}
+                 onMouseDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setHighlighted(i)}
                 onClick={() => select(o)}
                 className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 min-h-[44px] sm:min-h-0 text-left transition-colors ${
-                  i === highlighted ? "bg-brand-light dark:bg-card-nested" : "hover:bg-brand-bg dark:hover:bg-hover"
+                  i === highlighted || o.value === value ? "bg-brand-light dark:bg-brand-blue/20" : "hover:bg-brand-bg dark:hover:bg-muted/50"
                 }`}
               >
                 <span className="truncate text-sm font-medium text-brand-ink dark:text-foreground">{o.label}</span>
                 {o.value === value && (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-brand-blue dark:text-blue-400" aria-hidden="true" />
+                  <Check className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
                 )}
               </button>
             </li>
@@ -193,33 +231,34 @@ export default function SearchableSelect({
   return (
     <div>
       {label && (
-        <label className="text-sm font-medium text-brand-ink dark:text-foreground">
+        <label htmlFor={inputId} className={compact ? "text-xs font-medium text-brand-gray" : "text-sm font-medium text-brand-ink"}>
           {label}
-          {required && <span className="text-brand-danger dark:text-red-400"> *</span>}
+          {required && <span className="text-brand-danger"> *</span>}
         </label>
       )}
-      <div ref={wrapRef} className="relative mt-1.5">
+      <div ref={wrapRef} className={`relative ${label ? "mt-1.5" : ""}`}>
         <div
-          className={`flex h-11 w-full items-center gap-2 rounded-input border bg-white dark:bg-input px-3.5 transition-colors focus-within:border-[#2563EB] focus-within:ring-2 focus-within:ring-[#2563EB]/15 dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/15 ${
+          className={`flex ${compact ? "h-9 rounded-btn px-2.5" : "h-11 rounded-input px-3.5"} w-full items-center gap-2 border bg-white transition-colors focus-within:border-brand-blue dark:border-border dark:bg-card ${
             error
-              ? "border-brand-danger bg-red-50/40 focus-within:border-brand-danger focus-within:ring-red-500/15 dark:border-red-500 dark:bg-red-950/30 dark:focus-within:border-red-500 dark:focus-within:ring-red-500/15"
-              : "border-[#CBD5E1] dark:border-border"
+              ? "border-brand-danger bg-red-50/40 focus-within:border-brand-blue dark:border-brand-danger dark:bg-red-950/20"
+              : "border-brand-border"
           }`}
         >
-          <Search className="h-4 w-4 shrink-0 text-brand-gray dark:text-muted-foreground" aria-hidden="true" />
           <input
             ref={inputRef}
+            id={inputId}
             type="text"
             value={controlValue}
             role="combobox"
+            aria-label={ariaLabel}
             aria-invalid={Boolean(error)}
             aria-disabled={disabled}
             readOnly={disabled}
             aria-expanded={open}
             aria-autocomplete="list"
-            aria-controls="searchable-select-listbox"
+            aria-controls={open && !disabled ? listboxId : undefined}
             aria-activedescendant={
-              open && results[highlighted] ? `searchable-option-${highlighted}` : undefined
+              open && results[highlighted] ? `${listboxId}-option-${highlighted}` : undefined
             }
             placeholder={placeholder}
             onChange={(e) => {
@@ -233,24 +272,42 @@ export default function SearchableSelect({
               setOpen(true);
             }}
             onKeyDown={onKeyDown}
-            className={`w-full min-w-0 bg-transparent text-sm text-brand-ink dark:text-foreground outline-none placeholder:text-brand-gray/70 dark:placeholder:text-muted-foreground/70 ${disabled ? "cursor-not-allowed" : ""}`}
+            className={`w-full min-w-0 bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70 dark:text-foreground ${disabled ? "cursor-not-allowed" : ""}`}
             disabled={disabled}
           />
           {(value || query) && !disabled && (
             <button
               type="button"
               onClick={clear}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-brand-gray dark:text-muted-foreground transition-colors hover:text-brand-ink dark:hover:text-foreground touch-target-sm"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-brand-gray transition-colors hover:text-brand-ink touch-target-sm"
               aria-label="Clear selection"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           )}
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              if (disabled) return;
+              if (open) setOpen(false);
+              else {
+                inputRef.current?.focus();
+                setOpen(true);
+              }
+            }}
+            disabled={disabled}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-brand-gray transition-colors hover:text-brand-ink disabled:cursor-not-allowed touch-target-sm"
+            aria-label={`${open ? "Close" : "Open"} ${ariaLabel || label || "options"}`}
+            aria-expanded={open}
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+          </button>
         </div>
 
         {dropdown && (portalDropdown ? createPortal(dropdown, document.body) : dropdown)}
       </div>
-      {error && <p className="mt-1 text-xs text-brand-danger dark:text-red-400">{error}</p>}
+      {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
     </div>
   );
 }

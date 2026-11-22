@@ -5,6 +5,7 @@ import { deriveStage } from '../config/referralStage.js';
 import { stationsOf } from '../config/rhuStations.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import { validateVitals } from './intake.service.js';
+import { notifyAccountOnce } from './notifications.service.js';
 
 /**
  * Health Supervisor referral coordination service.
@@ -527,7 +528,9 @@ const sanitizeWrite = (payload = {}) => {
       o2sat: optionalNumber(input.o2sat),
     };
     const errors = validateVitals(vitals);
-    if (errors.length) throw ApiError.unprocessable(errors.join(' '));
+    if (Object.keys(errors).length) {
+      throw ApiError.unprocessable(Object.values(errors).join(' '), errors);
+    }
     row.referral_vitals = Object.fromEntries(Object.entries(vitals).filter(([, value]) => value !== null && value !== ''));
   }
   if (payload.impression !== undefined) row.impression = text(payload.impression);
@@ -627,7 +630,20 @@ export const create = async ({ user, payload = {}, fromPhn = false, supabase = g
   row.referring_facility = referringFacilityFor(user, sourceFacilities.data || []);
   if (row.recipient_personnel_id === user.id) throw ApiError.unprocessable('Select another authorized recipient.');
   row.resident_id = resident.id;
-  return write({ user, action: fromPhn ? 'create_phn' : 'create', record: row, supabase });
+  const created = await write({ user, action: fromPhn ? 'create_phn' : 'create', record: row, supabase });
+  if (created.recipient_personnel_id) {
+    await notifyAccountOnce({
+      recipientAuthUserId: created.recipient_personnel_id,
+      category: 'reminder',
+      title: 'New referral received',
+      message: 'A health referral was assigned to you for a resident in your service area.',
+      relatedType: 'health_referral',
+      relatedId: created.id,
+      eventKey: `referral_assigned:${created.id}`,
+      supabase,
+    });
+  }
+  return created;
 };
 
 /** Load an existing referral and confirm it is in the writer's scope. */
@@ -669,6 +685,19 @@ export const update = async ({ user, id, payload = {}, ifMatch = undefined, isSy
   Object.assign(row, await resolveRecipient(supabase, resident, payload, existing));
   if (row.recipient_personnel_id === user.id) throw ApiError.unprocessable('Select another authorized recipient.');
   const updated = await write({ user, id: existing.id, action: 'update', version, record: row, supabase });
+  if (updated.recipient_personnel_id) {
+    const versionKey = updated.version || updated.updated_at || updated.id;
+    await notifyAccountOnce({
+      recipientAuthUserId: updated.recipient_personnel_id,
+      category: 'information',
+      title: 'Referral details updated',
+      message: 'A health referral assigned to you was updated.',
+      relatedType: 'health_referral',
+      relatedId: updated.id,
+      eventKey: `referral_updated:${updated.id}:${versionKey}`,
+      supabase,
+    });
+  }
   if (scheduleChanged) {
     const { error: auditError } = await supabase.from('health_audit_logs').insert({
       actor_id: user.id, action: 'REFERRAL_SCHEDULE_CHANGED', entity_type: 'health_referrals', entity_id: existing.id,
@@ -701,7 +730,23 @@ export const updateStatus = async ({
     throw ApiError.unprocessable('A reason is required for rejection or cancellation.');
   }
   const resolvedVersion = resolveExpectedReferralVersion(version, existing, { isSync, ifMatch });
-  return write({ user, id: existing.id, action: 'status', version: resolvedVersion, record: { status, resolution_notes: text(resolutionNotes) }, supabase });
+  const updated = await write({ user, id: existing.id, action: 'status', version: resolvedVersion, record: { status, resolution_notes: text(resolutionNotes) }, supabase });
+  const recipientAuthUserId = capabilities.is_sender
+    ? existing.recipient_personnel_id
+    : existing.created_by;
+  if (recipientAuthUserId) {
+    await notifyAccountOnce({
+      recipientAuthUserId,
+      category: 'information',
+      title: 'Referral status updated',
+      message: `A health referral was updated to ${status}.`,
+      relatedType: 'health_referral',
+      relatedId: updated.id,
+      eventKey: `referral_status:${updated.id}:${updated.version || updated.updated_at || status}`,
+      supabase,
+    });
+  }
+  return updated;
 };
 
 export const syncSnapshots = async ({ user, id, version, ifMatch = undefined, isSync = false, supabase = getServiceClient() }) => {

@@ -11,9 +11,9 @@ const examples = [
   ['120/89', 'Stage 1 Hypertension'], ['130/75', 'Stage 1 Hypertension'],
   ['135/85', 'Stage 1 Hypertension'], ['139/89', 'Stage 1 Hypertension'],
   ['140/80', 'Stage 2 Hypertension'], ['130/90', 'Stage 2 Hypertension'],
-  ['150/95', 'Stage 2 Hypertension'], ['180/120', 'Stage 2 Hypertension'],
-  ['181/80', 'Severe Hypertension'], ['150/121', 'Severe Hypertension'],
-  ['185/125', 'Severe Hypertension'],
+  ['150/95', 'Stage 2 Hypertension'], ['180/100', 'Hypertensive Crisis'],
+  ['130/120', 'Hypertensive Crisis'], ['181/80', 'Hypertensive Crisis'], ['150/121', 'Hypertensive Crisis'],
+  ['185/125', 'Hypertensive Crisis'], ['85/65', 'Normal'], ['125/55', 'Elevated'],
 ];
 
 test('the configuration API reports effective clinical rules and rejects conflicting settings', async () => {
@@ -22,7 +22,8 @@ test('the configuration API reports effective clinical rules and rejects conflic
   const config = await getBpConfig({ repo });
   assert.deepEqual(config.thresholds, DEFAULT_BP_THRESHOLDS);
   assert.equal(config.categories.find(({ code }) => code === 'stage1').label, 'Stage 1 Hypertension');
-  assert.equal(config.categories.find(({ code }) => code === 'emergency').emergency, true);
+  assert.equal(config.categories.length, 5);
+  assert.equal(config.categories.find(({ code }) => code === 'crisis').label, 'Hypertensive Crisis');
   await assert.rejects(updateThresholds({ user: { role: 'admin' }, repo,
     payload: { ...DEFAULT_BP_THRESHOLDS, stage2SystolicMin: 135 } }), { statusCode: 422 });
 });
@@ -41,7 +42,7 @@ test('all systolic/diastolic threshold crossings select the higher category', ()
   for (const systolic of [110, 119, 120, 129, 130, 139, 140, 180, 181, 250]) {
     for (const diastolic of [20, 59, 70, 79, 80, 89, 90, 119, 120, 121, 200]) {
       if (systolic <= diastolic) continue;
-      const expected = systolic > 180 || diastolic > 120 ? 'crisis'
+      const expected = systolic >= 180 || diastolic >= 120 ? 'crisis'
         : systolic >= 140 || diastolic >= 90 ? 'stage2'
           : systolic >= 130 || diastolic >= 80 ? 'stage1'
             : systolic >= 120 ? 'elevated' : 'normal';
@@ -56,12 +57,12 @@ test('emergency symptoms promote only severe readings and require immediate eval
     'Changes in vision', 'Difficulty speaking', 'New acute chest pressure', 'Slurred speech', 'Seizure']) {
     const context = { findings };
     const result = frontend('185/125', context);
-    assert.equal(result.category, 'Hypertensive Emergency', findings);
+    assert.equal(result.category, 'Hypertensive Crisis', findings);
     assert.equal(result.emergency, true);
     assert.equal(result.urgency, 'immediate');
-    assert.match(result.message, /do not delay emergency care/i);
+    assert.match(result.message, /do not delay (emergency )?care/i);
     assert.equal(backend('150/121', context).emergency, true);
-    assert.equal(frontend('180/120', context).category, 'Stage 2 Hypertension');
+    assert.equal(frontend('180/120', context).category, 'Hypertensive Crisis');
   }
 });
 
@@ -70,7 +71,7 @@ test('negated, historical, hypothetical symptoms do not establish emergency', ()
     'No chest pain or back pain', 'History of chest pain', 'Family history of stroke',
     'If chest pain occurs, seek care', 'Chest pain absent', 'Back pain resolved']) {
     const result = frontend('185/125', { findings });
-    assert.equal(result.category, 'Severe Hypertension', findings);
+    assert.equal(result.category, 'Hypertensive Crisis', findings);
     assert.equal(result.emergency, false);
     assert.equal(result.urgency, 'prompt');
   }

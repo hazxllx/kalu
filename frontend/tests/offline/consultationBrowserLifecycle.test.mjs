@@ -7,6 +7,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
+import { calculateConsultationBmi } from '../../../shared/consultationClinical.js';
+import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixturePath = '/__consultation-browser-test';
@@ -20,6 +22,8 @@ const payload = {
   chiefComplaint: 'Synthetic browser complaint',
   findings: 'Synthetic browser findings',
   diagnosis: 'Synthetic browser diagnosis',
+  bloodPressure: '118/76', temperature: '36.7', pulseRate: '70', respiratoryRate: '18', height: '160', weight: '60', oxygenSaturation: '98',
+  clinicalIndicators: { dangerSignsReviewed: true },
   consultationDetails: { clinicalNote: 'Synthetic immutable note' },
 };
 
@@ -97,7 +101,7 @@ test('Chromium persists and automatically replays one consultation across offlin
       appType: 'custom',
       server: {
         host: '127.0.0.1', port: 0, strictPort: true, hmr: false, open: false, cors: false, watch: null,
-        fs: { allow: [root, cacheDir] },
+        fs: { allow: [root, cacheDir, fileURLToPath(new URL('../../../shared/', import.meta.url))] },
       },
       optimizeDeps: { noDiscovery: true, include: ['dexie'] },
       plugins: [{
@@ -119,6 +123,8 @@ test('Chromium persists and automatically replays one consultation across offlin
                 createdAt: body.recordedAt,
                 consultationEffectsCompletedAt: body.recordedAt,
                 status: 'completed',
+                vitals: { bp: body.bloodPressure, temperature: Number(body.temperature), hr: Number(body.pulseRate), rr: Number(body.respiratoryRate), heightCm: Number(body.height), weightKg: Number(body.weight), o2sat: Number(body.oxygenSaturation), bmi: calculateConsultationBmi(body.height, body.weight) },
+                bloodPressureClassification: classifyBloodPressure(body.bloodPressure),
               });
               return response.writeHead(503).end('Synthetic failure after committing the visit');
             }

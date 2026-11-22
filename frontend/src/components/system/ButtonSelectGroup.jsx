@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 
 /**
  * ButtonSelectGroup — the KALUSAGAP standard single-select button group.
@@ -42,19 +42,19 @@ function normalize(options) {
  */
 const VARIANTS = {
   default: {
-    base: "min-w-0 flex-1 rounded-btn border px-3.5 py-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[7rem]",
+    base: "min-w-0 flex-1 rounded-btn border px-3.5 py-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-1 focus-visible:ring-brand-blue/40 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[7rem]",
     selected: "border-brand-blue bg-brand-blue text-white hover:bg-brand-dark",
     unselectedError: "bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light border-brand-danger",
     unselected: "bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light border-brand-border",
   },
   registration: {
-    base: "min-w-0 flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium outline-none transition-all duration-200 focus-visible:ring-4 focus-visible:ring-brand-blue/20 focus-visible:border-brand-blue disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[7rem]",
+    base: "min-w-0 flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium outline-none transition-all duration-200 focus-visible:ring-1 focus-visible:ring-brand-blue/30 focus-visible:ring-offset-0 focus-visible:border-brand-blue disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[7rem]",
     selected: "border-brand-blue bg-brand-blue text-white shadow-sm hover:bg-brand-dark hover:border-brand-dark",
     unselectedError: "bg-white text-brand-ink hover:border-slate-300 border-brand-danger",
     unselected: "bg-white text-brand-ink hover:border-slate-300 border-slate-200",
   },
   compact: {
-    base: "h-11 min-w-0 flex-1 rounded-btn border px-3 text-sm font-medium outline-none transition-colors focus-visible:border-[#2563EB] focus-visible:ring-2 focus-visible:ring-[#2563EB]/15 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-60",
+    base: "h-11 min-w-0 flex-1 rounded-btn border px-3 text-sm font-medium outline-none transition-colors focus-visible:border-[#2563EB] focus-visible:ring-1 focus-visible:ring-[#2563EB]/30 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-60",
     selected: "border-brand-blue bg-brand-blue text-white hover:bg-brand-dark",
     unselectedError: "border-brand-danger bg-white text-brand-ink hover:border-brand-blue",
     unselected: "border-[#CBD5E1] bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light",
@@ -71,12 +71,14 @@ export default function ButtonSelectGroup({
   error = false,
   id = undefined,
   ariaDescribedby = undefined,
+  onBlur = undefined,
   variant = "default",
   className = "",
 }) {
   const styles = VARIANTS[variant] || VARIANTS.default;
   const items = normalize(options);
   const selectedIndex = items.findIndex((o) => o.value === value);
+  const buttonRefs = useRef([]);
 
   const onKeyDown = (e) => {
     const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
@@ -90,7 +92,9 @@ export default function ButtonSelectGroup({
     const nextPos = forward
       ? (base + 1) % enabled.length
       : (base - 1 + enabled.length) % enabled.length;
-    onChange(items[enabled[nextPos]].value);
+    const nextIndex = enabled[nextPos];
+    onChange(items[nextIndex].value);
+    buttonRefs.current[nextIndex]?.focus();
   };
 
   return (
@@ -101,6 +105,9 @@ export default function ButtonSelectGroup({
       aria-describedby={ariaDescribedby}
       aria-invalid={error || undefined}
       onKeyDown={onKeyDown}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onBlur?.();
+      }}
       className={`mt-1.5 flex flex-wrap gap-2 ${className}`}
     >
       {items.map((opt, idx) => {
@@ -109,6 +116,7 @@ export default function ButtonSelectGroup({
         return (
           <button
             key={String(opt.value) === "" ? `none-${idx}` : String(opt.value)}
+            ref={(element) => { buttonRefs.current[idx] = element; }}
             type="button"
             role="radio"
             aria-checked={selected}

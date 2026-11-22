@@ -108,7 +108,8 @@ const EMPTY_FORM = {
  * @property {number|null} [riskScore]
  * @property {string|null} [riskLevel]
  * @property {string} [riskAssessedAt]
- * @property {Array<{code?: string, name: string, measured?: string|number|null, weight: number}>} [riskFactors]
+ * @property {Array<{code?: string, name?: string, ruleId?: string, message?: string, reference?: string, measured?: string|number|null, weight?: number}>} [riskFactors]
+ * @property {string} [riskReason]
  * @property {string} [age]
  */
 
@@ -1493,7 +1494,7 @@ export default function ResidentsPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Current Risk</p>
-                    <div className="mt-1"><RiskBadge level={selected.riskLevel} /></div>
+                    <div className="mt-1"><RiskBadge level={selected.riskLevel} mediumLabel="Medium" /></div>
                   </div>
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Risk Score</p>
@@ -1508,6 +1509,8 @@ export default function ResidentsPage() {
                     </p>
                   </div>
                 </div>
+                {selected.riskReason && <p className="mt-3 text-xs text-brand-gray">{selected.riskReason}</p>}
+                <p className="mt-2 text-xs text-brand-gray">Risk classification supports clinical decisions and does not replace professional assessment.</p>
 
                 {Array.isArray(selected.riskFactors) && selected.riskFactors.length > 0 ? (
                   <div className="mt-4">
@@ -1523,16 +1526,16 @@ export default function ResidentsPage() {
                         </thead>
                         <tbody>
                           {selected.riskFactors.map((f) => (
-                            <tr key={f.code || f.name} className="border-t border-brand-border">
-                              <td className="px-3 py-2 text-brand-ink">{f.name}</td>
-                              <td className="px-3 py-2 text-brand-gray">{f.measured ?? "Present"}</td>
-                              <td className="px-3 py-2 text-right font-stat font-medium text-brand-ink">+{f.weight}</td>
+                            <tr key={f.code || f.ruleId || f.name || f.message} className="border-t border-brand-border">
+                              <td className="px-3 py-2 text-brand-ink">{f.name || f.message || f.ruleId?.replaceAll("_", " ")}</td>
+                              <td className="px-3 py-2 text-brand-gray">{f.measured ?? f.reference ?? (f.ruleId ? "Clinical decision support" : "Present")}</td>
+                              <td className="px-3 py-2 text-right font-stat font-medium text-brand-ink">{Number.isFinite(f.weight) ? `+${f.weight}` : "Not scored"}</td>
                             </tr>
                           ))}
-                          <tr className="border-t border-brand-border bg-brand-light/20">
+                          {Number.isFinite(selected.riskScore) && <tr className="border-t border-brand-border bg-brand-light/20">
                             <td className="px-3 py-2 font-medium text-brand-ink" colSpan={2}>Total Score</td>
-                            <td className="px-3 py-2 text-right font-stat font-bold text-brand-ink">{selected.riskScore ?? 0}</td>
-                          </tr>
+                            <td className="px-3 py-2 text-right font-stat font-bold text-brand-ink">{selected.riskScore}</td>
+                          </tr>}
                         </tbody>
                       </table>
                     </div>
@@ -1541,7 +1544,7 @@ export default function ResidentsPage() {
                   <p className="mt-3 text-xs text-brand-gray">
                     {selected.riskLevel
                       ? "No individual criteria contributed to this resident's score."
-                      : "No consultation with recorded vitals yet, so no risk has been assessed."}
+                      : "Recorded clinical information is insufficient for an assessed risk level."}
                   </p>
                 )}
               </div>
