@@ -551,8 +551,7 @@ children: [
     },
   ],
 
-  // Admin navigation has six direct links in visual sections (no dropdowns).
-  // Related pages remain tabs; each tab keeps its original route and permission.
+  // Admin destinations are organized into compact visual sections.
   admin: [
     {
       label: "Dashboard",
@@ -605,38 +604,37 @@ children: [
       ],
     },
     {
-      id: "health-system",
-      label: "Health & System Settings",
-      icon: "ShieldAlert",
-      path: "/app/admin/risk-settings",
-      group: "Configuration",
-      tabs: [
-        {
-          label: "Risk & Intervention",
-          icon: "ShieldAlert",
-          path: "/app/admin/risk-settings",
-          // Former routes redirect here; keep them active for highlighting.
-          activePaths: ["/app/admin/risk-assessment", "/app/admin/risk-rules"],
-          permission: "system.settings.manage",
-        },
-        {
-          label: "Medicine & BP",
-          icon: "Pill",
-          path: "/app/admin/medicines",
-          permission: "system.settings.manage",
-        },
-        {
-          label: "Advisories",
-          icon: "Megaphone",
-          path: "/app/admin/advisories",
-        },
-        {
-          label: "System Settings",
-          icon: "Settings",
-          path: "/app/admin/settings",
-          permission: "system.settings.manage",
-        },
+      label: "Risk & Early Intervention",
+      icon: "HeartPulse",
+      path: "/app/admin/risk-early-intervention",
+      activePaths: [
+        "/app/admin/risk-settings",
+        "/app/admin/risk-assessment",
+        "/app/admin/early-intervention",
+        "/app/admin/risk-rules",
       ],
+      permission: "system.settings.manage",
+      group: "Health Configuration",
+    },
+    {
+      label: "Medicine & BP",
+      icon: "Pill",
+      path: "/app/admin/medicines",
+      permission: "system.settings.manage",
+      group: "Health Configuration",
+    },
+    {
+      label: "Advisory Management",
+      icon: "Megaphone",
+      path: "/app/admin/advisories",
+      group: "Communication",
+    },
+    {
+      label: "System Settings",
+      icon: "Settings",
+      path: "/app/admin/settings",
+      permission: "system.settings.manage",
+      group: "System",
     },
     {
       label: "Audit Trail",

@@ -16,7 +16,7 @@ import {
 import { normalizeRegistrationMobile, registrationDateReference } from '../validators/registration.validators.js';
 import { notifyHealthSupervisorsOnce } from './notifications.service.js';
 
-const SELF_ROLES = Object.freeze(['resident', 'resident-limited', 'resident-incomplete']);
+const SELF_ROLES = Object.freeze(['resident', 'resident-limited']);
 
 // Verification states that mean "registration is still in progress and may be
 // safely retried". A retry that happens after the Auth user + resident row

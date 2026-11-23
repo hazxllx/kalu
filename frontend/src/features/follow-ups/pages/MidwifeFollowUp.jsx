@@ -12,7 +12,7 @@ import PriorityBadge from "@/features/follow-ups/components/PriorityBadge";
 import FollowUpStatusBadge, { STATUS_DOTS } from "@/features/follow-ups/components/FollowUpStatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
-import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2, MoreVertical, AlertTriangle } from "lucide-react";
+import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2, MoreVertical, AlertTriangle, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
@@ -1068,9 +1068,10 @@ export default function MidwifeFollowUp() {
       };
       setFollowUps((current) => [newFollowUp, ...current]);
       setShowScheduleModal(false);
-      setToast({ type: "success", message: result?.queued
+      setToast({ type: result?.queued ? "queued" : "success", message: result?.queued
         ? `Follow-up saved on this device for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}. It will sync when a connection is available and may not yet be visible to the resident or other staff.`
         : `Follow-up scheduled successfully for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}.` });
+      if (!result?.queued) void load();
     } catch (err) {
       setToast({ type: "error", message: err?.message || "Could not schedule follow-up." });
     } finally {
@@ -1107,7 +1108,7 @@ export default function MidwifeFollowUp() {
       {/* Toast Notification */}
       {toast && (
         <div className="fixed bottom-4 right-4 z-50 flex animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
-          {toast.type === "error" ? <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-green" aria-hidden="true" />}
+          {toast.type === "error" || toast.type === "queued" ? <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-green" aria-hidden="true" />}
           <span role={toast.type === "error" ? "alert" : "status"} className="text-sm text-white">{toast.message}</span>
         </div>
       )}
@@ -1286,20 +1287,20 @@ export default function MidwifeFollowUp() {
 
       {/* Schedule Follow-up Modal */}
       {showScheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="follow-up-schedule-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <Card
             role="dialog"
             aria-modal="true"
             aria-label={selectedFollowUp ? "Edit Follow-up Schedule" : "Schedule Follow-up"}
-            className={`flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden ${supervisor ? "supervisor-modal supervisor-form" : ""}`}
+            className={`follow-up-schedule-modal flex min-h-0 w-full max-w-[820px] flex-col overflow-hidden ${supervisor ? "supervisor-modal supervisor-form" : ""}`}
           >
             {/* Fixed header */}
-            <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-light">
+            <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-4 py-3 sm:px-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-light">
                   <Calendar className="h-5 w-5 text-brand-blue" strokeWidth={1.8} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-brand-ink">
                     {selectedFollowUp ? "Edit / Reschedule Follow-up" : "Schedule Follow-up"}
                   </h3>
@@ -1309,8 +1310,10 @@ export default function MidwifeFollowUp() {
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowScheduleModal(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink"
+                disabled={saving}
+                className="ml-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink"
                 aria-label="Close modal"
               >
                 <X className="w-4 h-4" />
@@ -1318,8 +1321,8 @@ export default function MidwifeFollowUp() {
             </div>
 
             {/* Scrollable form body */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="space-y-5">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+              <div className="space-y-4">
                 {/* RESIDENT */}
                 {!selectedFollowUp && <section>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Resident</p>
@@ -1369,7 +1372,7 @@ export default function MidwifeFollowUp() {
                 <section>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Follow-up Details</p>
                   <div className="space-y-3.5">
-                    <div className="grid gap-3.5 sm:grid-cols-2">
+                    <div className="grid gap-3 md:grid-cols-2">
                       <div>
                         <label htmlFor="followup-schedule-date" className="mb-1.5 block text-sm font-medium text-brand-ink">
                           Follow-up Date <span className="text-red-500">*</span>
@@ -1395,7 +1398,7 @@ export default function MidwifeFollowUp() {
                         <label htmlFor={supervisor ? "followup-schedule-time" : undefined} className="mb-1.5 block text-sm font-medium text-brand-ink">
                           Follow-up Time <span className="text-red-500">*</span>
                         </label>
-                        {supervisor ? <input id="followup-schedule-time" type="time" value={scheduleForm.time} onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })} className={inputCls(scheduleErrors.time)} /> : <TimePicker
+                        {supervisor ? <input id="followup-schedule-time" type="time" value={scheduleForm.time} onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })} onBlur={() => setTouched((t) => ({ ...t, time: true }))} className={inputCls(scheduleErrors.time)} /> : <TimePicker
                           value={scheduleForm.time}
                           onChange={(time) => setScheduleForm({ ...scheduleForm, time })}
                           error={Boolean(scheduleErrors.time)}
@@ -1405,7 +1408,7 @@ export default function MidwifeFollowUp() {
                         )}
                       </div>
                     </div>
-                    <div className="grid gap-3.5 sm:grid-cols-2">
+                    <div className={`grid gap-3 ${supervisor ? "grid-cols-1" : "md:grid-cols-2"}`}>
                       {!supervisor && <div>
                         <label className="mb-1.5 block text-sm font-medium text-brand-ink">Follow-up Type</label>
                         <select
@@ -1418,7 +1421,7 @@ export default function MidwifeFollowUp() {
                           ))}
                         </select>
                       </div>}
-                      <div>
+                      <div className={supervisor ? "md:max-w-[240px]" : ""}>
                         <label htmlFor="followup-schedule-priority" className="mb-1.5 block text-sm font-medium text-brand-ink">Priority</label>
                         <select
                           id="followup-schedule-priority"
@@ -1454,7 +1457,7 @@ export default function MidwifeFollowUp() {
                       <textarea id="followup-schedule-change-reason" rows={2} value={scheduleForm.scheduleChangeReason} onChange={(e) => setScheduleForm({ ...scheduleForm, scheduleChangeReason: e.target.value })} className={inputCls(scheduleErrors.scheduleChangeReason)} placeholder="Explain why this schedule needs to change" />
                       {scheduleErrors.scheduleChangeReason && <p className="mt-1 text-xs text-red-600">{scheduleErrors.scheduleChangeReason}</p>}
                     </div>}
-                    <div className="grid gap-3.5 sm:grid-cols-2">
+                    <div className="grid gap-3 md:grid-cols-2">
                       <div>
                         <label htmlFor="followup-location" className="mb-1.5 block text-sm font-medium text-brand-ink">Location</label>
                         <select
@@ -1507,7 +1510,7 @@ export default function MidwifeFollowUp() {
             </div>
 
             {/* Status hint strip */}
-            <div className="shrink-0 border-t border-brand-border bg-brand-bg/60 px-6 py-2.5">
+            <div className="shrink-0 border-t border-brand-border bg-brand-bg/60 px-4 py-2 sm:px-6">
               <p className="flex flex-wrap items-center gap-2 text-xs text-brand-gray">
                 <FollowUpStatusBadge value={deriveStatus(scheduleForm.date)} showDot={false} className="shrink-0" />
                 <span>
@@ -1519,28 +1522,30 @@ export default function MidwifeFollowUp() {
             </div>
 
             {/* Fixed footer */}
-            <div className="flex shrink-0 justify-end gap-3 bg-white px-6 py-4">
+            <div className="flex shrink-0 justify-end gap-3 bg-white px-4 py-3 sm:px-6 sm:py-4 max-[767px]:flex-col">
               <button
+                type="button"
                 onClick={() => {
                   setShowScheduleModal(false);
                   setSelectedFollowUp(null);
                   setSelectedResident(null);
                 }}
                 disabled={saving}
-                className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
+                className="rounded-btn px-4 py-2.5 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg max-[767px]:w-full"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleSchedule}
                 disabled={!canSchedule || saving}
-                className={`px-4 py-2 rounded-btn text-sm font-medium transition-colors ${
+                className={`rounded-btn px-4 py-2.5 text-sm font-medium transition-colors max-[767px]:w-full ${
                   canSchedule && !saving
                     ? "bg-brand-blue text-white hover:bg-brand-dark"
                     : "cursor-not-allowed bg-brand-blue/50 text-white"
                 }`}
               >
-                {saving ? "Saving..." : selectedFollowUp ? "Save Changes" : "Schedule Follow-up"}
+                {saving ? selectedFollowUp ? "Saving..." : <><Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden="true" />Scheduling...</> : selectedFollowUp ? "Save Changes" : "Schedule Follow-up"}
               </button>
             </div>
           </Card>

@@ -67,6 +67,9 @@ const destinationFor = (notification, role) => {
   if (notification.relatedType === "consultation" && role === "resident") {
     return "/app/resident/record";
   }
+  if (notification.relatedType === "immunizations" && role === "resident") {
+    return "/app/resident/record";
+  }
   if (["resident_registration", "resident_registration_review"].includes(notification.relatedType)
     && role === "health_supervisor") {
     return notification.relatedType === "resident_registration_review"
@@ -105,6 +108,7 @@ const actionLabelFor = (notification, role) => {
     return ["resident", "resident-limited"].includes(role) ? "View submitted request" : "Open transfer request";
   }
   if (notification?.relatedType === "health_referral") return "View referral";
+  if (notification?.relatedType === "immunizations" && role === "resident") return "View immunization";
   if (["follow_up_assigned", "follow_up_updated", "follow_ups"].includes(notification?.relatedType)) return "View follow-ups";
   if (notification?.relatedType === "resident_registration_review") return "Review registration";
   if (notification?.relatedType === "resident_registration") return "View residents";

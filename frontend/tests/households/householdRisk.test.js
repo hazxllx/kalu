@@ -32,7 +32,7 @@ test("parity: documented factor combinations match the server model", () => {
   assert.deepEqual({ score: a.score, level: a.level }, { score: 60, level: "High" });
 
   const b = computeHouseholdRisk({ waterSource: "level1", toilet: "open_pit" });
-  assert.deepEqual({ score: b.score, level: b.level }, { score: 55, level: "Moderate" });
+  assert.deepEqual({ score: b.score, level: b.level }, { score: 55, level: "High" });
 
   const c = computeHouseholdRisk({ waterSource: "level2", toilet: "ws_shared", sanitationAccess: "Shared with other household" });
   assert.deepEqual({ score: c.score, level: c.level }, { score: 35, level: "Low" });

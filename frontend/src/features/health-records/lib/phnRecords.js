@@ -98,7 +98,6 @@ export const clinicalErrors = (payload, { required = true, encounterDate = paylo
   if (required) {
     if (!text(payload.chiefComplaint)) errors.chiefComplaint = 'Chief complaint is required.';
     if (!text(payload.findings)) errors.findings = 'Clinical findings are required.';
-    if (payload.clinicalIndicators?.dangerSignsReviewed !== true) errors['clinicalIndicators.dangerSignsReviewed'] = 'Confirm that clinical history, pregnancy status and danger signs were reviewed.';
   }
   if ((payload.followUpRequired === 'Yes' || payload.nextVisitDate)
     && (validateConsultationDateTime({ consultationDate: payload.nextVisitDate }).consultationDate || (encounterDate && payload.nextVisitDate < encounterDate))) errors.nextVisitDate = 'Set a valid follow-up date on or after the encounter.';

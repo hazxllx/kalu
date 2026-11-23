@@ -244,10 +244,9 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
   if (state && state.hasResidentRecord === false) {
     return (
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-        <Card className="border-slate-200 p-6">
-          <p className="text-sm font-semibold text-brand-ink">No resident record is linked to your account yet.</p>
-          <p className="mt-1 text-sm text-brand-gray">
-            Please contact your Barangay Health Station or the RHU so your resident record can be completed.
+        <Card className="border-blue-200 bg-blue-50 p-4 sm:p-5">
+          <p className="text-sm leading-relaxed text-brand-ink">
+            Your resident registration is awaiting completion. Your account information is available, but resident-specific health services will become accessible after verification.
           </p>
         </Card>
       </motion.div>

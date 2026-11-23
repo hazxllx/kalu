@@ -24,15 +24,19 @@ import asyncHandler from '../utils/asyncHandler.js';
  * Request pipeline:
  *   route -> authenticate -> authorize(roles [, permission]) -> [validate | uploadMiddleware] -> controller -> service -> Supabase (RLS)
  *
- * Read routes require `FEATURE_ROLES.healthServicesRead` (all staff who can be
- * assigned a service); management routes require `FEATURE_ROLES.healthServices`
- * (MHO / PHN / Health Supervisor). The service enforces municipality/barangay
- * scope, and Supabase RLS enforces the same visibility boundary independently.
+ * The collection route also permits authenticated residents to read a reduced
+ * public catalog within their profile municipality/barangay. Other read routes
+ * require staff `FEATURE_ROLES.healthServicesRead`; management routes require
+ * `FEATURE_ROLES.healthServices`. Scope is enforced server-side and by RLS.
  */
 const router = Router();
 
 // Reusable auth + RBAC middleware stacks partitioned by read vs management permissions.
 const readers = [authenticate, authorize(FEATURE_ROLES.healthServicesRead)];
+const catalogReaders = [
+  authenticate,
+  authorize([...FEATURE_ROLES.healthServicesRead, ...FEATURE_ROLES.residentSelf]),
+];
 const managerReaders = [
   authenticate,
   authorize(FEATURE_ROLES.healthServices, { anyPermission: ['services.create', 'services.edit'] }),
@@ -53,8 +57,8 @@ router.get('/reference', ...managerReaders, asyncHandler(controller.reference));
 router.get('/personnel', ...managerReaders, asyncHandler(controller.personnel));
 // GET /api/health-services/attendance — Query service attendance logs (`readers` + `attendanceListQueryValidator` on `req.query`).
 router.get('/attendance', ...readers, validate(attendanceListQueryValidator, 'query'), asyncHandler(controller.listAttendance));
-// GET /api/health-services — List health services visible within the caller's municipality/barangay scope (`readers`).
-router.get('/', ...readers, asyncHandler(controller.list));
+// GET /api/health-services — Staff catalog or resident-safe public catalog, each profile-scoped server-side.
+router.get('/', ...catalogReaders, asyncHandler(controller.list));
 // PATCH /api/health-services/attendance/:id — Update an attendance record (`editors` + `attendanceIdParam` + `updateAttendanceValidator`).
 router.patch('/attendance/:id', ...editors, attendanceIdParam, validate(updateAttendanceValidator), asyncHandler(controller.updateAttendance));
 // GET /api/health-services/:id/registrations — List resident visit intents/registrations for service `:id` (`readers` + `idParam`).

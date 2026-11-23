@@ -10,14 +10,14 @@ test('backend referral date validation compares the referral date in the user ti
     referral_date: '2026-10-15',
     client_time_zone: 'Asia/Manila',
   }, { now }));
-  assert.throws(() => assertReferralDates({
+  assert.doesNotThrow(() => assertReferralDates({
     referral_date: '2026-10-16',
     client_time_zone: 'Asia/Manila',
-  }, { now }), /Referral date cannot be later than today/);
+  }, { now }));
   assert.throws(() => assertReferralDates({
-    referral_date: '2026-10-16',
+    referral_date: '2026-10-14',
     client_time_zone: 'UTC',
-  }, { now }), /Referral date cannot be later than today/);
+  }, { now }), /Referral date cannot be earlier than today/);
 });
 
 test('backend rejects yesterday, earlier today and the exact current time', () => {

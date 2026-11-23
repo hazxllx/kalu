@@ -16,7 +16,7 @@ import {
   rejectResident,
   requestResubmission,
 } from "@/services/api/verificationsApi";
-import { CheckCircle2, ChevronRight, History } from "lucide-react";
+import { CheckCircle2, Eye, History } from "lucide-react";
 
 /**
  * Health Supervisor resident-verification page.
@@ -69,8 +69,8 @@ export default function PendingVerifications({
   const [page, setPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
 
-  const loadQueue = useCallback(async () => {
-    setLoading(true);
+  const loadQueue = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     setError("");
     try {
       const { rows: data, total: resultTotal } = await fetchVerificationQueue({
@@ -83,11 +83,13 @@ export default function PendingVerifications({
       setTotal(resultTotal);
       if (tab === "pending" && !query.trim()) onPendingCount?.(pendingCountKey, resultTotal);
     } catch (err) {
-      setRows([]);
-      setTotal(0);
+      if (!quiet) {
+        setRows([]);
+        setTotal(0);
+      }
       setError(err?.message || "We could not load the verification queue. Please try again.");
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [onPendingCount, page, pendingCountKey, query, tab]);
 
@@ -103,6 +105,20 @@ export default function PendingVerifications({
 
   useEffect(() => {
     loadQueue();
+  }, [loadQueue]);
+
+  useEffect(() => {
+    let active = true;
+    let timeoutId;
+    const refreshQueue = async () => {
+      await loadQueue({ quiet: true });
+      if (active) timeoutId = window.setTimeout(refreshQueue, 30_000);
+    };
+    timeoutId = window.setTimeout(refreshQueue, 30_000);
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
   }, [loadQueue]);
 
   useEffect(() => {
@@ -207,7 +223,7 @@ export default function PendingVerifications({
                   <th scope="col" style={{ width: "19%" }}>Submitted</th>
                   <th scope="col" style={{ width: "15%" }}>Reference no.</th>
                   <th scope="col" style={{ width: "15%" }}>Status</th>
-                  <th scope="col" className="is-narrow text-right">Action</th>
+                  <th scope="col" className="is-narrow text-center">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -235,13 +251,14 @@ export default function PendingVerifications({
                     <td>
                       <VerificationBadge status={r.status} size="sm" />
                     </td>
-                    <td className="text-right">
+                    <td className="text-center">
                       <button
                         type="button"
                         onClick={() => openReview(r)}
-                        className="inline-flex items-center gap-1.5 rounded-btn px-2.5 py-1.5 text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-btn bg-brand-blue px-3 text-xs font-semibold text-white transition-colors hover:bg-brand-blue/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
                       >
-                        View Request <ChevronRight className="h-3.5 w-3.5" />
+                        <Eye className="h-3.5 w-3.5" />
+                        Review
                       </button>
                     </td>
                   </motion.tr>
@@ -274,13 +291,14 @@ export default function PendingVerifications({
                   <dt>Status</dt>
                   <dd><VerificationBadge status={r.status} size="sm" /></dd>
                 </div>
-                <div className="card-action">
+                <div className="card-action flex justify-end">
                   <button
                     type="button"
                     onClick={() => openReview(r)}
-                    className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-btn border border-brand-border px-3 text-[13px] font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:hover:bg-card-nested sm:w-auto"
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-btn bg-brand-blue px-3 text-xs font-semibold text-white transition-colors hover:bg-brand-blue/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
                   >
-                    View Request <ChevronRight className="h-4 w-4" />
+                    <Eye className="h-3.5 w-3.5" />
+                    Review
                   </button>
                 </div>
               </li>

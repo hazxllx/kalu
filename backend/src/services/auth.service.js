@@ -54,7 +54,7 @@ const residentRegistrationProjection = async (profileUser) => {
   if (!resident) {
     return {
       ...profileUser,
-      role: 'resident-incomplete',
+      role: 'resident-limited',
       status: 'incomplete_registration',
       registrationStatus: 'incomplete',
       residentId: null,

@@ -223,6 +223,7 @@ const recomputeRisk = (household, patch = {}, members) => {
   const flags = householdFlags({
     waterSource: patch.waterSource ?? household.waterSource,
     toilet: patch.toiletType ?? household.toiletType,
+    sanitationAccess: patch.sanitationAccess ?? household.sanitationAccess,
     members: roster.map((m) => ({ name: m.name, age: m.age, philhealth: m.philhealth })),
   });
   return { riskScore: computed.score, riskLevel: computed.level, riskFactors: computed.factors, flags };

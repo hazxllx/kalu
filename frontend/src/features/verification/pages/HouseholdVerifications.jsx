@@ -33,6 +33,7 @@ const toRow = (h) => ({
   ref: h.id,
   head: h.headName || h.head || "—",
   barangay: h.barangay || "",
+  purok: h.purok || "",
   members: Array.isArray(h.members) ? h.members.length : h.members ?? 0,
   families: h.families ?? 1,
   verificationStatus: h.verificationStatus || "Pending Verification",
@@ -65,6 +66,7 @@ const toDrawer = (h) => ({
   })),
   collector: h.collectorName || "—",
   collectedOn: h.createdAt ? new Date(h.createdAt).toLocaleDateString() : "—",
+  verificationStatus: h.verificationStatus || "Pending Verification",
   riskLevel: canonicalRiskLevel(h.riskLevel) || "Unassessed",
   lastUpdated: h.updatedAt ? new Date(h.updatedAt).toLocaleDateString() : "—",
 });
@@ -93,6 +95,8 @@ export default function HouseholdVerifications({
   const [statusFilter, setStatusFilter] = useState("pending");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [barangayFilter, setBarangayFilter] = useState("all");
+  const [purokFilter, setPurokFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [reviewing, setReviewing] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -133,11 +137,22 @@ export default function HouseholdVerifications({
     [households]
   );
 
+  const barangayOptions = useMemo(
+    () => [...new Set(households.map((h) => h.barangay).filter(Boolean))].sort(),
+    [households],
+  );
+  const purokOptions = useMemo(
+    () => [...new Set(households.flatMap((h) => h.purok ? [h.purok] : []).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true })),
+    [households],
+  );
+
   const filtered = useMemo(() => {
     const selectedStatus = HOUSEHOLD_STATUS_FILTERS.find((filter) => filter.value === statusFilter);
     const normalizedQuery = query.trim().toLowerCase();
     return households.filter((household) => {
       if (household.verificationStatus !== selectedStatus?.match) return false;
+      if (barangayFilter !== "all" && household.barangay !== barangayFilter) return false;
+      if (purokFilter !== "all" && household.purok !== purokFilter) return false;
       if (
         normalizedQuery &&
         ![household.head, household.householdId, household.ref, household.barangay]
@@ -147,7 +162,7 @@ export default function HouseholdVerifications({
       if (dateTo && (!household.createdAt || household.createdAt.slice(0, 10) > dateTo)) return false;
       return true;
     });
-  }, [dateFrom, dateTo, households, query, statusFilter]);
+  }, [barangayFilter, dateFrom, dateTo, households, purokFilter, query, statusFilter]);
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   useEffect(() => {
@@ -215,9 +230,31 @@ export default function HouseholdVerifications({
           onStatusChange={(value) => { setPage(1); setStatusFilter(value); }}
           searchValue={query}
           onSearchChange={(value) => { setPage(1); setQuery(value); }}
-          searchPlaceholder="Search households by head, ID, or barangay"
+          searchPlaceholder="Search by household head, household ID, or barangay"
           resultText={loading ? "Loading…" : `${filtered.length} household${filtered.length === 1 ? "" : "s"}`}
         >
+          <label className="sr-only" htmlFor="household-barangay-filter">Barangay</label>
+          <select
+            id="household-barangay-filter"
+            value={barangayFilter}
+            onChange={(event) => { setPage(1); setBarangayFilter(event.target.value); }}
+            className="h-10 w-full rounded-input border border-brand-border bg-white px-3 text-sm text-brand-ink outline-none sm:w-auto"
+            aria-label="Barangay"
+          >
+            <option value="all">All Barangays</option>
+            {barangayOptions.map((barangay) => <option key={barangay} value={barangay}>{barangay}</option>)}
+          </select>
+          <label className="sr-only" htmlFor="household-purok-filter">Purok / Zone</label>
+          <select
+            id="household-purok-filter"
+            value={purokFilter}
+            onChange={(event) => { setPage(1); setPurokFilter(event.target.value); }}
+            className="h-10 w-full rounded-input border border-brand-border bg-white px-3 text-sm text-brand-ink outline-none sm:w-auto"
+            aria-label="Purok / Zone"
+          >
+            <option value="all">All Zones</option>
+            {purokOptions.map((purok) => <option key={purok} value={purok}>{purok}</option>)}
+          </select>
           <label className="sr-only" htmlFor="household-date-from">Submitted from</label>
           <input
             id="household-date-from"

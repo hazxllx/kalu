@@ -149,7 +149,6 @@ test('P0-3: add, update, and remove member recompute and persist parent risk (at
     assert.ok(added.household.riskFactors.some((f) => /Pregnant/i.test(f)));
     assert.ok(added.household.riskFactors.some((f) => /PWD/i.test(f)));
     assert.deepEqual(added.household.flags, [
-      'Sanitation Risk',
       'Verify PhilHealth enrollment for Ana Cruz',
     ]);
 
@@ -167,7 +166,7 @@ test('P0-3: add, update, and remove member recompute and persist parent risk (at
     assert.equal(updated.household.riskScore, 50);
     assert.equal(updated.household.riskLevel, 'Moderate');
     assert.ok(updated.household.riskFactors.some((f) => /Senior citizen/i.test(f)));
-    assert.deepEqual(updated.household.flags, ['Sanitation Risk']);
+    assert.deepEqual(updated.household.flags, []);
 
     // 3. Remove the added member -> reverts back to 30 (Low)
     const removed = await removeHouseholdMember({
@@ -179,7 +178,7 @@ test('P0-3: add, update, and remove member recompute and persist parent risk (at
     assert.equal(removed.success, true);
     assert.equal(removed.household.riskScore, 30);
     assert.equal(removed.household.riskLevel, 'Low');
-    assert.deepEqual(removed.household.flags, ['Sanitation Risk']);
+    assert.deepEqual(removed.household.flags, []);
 
     if (withAtomic) {
       assert.deepEqual(repo.atomicCalls.map((c) => c.op), ['add', 'update', 'remove']);
@@ -295,7 +294,7 @@ test('P0-3: Postgres atomic RPCs update member + risk in one transaction and rol
     assert.equal(addRes.household.risk_score, 45);
     assert.equal(addRes.household.risk_level, 'Moderate');
     assert.equal(addRes.household.revision, 2);
-    assert.equal(addRes.household.flags.length, 1);
+    assert.equal(addRes.household.flags.length, 0);
 
     // Transaction rollback guarantee: if risk update violates CHECK constraint, the member insert MUST roll back too!
     await assert.rejects(

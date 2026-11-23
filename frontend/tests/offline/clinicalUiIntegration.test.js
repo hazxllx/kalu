@@ -487,6 +487,8 @@ test('TBRecords.jsx: online cache -> offline view, search, status filter & indic
   const { mod, cleanup } = await compileComponent('features/health-records/pages/TBRecords.jsx', {
     useAuth: () => ({ user: { id: OWNER_A, role: 'health_supervisor', assignedBarangay: 'San Jose' } }),
     useSyncStatus: () => ({ online, lastSyncedAt: 1700000000000 }),
+    DateRangeFilter: () => null,
+    matchesDateRange: () => true,
     tclApi: { list: async () => { if (!online) throw networkFailure(); return { rows }; } },
   });
   let renderer;

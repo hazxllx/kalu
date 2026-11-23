@@ -25,13 +25,17 @@ import {
   navItemIsActive,
 } from "@/lib/navConfig";
 import { homeForRole } from "@/lib/roles";
-import { notificationsApi } from "@/services/api";
+import { bpConfigApi, notificationsApi } from "@/services/api";
+import { useToast } from "@/components/ui/use-toast";
+import { subscribeBloodPressureConfig } from "../../../shared/bloodPressure.js";
 import { onUnreadChanged } from "@/services/notifications/unreadBus";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { hasValidPermissionSnapshot, permissionNotice, routePermissionsAllowed } from "@/services/accessControl/permissionAccess";
 import { isNavigatorOnline } from "@/services/offline/connectivity";
 import { getSupervisorScope } from "@/lib/supervisorScope";
+
+const BP_CONFIG_READ_ROLES = new Set(["admin", "mho", "phn", "health_supervisor", "rhu_personnel"]);
 
 /**
  * Main application shell for authenticated users.
@@ -61,6 +65,8 @@ export default function DashboardLayout({ roleKey }) {
   const navigate = useNavigate();
   const { user, logout, refreshProfile } = useAuth();
   const { can, matrixLoadState, refreshMatrix } = usePermissions();
+  const { toast } = useToast();
+  const [, setBpConfigRevision] = useState(0);
   const isSupervisor = roleKey === "health_supervisor";
   const assignedBarangay = getSupervisorScope(user)?.assignedBarangay;
 
@@ -90,6 +96,27 @@ export default function DashboardLayout({ roleKey }) {
     document.body.classList.add("admin-density");
     return () => document.body.classList.remove("admin-density");
   }, [roleKey]);
+
+  useEffect(() => {
+    if (!BP_CONFIG_READ_ROLES.has(roleKey)) return undefined;
+    let active = true;
+    const unsubscribe = subscribeBloodPressureConfig(() => {
+      if (active) setBpConfigRevision((revision) => revision + 1);
+    });
+    bpConfigApi.get().catch((err) => {
+      if (active) {
+        toast({
+          variant: "destructive",
+          title: "Blood-pressure configuration unavailable",
+          description: err?.message || "Clinical readings are using the default thresholds until settings can be loaded.",
+        });
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [roleKey, user?.id, toast]);
 
   // Track online/offline status for connectivity indicator
   useEffect(() => {
@@ -353,7 +380,7 @@ export default function DashboardLayout({ roleKey }) {
 
   const NavList = ({ collapsed = false } = {}) => {
     const adminNav = roleKey === "admin";
-    const compact = roleKey === "health_supervisor";
+    const compact = roleKey === "health_supervisor" || roleKey === "resident-limited";
     const rowSize = collapsed
       ? "min-h-10"
       : adminNav
@@ -471,7 +498,7 @@ export default function DashboardLayout({ roleKey }) {
           className={`app-nav-item supervisor-nav-item group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-[color,background-color,padding,gap] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
             active
               ? adminNav
-                ? "bg-brand-light text-brand-blue font-medium dark:bg-brand-blue/20"
+                ? "relative before:absolute before:bottom-1/4 before:left-0 before:top-1/4 before:w-0.5 before:rounded-r before:bg-brand-dark before:content-[''] bg-brand-light text-brand-blue font-medium dark:bg-brand-blue/20"
                 : "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
               : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
           }`}
@@ -501,7 +528,10 @@ export default function DashboardLayout({ roleKey }) {
     // Keep account destinations in the fixed footer so they remain easy to
     // reach without interrupting the role-specific feature navigation.
     const visibleItems = items.filter(
-      (item) => !item.hidden && item.path !== profilePath && item.path !== settingsPath,
+      (item) =>
+        !item.hidden &&
+        item.path !== profilePath &&
+        (item.path !== settingsPath || (adminNav && item.label === "System Settings")),
     );
     const blocks = visibleItems.reduce((acc, it) => {
       const last = acc[acc.length - 1];
@@ -518,7 +548,7 @@ export default function DashboardLayout({ roleKey }) {
     }, []);
 
     return (
-      <div className={adminNav ? "space-y-2" : compact ? "space-y-0.5" : "space-y-1"}>
+      <div className={adminNav ? "space-y-1" : compact ? "space-y-0.5" : "space-y-1"}>
         {blocks.map((block, i) => (
           <div
             key={block.group || `block-${i}`}
@@ -577,13 +607,13 @@ export default function DashboardLayout({ roleKey }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -5 }}
             transition={{ duration: 0.16, ease: "easeOut" }}
-            className={roleKey === "admin" ? "min-w-0 flex-1" : "min-w-0"}
+            className="min-w-0 flex-1"
           >
             <p className="font-display text-[15px] font-bold leading-tight tracking-[0.03em] text-brand-dark dark:text-foreground">
               KALUSAGAP
             </p>
             <p className={`mt-0.5 font-medium uppercase leading-tight text-brand-gray dark:text-slate-400 ${roleKey === "admin" ? "text-[10px] tracking-[0.03em]" : "truncate text-[9.5px] tracking-[0.12em]"}`}>
-              {isSupervisor ? "Municipal Health Office" : "Community Health System"}
+              {isSupervisor ? "Municipal Health Office" : roleKey === "resident-limited" ? "Community Health Portal" : "Community Health System"}
             </p>
           </motion.div>
         )}
@@ -595,7 +625,7 @@ export default function DashboardLayout({ roleKey }) {
     <div className="space-y-1">
       {[
         { label: "Profile", path: profilePath, IconComponent: User },
-        { label: "Settings", path: settingsPath, IconComponent: Settings },
+        ...(roleKey === "admin" ? [] : [{ label: "Settings", path: settingsPath, IconComponent: Settings }]),
       ].map(({ label, path, IconComponent }) => {
         const active = location.pathname === path || location.pathname.startsWith(`${path}/`);
         return (
@@ -632,7 +662,7 @@ export default function DashboardLayout({ roleKey }) {
   return (
     <div className={`kalusagap-shell min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""} ${roleKey === "admin" ? "admin-shell" : ""}`}>
       <aside
-        className={`app-sidebar hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : roleKey === "admin" || isSupervisor ? "w-64" : "w-72"}`}
+        className={`app-sidebar hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : roleKey === "admin" ? "w-[272px]" : isSupervisor ? "w-64" : "w-72"}`}
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
       >
         {/* Brand header — fixed */}
@@ -654,16 +684,15 @@ export default function DashboardLayout({ roleKey }) {
         {/* Scrollable navigation */}
         <nav
           aria-label="Main navigation"
-          className={`nav-scroll min-h-0 flex-1 overflow-y-auto ${roleKey === "admin" ? "py-2" : "py-3"} ${sidebarCollapsed ? "overflow-x-visible px-2" : "px-3"}`}
+          className={`nav-scroll min-h-0 flex-1 ${roleKey === "admin" ? "overflow-y-auto py-1" : roleKey === "resident-limited" ? "overflow-y-auto py-2" : "overflow-y-auto py-3"} ${sidebarCollapsed ? "overflow-x-visible px-2" : "px-3"}`}
         >
           <NavList collapsed={sidebarCollapsed} />
 
-          {/* Bottom padding so the final nav item is always reachable */}
-          <div className="h-2" aria-hidden="true" />
+          {roleKey !== "admin" && <div className="h-2" aria-hidden="true" />}
         </nav>
 
          {/* Fixed account footer */}
-         <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
+         <div className={`shrink-0 border-t border-slate-200 bg-white dark:border-border dark:bg-sidebar ${roleKey === "admin" ? "p-1.5" : "p-2"}`}>
            <SidebarAccountLinks collapsed={sidebarCollapsed} />
            <button
             onClick={() => logout()}
@@ -737,7 +766,7 @@ export default function DashboardLayout({ roleKey }) {
         )}
       </AnimatePresence>
 
-      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : roleKey === "admin" || isSupervisor ? "lg:pl-64" : "lg:pl-72"}`}>
+      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : roleKey === "admin" ? "lg:pl-[272px]" : isSupervisor ? "lg:pl-64" : "lg:pl-72"}`}>
         <header className={`app-header sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 ${roleKey === "admin" ? "md:px-5" : "md:px-6"}`}>
           <button
             onClick={() => setOpen(true)}
@@ -790,7 +819,7 @@ export default function DashboardLayout({ roleKey }) {
                   </p>
 
                   <p className="text-[11px] text-slate-500">
-                    {role.label}
+                    {roleKey === "resident-limited" ? "Pending Verification" : role.label}
                   </p>
                 </div>
 
@@ -818,7 +847,7 @@ export default function DashboardLayout({ roleKey }) {
                           </p>
 
                           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                            {role.label}
+                            {roleKey === "resident-limited" ? "Pending Verification" : role.label}
                           </p>
 
                           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
@@ -835,11 +864,11 @@ export default function DashboardLayout({ roleKey }) {
                           label: "Profile",
                           to: profilePath,
                         },
-                        {
+                        ...(roleKey === "admin" ? [] : [{
                           icon: Settings,
                           label: "Settings",
                           to: settingsPath,
-                        },
+                        }]),
                         // BUG-021: the "Help Center" item pointed at "#"
                         // (dead link). There is no Help Center destination,
                         // so it is removed rather than left as a misleading
@@ -879,7 +908,7 @@ export default function DashboardLayout({ roleKey }) {
           </div>
         </header>
 
-        <main className={`app-main mx-auto min-w-0 ${roleKey === "admin" ? "admin-content max-w-content px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : ["resident", "resident-limited"].includes(roleKey) ? "max-w-[1180px] px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
+        <main className={`app-main mx-auto min-w-0 ${roleKey === "admin" ? "admin-content max-w-content px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : roleKey === "resident-limited" ? "max-w-[1180px] px-4 py-4 sm:px-5 sm:py-5 md:px-6 md:py-6" : roleKey === "resident" ? "max-w-[1180px] px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
           {notice && (!routePermissions || permissionsReady) && (
             <div
               className={`mb-4 flex flex-wrap items-center justify-between gap-3 border px-4 py-2 text-xs ${permissionsReady ? "border-amber-300 bg-amber-50 text-amber-950" : "border-brand-danger/30 bg-white text-brand-ink"}`}

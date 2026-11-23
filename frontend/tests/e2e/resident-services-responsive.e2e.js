@@ -14,6 +14,7 @@ const service = {
   id: 'synthetic-service', name: 'Community Health Assessment and Nutrition Service',
   description: 'Eligibility, schedule, and instructions for synthetic residents. '.repeat(8),
   facilityName, availability: { open: true }, weekdays: [1, 3, 5],
+  schedule: { startDate: '2030-11-20', endDate: '2030-11-22', registrationDeadline: '2030-11-19' },
   windowStart: '08:00', windowEnd: '17:00',
   pubmatUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="125"%3E%3C/svg%3E',
   memo: { url: 'https://synthetic.invalid/memo', filename: 'Synthetic memorandum', mimeType: 'text/plain' },
@@ -113,10 +114,17 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await expect(page.getByRole('dialog')).toBeVisible();
       await fits(page, page.getByRole('dialog').locator('.relative'));
       await page.getByRole('button', { name: 'Close image preview' }).click();
-      await expect(page.getByRole('button', { name: /View memorandum/ })).toBeHidden();
       await page.getByRole('button', { name: 'View details', exact: true }).click();
+      let details = page.getByRole('dialog', { name: service.name });
+      await expect(details).toBeVisible();
+      await expect(details).toContainText(service.description.trim());
+      await fits(page, details);
       await page.getByRole('button', { name: /View memorandum/ }).click();
-      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.getByRole('dialog', { name: /memorandum/ })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(details).toHaveCount(0);
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
+      details = page.getByRole('dialog', { name: service.name });
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await page.getByLabel('Availability', { exact: true }).selectOption('closed');
@@ -125,18 +133,36 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await page.getByLabel('Facility', { exact: true }).selectOption('rhu');
       await expect(page.getByText('No services match these filters.')).toBeVisible();
       await page.getByLabel('Facility', { exact: true }).selectOption('bhc');
+      await page.getByRole('button', { name: /Date Range:/ }).click();
+      await page.getByLabel('Calendar month').selectOption('10');
+      await page.getByLabel('Calendar year').selectOption('2030');
+      await page.getByRole('gridcell', { name: 'Wednesday, November 20, 2030' }).click();
+      await page.getByRole('gridcell', { name: 'Thursday, November 21, 2030' }).click();
+      await page.getByRole('button', { name: 'Apply', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'View details', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: /Date Range:/ }).click();
+      await page.getByRole('gridcell', { name: 'Saturday, November 23, 2030' }).click();
+      await page.getByRole('gridcell', { name: 'Sunday, November 24, 2030' }).click();
+      await page.getByRole('button', { name: 'Apply', exact: true }).click();
+      await expect(page.getByText('No services match these filters.')).toBeVisible();
+      await page.getByRole('button', { name: 'Clear filters' }).click();
       await page.getByRole('button', { name: 'View details', exact: true }).click();
-      await expect(page.getByRole('button', { name: 'Show less', exact: true })).toBeVisible();
-      await fits(page);
-      await page.getByRole('button', { name: 'Show less', exact: true }).click();
-      await expect(page.getByRole('button', { name: /View memorandum/ })).toBeHidden();
-      await page.getByRole('button', { name: 'Register', exact: true }).click();
+      details = page.getByRole('dialog', { name: service.name });
+      await expect(details).toBeVisible();
+      await fits(page, details);
+      await details.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(details).toHaveCount(0);
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
+      details = page.getByRole('dialog', { name: service.name });
+      await details.getByRole('button', { name: 'Register', exact: true }).click();
       let dialog = page.getByRole('dialog');
       await expect(dialog.getByRole('button', { name: 'Confirm Registration' })).toBeEnabled();
       await fits(page, dialog.locator('.ui-card'));
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
       await expect(dialog).toHaveCount(0);
-      await page.getByRole('button', { name: 'Register', exact: true }).click();
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
+      details = page.getByRole('dialog', { name: service.name });
+      await details.getByRole('button', { name: 'Register', exact: true }).click();
       dialog = page.getByRole('dialog');
       await dialog.getByRole('button', { pressed: false }).filter({ hasText: '23 Nov' }).click();
       await dialog.getByLabel(/Note/).fill('Bringing my synthetic health record');
@@ -147,12 +173,19 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await dialog.getByRole('button', { name: 'Confirm Registration' }).click();
       await expect(dialog).toHaveCount(0);
       expect(await page.evaluate(() => window.registration)).toEqual({ serviceId: service.id, plannedDate: '2099-11-23', note: 'Bringing my synthetic health record' });
-      await page.getByRole('button', { name: 'Cancel registration', exact: true }).click();
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
+      details = page.getByRole('dialog', { name: service.name });
+      await details.getByRole('button', { name: 'Cancel registration', exact: true }).click();
       await page.getByRole('button', { name: 'Keep registration' }).click();
       await expect(page.getByRole('dialog')).toHaveCount(0);
-      await page.getByRole('button', { name: 'Cancel registration', exact: true }).click();
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
+      details = page.getByRole('dialog', { name: service.name });
+      await details.getByRole('button', { name: 'Cancel registration', exact: true }).click();
       await page.getByRole('dialog').getByRole('button', { name: 'Cancel registration', exact: true }).click();
-      await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
+      details = page.getByRole('dialog', { name: service.name });
+      await expect(details.getByRole('button', { name: 'Register', exact: true })).toBeVisible();
+      await details.getByRole('button', { name: 'Close', exact: true }).click();
       expect(await page.evaluate(() => window.cancelled)).toBe('synthetic-plan');
       await fits(page);
     });
@@ -215,7 +248,8 @@ test('follow-ups show a clear empty state when the API returns no records', asyn
 test('registration footer stays reachable with a reduced mobile viewport height', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 440 });
   await mount(page, 'services');
-  await page.getByRole('button', { name: 'Register', exact: true }).click();
+  await page.getByRole('button', { name: 'View details', exact: true }).click();
+  await page.getByRole('dialog', { name: service.name }).getByRole('button', { name: 'Register', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Confirm Registration' })).toBeEnabled();
   await fits(page, dialog.locator('.ui-card'));

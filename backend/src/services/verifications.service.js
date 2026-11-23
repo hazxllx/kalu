@@ -505,9 +505,14 @@ export const getMine = async ({ user } = {}) => {
   } catch {
     municipality = '';
   }
+  const verification = await toVerification(resident);
   return {
     hasResidentRecord: true,
-    verification: { ...(await toVerification(resident)), municipality },
+    verification: {
+      ...verification,
+      municipality,
+      submittedByCurrentUser: resident.createdById === user.id || resident.verificationSubmittedBy === user.id,
+    },
     history,
   };
 };

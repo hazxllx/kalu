@@ -29,6 +29,13 @@ export const riskLevelFromScore = (score) => {
   return 'Low';
 };
 
+export const isCriticalSanitationRisk = ({ waterSource, toilet, sanitationAccess } = {}) =>
+  waterSource === 'unimproved'
+  || toilet === 'none'
+  || toilet === 'open_pit'
+  || toilet === 'antipolo'
+  || sanitationAccess === 'None';
+
 /**
  * Computes the additive risk score, qualitative risk level, and human-readable
  * contributing factor labels for a household profile.
@@ -115,7 +122,10 @@ export const computeHouseholdRisk = ({ waterSource, toilet, sanitationAccess, me
     }
   }
 
-  return { score: total, level: riskLevelFromScore(total), factors };
+  const level = isCriticalSanitationRisk({ waterSource, toilet, sanitationAccess }) && total < 60
+    ? 'High'
+    : riskLevelFromScore(total);
+  return { score: total, level, factors };
 };
 
 /**
@@ -130,9 +140,14 @@ export const computeHouseholdRisk = ({ waterSource, toilet, sanitationAccess, me
  * @param {Array<Object>} [params.members=[]] - Household members (`{ name, age, philhealth }`).
  * @returns {Array<string>} List of warning/follow-up flag strings.
  */
-export const householdFlags = ({ waterSource, toilet, members = [] } = {}) => {
+export const householdFlags = ({ waterSource, toilet, sanitationAccess, members = [] } = {}) => {
   const flags = [];
-  if (waterSource === 'level1' || waterSource === 'unimproved' || toilet === 'none') {
+  // Level I describes service level and is not itself an unsafe-water determination.
+  if (waterSource === 'unimproved'
+    || toilet === 'none'
+    || toilet === 'open_pit'
+    || toilet === 'antipolo'
+    || sanitationAccess === 'None') {
     flags.push('Sanitation Risk');
   }
   members.forEach((m) => {

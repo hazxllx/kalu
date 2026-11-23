@@ -4,7 +4,8 @@ import { memoryCache } from '../../utils/memoryCache';
 /**
  * Health services API — scoped catalog + personnel assignment. Backed by
  * /api/health-services (Express + Supabase public.health_services and
- * public.health_service_assignments).
+ * public.health_service_assignments). Resident collection reads return only the
+ * active public catalog in the authenticated profile's assigned scope.
  *
  * Visibility, municipality/barangay scope and management authority are all
  * enforced server-side and by RLS; an assigned service appears in the assignee's
@@ -22,7 +23,7 @@ export const healthServicesApi = {
       METADATA_TTL
     );
   },
-  // params: { mine: true, category }
+  // params: { mine: true, category }; resident roles receive the public catalog.
   // params: { from, to } for calendar scope
   // params: { service_id } | { resident_id } | { from, to } for dashboard listing
    listAttendance: (params) => api.get('/health-services/attendance', { params }),

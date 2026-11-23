@@ -1670,16 +1670,34 @@ const formatDateTime = (iso) => {
 
 /**
  * Staff roster for one service: the residents who registered (visit plans),
- * their registration status and timestamp, with attendance marking. Only active
- * (non-cancelled) registrations can be marked attended/missed.
+ * their registration status and timestamp, with attendance marking. Cancelled
+ * registrations remain visible but cannot receive attendance or service actions.
  */
 function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark, onSaveDelivery, onClose, supervisor = false, followUpStart = null }) {
   const { loading, error, registrations, counts } = state;
-  const active = registrations.filter((r) => r.status !== "Cancelled");
-  const cancelled = registrations.filter((r) => r.status === "Cancelled");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [deliveryTarget, setDeliveryTarget] = useState(null);
+  const [missedTarget, setMissedTarget] = useState(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      if (missedTarget) setMissedTarget(null);
+      else if (deliveryTarget) setDeliveryTarget(null);
+      else onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [deliveryTarget, missedTarget, onClose]);
 
   useEffect(() => {
     if (!followUpStart?.id || !followUpStart?.residentId || !service) return;
@@ -1693,31 +1711,39 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
     });
   }, [followUpStart?.id, followUpStart?.residentId, followUpStart?.residentName, followUpStart?.scheduledDate, service?.id]);
 
-  // Filter registrations based on search and status
-  const filtered = active.filter((reg) => {
+  const hasCancelled = registrations.some((reg) => reg.status === "Cancelled")
+    || (Number.isFinite(counts?.cancelled) && counts.cancelled > 0);
+  const filtered = registrations.filter((reg) => {
     const query = searchQuery.trim().toLowerCase();
-    const matchesSearch = !query || 
-      reg.residentName.toLowerCase().includes(query) ||
-      reg.barangay.toLowerCase().includes(query);
-    
-    const matchesStatus = statusFilter === "all" || 
-      (statusFilter === "attended" && reg.attendance?.status === "attended") ||
-      (statusFilter === "absent" && reg.attendance?.status === "absent") ||
-      (statusFilter === "pending" && !reg.attendance?.status);
-    
+    const label = registrationLabel(reg);
+    const matchesSearch = !query
+      || String(reg.residentName || "").toLowerCase().includes(query)
+      || String(reg.barangay || "").toLowerCase().includes(query);
+    const matchesStatus = statusFilter === "all"
+      || (statusFilter === "attended" && label === "Attended")
+      || (statusFilter === "pending" && label === "Registered")
+      || (statusFilter === "absent" && label === "Missed")
+      || (statusFilter === "cancelled" && label === "Cancelled");
     return matchesSearch && matchesStatus;
   });
+  const statusOptions = [
+    ["all", "All"],
+    ["attended", "Attended"],
+    ["pending", "Pending"],
+    ["absent", "Missed / Not Attended"],
+    ...(hasCancelled ? [["cancelled", "Cancelled"]] : []),
+  ];
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Registrations for ${service.name}`}>
-      <Card className={`max-h-[92vh] w-full max-w-3xl overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
-        <div className="p-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label={`Registrations for ${service.name}`}>
+      <Card className={`flex h-dvh max-h-dvh w-full max-w-3xl flex-col overflow-hidden rounded-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-lg ${supervisor ? "supervisor-modal" : ""}`}>
+        <div className="shrink-0 p-4 pb-3 sm:p-5 sm:pb-4">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="truncate text-lg font-semibold text-brand-ink">{service.name}</h3>
+              <h3 className="break-words text-lg font-semibold text-brand-ink">{service.name}</h3>
               <p className="mt-0.5 text-sm text-brand-gray">{followUpStart?.id ? "Record service for the selected follow-up resident." : "Registered residents and attendance."}</p>
               {scheduleSummary(service.schedule) && (
-                <p className="mt-1 flex items-center gap-1.5 text-sm text-brand-ink">
+                <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-brand-ink">
                   <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" /> {scheduleSummary(service.schedule)}
                 </p>
               )}
@@ -1727,72 +1753,71 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                 </p>
               )}
             </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+            <button type="button" onClick={onClose} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
 
-          {/* KPI Cards */}
           {counts && !loading && !error && (
-            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
-                <p className="text-xs font-medium text-brand-gray">Total Registered</p>
-                <p className="mt-1 text-xl font-semibold text-brand-blue">{counts.registered}</p>
+            <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-2 border-y border-brand-border/70 py-2.5 dark:border-border">
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-xs text-brand-gray">Total Registered</dt>
+                <dd className="font-stat text-sm font-semibold text-brand-ink">{counts.registered}</dd>
               </div>
-              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
-                <p className="text-xs font-medium text-brand-gray">Attended</p>
-                <p className="mt-1 text-xl font-semibold text-brand-green">{counts.attended}</p>
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-xs text-brand-gray">Attended</dt>
+                <dd className="font-stat text-sm font-semibold text-brand-green">{counts.attended}</dd>
               </div>
-              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
-                <p className="text-xs font-medium text-brand-gray">Not Attended</p>
-                <p className="mt-1 text-xl font-semibold text-brand-danger">{counts.absent}</p>
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-xs text-brand-gray">Pending</dt>
+                <dd className="font-stat text-sm font-semibold text-brand-ink">{counts.pendingAttendance}</dd>
               </div>
-              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
-                <p className="text-xs font-medium text-brand-gray">Pending</p>
-                <p className="mt-1 text-xl font-semibold text-brand-gray">{counts.pendingAttendance}</p>
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-xs text-brand-gray">Missed / Not Attended</dt>
+                <dd className="font-stat text-sm font-semibold text-brand-danger">{counts.absent}</dd>
               </div>
-              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
-                <p className="text-xs font-medium text-brand-gray">Cancelled</p>
-                <p className="mt-1 text-xl font-semibold text-brand-gray">{counts.cancelled}</p>
-              </div>
-            </div>
+              {hasCancelled && (
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-xs text-brand-gray">Cancelled</dt>
+                  <dd className="font-stat text-sm font-semibold text-brand-gray">{counts.cancelled}</dd>
+                </div>
+              )}
+            </dl>
           )}
 
-          {/* Search and Filter */}
-          {!loading && !error && active.length > 0 && (
-            <div className="mb-4 space-y-3">
-              <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 dark:border-border dark:bg-input">
-                <Search className="h-4 w-4 text-brand-gray" />
+          {!loading && !error && registrations.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <label className="flex min-h-10 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 dark:border-border dark:bg-input">
+                <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
                 <input
                   type="search"
-                  placeholder="Search by name or barangay..."
+                  aria-label="Search by resident name or barangay"
+                  placeholder="Search residents or barangays"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
                 />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {["all", "attended", "pending", "absent"].map((status) => (
+              </label>
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter registrations by attendance status">
+                {statusOptions.map(([status, label]) => (
                   <button
                     key={status}
+                    type="button"
+                    aria-pressed={statusFilter === status}
                     onClick={() => setStatusFilter(status)}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    className={`min-h-8 rounded-btn px-2.5 text-xs font-medium transition-colors ${
                       statusFilter === status
                         ? "bg-brand-blue text-white"
                         : "border border-brand-border text-brand-ink hover:border-brand-blue hover:text-brand-blue dark:border-border"
                     }`}
                   >
-                    {status === "all" ? "All" : status === "attended" ? "Attended" : status === "pending" ? "Pending" : "Not Attended"}
+                    {label}
                   </button>
                 ))}
               </div>
             </div>
           )}
+        </div>
 
-          <div className="mb-3 flex justify-end">
-            <button onClick={onReload} className="inline-flex items-center gap-2 rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
-            </button>
-          </div>
-
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
           {error ? (
             <div className="py-8 text-center">
               <p className="text-sm font-medium text-brand-danger">{error}</p>
@@ -1802,38 +1827,41 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
             </div>
           ) : loading ? (
             <p className="py-10 text-center text-sm text-brand-gray">Loading registrations…</p>
-          ) : filtered.length === 0 && searchQuery ? (
-            <div className="py-10 text-center">
-              <Users className="mx-auto mb-3 h-10 w-10 text-brand-gray/40" />
-              <p className="text-sm text-brand-gray">No residents match your search.</p>
-            </div>
           ) : filtered.length === 0 ? (
             <div className="py-10 text-center">
               <Users className="mx-auto mb-3 h-10 w-10 text-brand-gray/40" />
-              <p className="text-sm text-brand-gray">{cancelled.length ? "No active resident registrations. All loaded registrations are cancelled." : "No residents have registered for this service yet."}</p>
+              <p className="text-sm text-brand-gray">
+                {registrations.length === 0
+                  ? "No residents have registered for this service yet."
+                  : searchQuery
+                    ? "No residents match your search and selected status."
+                    : "No registrations match the selected status."}
+              </p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="divide-y divide-brand-border/70 border-y border-brand-border/70 dark:divide-border dark:border-border">
               {filtered.map((reg) => {
                 const label = registrationLabel(reg);
                 return (
-                  <div key={reg.id} className="rounded-btn border border-brand-border p-3 dark:border-border">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div key={reg.id} className="py-3 first:pt-3 last:pb-3">
+                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-brand-ink">{reg.residentName}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-brand-ink">{reg.residentName}</p>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${REG_STATUS_BADGE[label] || "bg-brand-gray/10 text-brand-gray"}`}>{label}</span>
+                        </div>
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-gray">
-                          {reg.barangay && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> {reg.barangay}</span>}
-                          {reg.plannedDate && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Plans to visit {formatDate(reg.plannedDate)}</span>}
+                          {reg.barangay && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" aria-hidden="true" />{reg.barangay}</span>}
+                          {reg.plannedDate && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" aria-hidden="true" />Scheduled {formatDate(reg.plannedDate)}</span>}
                           {reg.registeredAt && <span>Registered {formatDateTime(reg.registeredAt)}</span>}
                         </div>
-                        {reg.note && <p className="mt-1 text-xs italic text-brand-gray">"{reg.note}"</p>}
+                        {reg.note && <p className="mt-1 text-xs text-brand-gray">Registration note: {reg.note}</p>}
                       </div>
-                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${REG_STATUS_BADGE[label] || "bg-brand-gray/10 text-brand-gray"}`}>{label}</span>
                     </div>
                     {reg.attendance?.status === "attended" && reg.attendance.serviceProvided && (
-                      <details className="mt-3 border-t border-brand-border pt-2.5 dark:border-border">
-                        <summary className="cursor-pointer text-xs font-medium text-brand-blue">View service record</summary>
-                        <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs font-medium text-brand-blue">View Record</summary>
+                        <div className="mt-2 grid gap-x-5 gap-y-1.5 text-xs sm:grid-cols-2">
                           <p><span className="font-semibold text-brand-ink">Provided:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.serviceProvided}</span></p>
                           {reg.attendance.assessment && <p><span className="font-semibold text-brand-ink">Assessment:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.assessment}</span></p>}
                           {reg.attendance.recommendations && <p><span className="font-semibold text-brand-ink">Recommendations:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.recommendations}</span></p>}
@@ -1844,24 +1872,24 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                         </div>
                       </details>
                     )}
-                    {canEdit && (
-                      <div className="mt-3 flex items-center gap-2 border-t border-brand-border pt-2.5 dark:border-border">
+                    {canEdit && reg.status !== "Cancelled" && (
+                      <div className="mt-2 flex flex-wrap gap-2">
                         <button
+                          type="button"
                           onClick={() => setDeliveryTarget(reg)}
                           disabled={attBusy === reg.residentId}
-                          className="inline-flex items-center gap-1.5 rounded-btn bg-brand-green px-3 py-1.5 text-xs font-medium text-white transition-colors hover:brightness-95 disabled:opacity-60"
+                          className="inline-flex min-h-9 items-center gap-1.5 rounded-btn bg-brand-blue px-3 text-xs font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
                         >
-                          <UserCheck className="h-3.5 w-3.5" /> {reg.attendance?.status === "attended" ? "Edit service record" : "Record service"}
+                          <UserCheck className="h-3.5 w-3.5" aria-hidden="true" /> {reg.attendance?.status === "attended" && reg.attendance.serviceProvided ? "Edit service record" : "Record Service"}
                         </button>
-                        {reg.attendance?.status !== "attended" && (
+                        {label !== "Missed" && label !== "Attended" && (
                           <button
-                            onClick={() => onMark(reg, "absent")}
+                            type="button"
+                            onClick={() => setMissedTarget(reg)}
                             disabled={attBusy === reg.residentId}
-                            className={`inline-flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
-                              label === "Missed" ? "bg-brand-danger text-white" : "border border-brand-danger/40 text-brand-danger hover:bg-brand-danger/5"
-                            }`}
+                            className="inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-danger/40 px-3 text-xs font-medium text-brand-danger transition-colors hover:bg-brand-danger/5 disabled:opacity-60"
                           >
-                            <UserX className="h-3.5 w-3.5" /> Missed
+                            <UserX className="h-3.5 w-3.5" aria-hidden="true" /> Mark as Missed
                           </button>
                         )}
                       </div>
@@ -1870,27 +1898,31 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                 );
               })}
 
-              {cancelled.length > 0 && (
-                <details className="mt-3 rounded-btn border border-brand-border p-2 dark:border-border">
-                  <summary className="cursor-pointer text-xs font-medium text-brand-gray">{cancelled.length} cancelled registration{cancelled.length > 1 ? "s" : ""}</summary>
-                  <div className="mt-2 space-y-1">
-                    {cancelled.map((reg) => (
-                      <div key={reg.id} className="flex items-center justify-between gap-2 px-1 py-1 text-xs text-brand-gray">
-                        <span className="truncate">{reg.residentName}{reg.barangay ? ` — ${reg.barangay}` : ""}</span>
-                        <span className="rounded-full bg-brand-gray/10 px-2 py-0.5">Cancelled</span>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
             </div>
           )}
-
-          <div className="mt-5 flex justify-end border-t border-brand-border pt-4 dark:border-border">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Close</button>
-          </div>
         </div>
       </Card>
+      {missedTarget && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" role="alertdialog" aria-modal="true" aria-labelledby="missed-confirm-title" aria-describedby="missed-confirm-description">
+          <div className="w-full max-w-sm rounded-lg border border-brand-border bg-white p-5 shadow-lg dark:border-border dark:bg-card">
+            <h4 id="missed-confirm-title" className="text-base font-semibold text-brand-ink">Mark registration as missed?</h4>
+            <p id="missed-confirm-description" className="mt-2 text-sm text-brand-gray">
+              Record {missedTarget.residentName} as not attended for this service?
+            </p>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setMissedTarget(null)} className="min-h-9 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:border-border dark:hover:bg-hover">Cancel</button>
+              <button
+                type="button"
+                onClick={() => { const target = missedTarget; setMissedTarget(null); void onMark(target, "absent"); }}
+                disabled={attBusy === missedTarget.residentId}
+                className="min-h-9 rounded-btn bg-brand-danger px-3 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60"
+              >
+                Confirm missed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {deliveryTarget && (
         <ServiceDeliveryModal
           service={service}
@@ -1945,9 +1977,9 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
     } : { ...form, follow_up_date: form.follow_up_required ? form.follow_up_date : null });
   };
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Record service delivery">
-      <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto">
-        <form onSubmit={submit} className="space-y-4 p-5 sm:p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Record service delivery">
+      <Card className="flex h-dvh max-h-dvh w-full max-w-2xl flex-col overflow-hidden rounded-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-lg">
+        <form onSubmit={submit} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Service delivery</p>

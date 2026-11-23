@@ -453,8 +453,11 @@ export default function TreatmentConsultation() {
       listConsultationsOffline({ ownerId, fetchList: () => loadServerRows((params) => consultationsApi.list(params)) }),
     ]).then(([residentRows, consultationRows]) => {
         if (!guard()) return;
-        setAllResidents(residentRows);
-        setConsultations(consultationRows.filter((row) => !row.offline));
+        if (!Array.isArray(residentRows) || !Array.isArray(consultationRows)) {
+          throw new Error("The server returned an invalid consultation or resident list.");
+        }
+        setAllResidents(residentRows.filter((row) => row && typeof row === "object"));
+        setConsultations(consultationRows.filter((row) => row && typeof row === "object" && !row.offline));
       })
       .catch((err) => {
         if (!guard()) return;

@@ -104,23 +104,22 @@ const OfflineStatusIndicator = () => {
   const attention = (counts.pending || 0) + (counts.failed || 0) + (counts.conflict || 0) + (counts.offlineDraft || 0);
   const hasProblems = (counts.failed || 0) + (counts.conflict || 0) > 0;
   const canRetry = (counts.pending || 0) > 0 || failed.some((item) => item.retryable);
+  const waitingCount = (counts.pending || 0) + (counts.syncing || 0) + (counts.offlineDraft || 0);
 
   const connectionLabel = online ? 'Online' : 'Offline';
   const summary = useMemo(() => {
     if (upgradeBlocked) return 'Close other tabs to finish device storage upgrade';
     if (syncing) {
       const total = progress?.total || 0;
-      return total ? `Syncing ${progress?.processed || 0}/${total}` : 'Syncing...';
+      return total ? `Synchronizing changes (${progress?.processed || 0}/${total})` : 'Synchronizing changes...';
     }
+    if (counts.failed > 0 || counts.conflict > 0) return 'Synchronization needs attention';
+    if (waitingCount > 0) return 'Changes waiting to synchronize';
     if (!online) return 'Working offline';
     if (lastError?.code === 'auth') return 'Sign in again to synchronize';
     if (serverAvailable === false) return 'Backend unavailable — retrying automatically';
-    if (counts.offlineDraft > 0) {
-      return `${counts.offlineDraft} offline draft${counts.offlineDraft === 1 ? '' : 's'} need review`;
-    }
-    if (attention > 0) return `${attention} change${attention === 1 ? '' : 's'} pending`;
-    return lastSyncedAt ? 'Synced successfully' : 'No pending changes';
-  }, [syncing, progress, online, attention, counts.offlineDraft, upgradeBlocked, serverAvailable, lastError, lastSyncedAt]);
+    return lastSyncedAt ? 'All changes are synchronized' : 'No pending changes';
+  }, [syncing, progress, counts.failed, counts.conflict, waitingCount, online, upgradeBlocked, serverAvailable, lastError, lastSyncedAt]);
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -168,7 +167,7 @@ const OfflineStatusIndicator = () => {
         <div
           role="dialog"
           aria-label="Connection and synchronization status"
-          className="absolute right-0 top-full z-50 mt-2 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-slate-200 bg-white shadow-soft dark:border-border dark:bg-popover"
+          className="fixed inset-x-3 top-16 z-50 max-h-[calc(100vh-5rem)] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-soft sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[22rem] sm:max-w-[calc(100vw-2rem)] dark:border-border dark:bg-popover"
         >
           <div className="border-b border-slate-200 bg-brand-bg/60 px-4 py-3 dark:border-border">
             <div className="flex items-center gap-2">
@@ -228,7 +227,8 @@ const OfflineStatusIndicator = () => {
           )}
 
           <div className="space-y-3 p-4">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Stat label="Successful" value={counts.synced || 0} tone="success" />
               <Stat label="Pending" value={counts.pending || 0} tone={counts.pending ? 'warn' : 'success'} />
               <Stat label="Failed" value={counts.failed || 0} tone={counts.failed ? 'danger' : 'success'} />
               <Stat label="Conflicts" value={counts.conflict || 0} tone={counts.conflict ? 'danger' : 'success'} />
@@ -296,19 +296,31 @@ const OfflineStatusIndicator = () => {
               </p>
             )}
 
-            <button
-              type="button"
-              onClick={handleRetry}
-              disabled={retrying || syncing || !online || !canRetry}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {retrying || syncing ? (
+            {syncing ? (
+              <button type="button" disabled className="inline-flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue/70 px-4 py-2 text-sm font-medium text-white">
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              {online ? (canRetry ? 'Retry synchronization' : 'No automatic retries pending') : 'Offline — retry when connected'}
-            </button>
+                Synchronizing changes...
+              </button>
+            ) : canRetry ? (
+              <button
+                type="button"
+                onClick={handleRetry}
+                disabled={retrying || !online}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {online ? 'Sync Now' : 'Offline — retry when connected'}
+              </button>
+            ) : hasProblems ? (
+              (counts.conflict || 0) > 0
+                ? null
+                : <p className="text-xs text-slate-500">A retry may be available automatically.</p>
+            ) : (
+              <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-brand-green">
+                <CheckCircle2 className="h-4 w-4" />
+                All changes are synchronized
+              </p>
+            )}
           </div>
         </div>
       )}

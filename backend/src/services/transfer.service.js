@@ -187,9 +187,11 @@ const residentView = (resident, byId) => ({
  */
 export const getContext = async ({ user }) => {
   assertSelf(user);
-  const resident = await loadOwnResident(user);
-  const { rows: barangays, byId } = await barangayIndex(resident.municipalityId);
-  const currentBarangayId = await residentBarangayId(resident);
+  const resident = await repository.getResidentByAuthUserId(user.id);
+  const { rows: barangays, byId } = await barangayIndex(
+    resident?.municipalityId || user?.municipalityId || null,
+  );
+  const currentBarangayId = resident ? await residentBarangayId(resident) : null;
 
   let history = [];
   try {
@@ -200,10 +202,12 @@ export const getContext = async ({ user }) => {
   }
   const activeRequest = history.find((row) => BLOCKING_STATUSES.has(row.status)) || null;
 
-  const destinations = eligibleDestinations(barangays, currentBarangayId);
+  const destinations = resident ? eligibleDestinations(barangays, currentBarangayId) : [];
 
   return {
-    resident: residentView({ ...resident, barangayId: currentBarangayId || resident.barangayId }, byId),
+    resident: resident
+      ? residentView({ ...resident, barangayId: currentBarangayId || resident.barangayId }, byId)
+      : null,
     destinations,
     activeRequest: shapeRequest(activeRequest, byId),
     // Only submitted requests are meaningful history; drafts are working state.

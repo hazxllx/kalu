@@ -30,10 +30,10 @@ test('documented factor weights sum deterministically', () => {
     (() => { const { score, level } = computeHouseholdRisk({ waterSource: 'unimproved', income: 4000 }); return { score, level }; })(),
     { score: 60, level: 'High' },
   );
-  // level1 water (30) + open_pit toilet (25) = 55 => Moderate.
+  // level1 water (30) + open_pit toilet (25) = 55, but unsafe sanitation escalates to High.
   assert.deepEqual(
     (() => { const { score, level } = computeHouseholdRisk({ waterSource: 'level1', toilet: 'open_pit' }); return { score, level }; })(),
-    { score: 55, level: 'Moderate' },
+    { score: 55, level: 'High' },
   );
   // level2 water (15) + shared toilet (10) + shared sanitation (10) = 35 => Low.
   assert.deepEqual(

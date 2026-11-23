@@ -7,15 +7,12 @@ const routes = source("routes/AppRoutes.jsx");
 const chooser = source("features/registration/pages/RegistrationTypeSelection.jsx");
 const management = source("features/users/pages/UserManagement.jsx");
 
-test("incomplete residents are detected separately and can resume persisted registration", () => {
-  assert.match(routes, /path="\/registration-incomplete"/);
-  assert.match(routes, /resident-incomplete/);
+test("incomplete residents are routed to the limited resident dashboard", () => {
+  assert.doesNotMatch(routes, /RegistrationIncomplete|<RegistrationIncomplete/);
+  assert.match(routes, /path="\/registration-incomplete"[\s\S]*?<Navigate to="\/app\/resident-limited\/dashboard" replace \/>/);
   const roles = source("lib/roles.js");
-  assert.match(roles, /RESIDENT_INCOMPLETE: 'resident-incomplete'/);
-  assert.match(roles, /\[ROLE\.RESIDENT_INCOMPLETE\]: '\/registration-incomplete'/);
-  const page = source("features/registration/pages/RegistrationIncomplete.jsx");
-  assert.match(page, /resident record has not been created/);
-  assert.match(page, /Continue Registration/);
+  assert.doesNotMatch(roles, /resident-incomplete|RESIDENT_INCOMPLETE/);
+  assert.match(roles, /\[ROLE\.RESIDENT_LIMITED\]: '\/app\/resident-limited\/dashboard'/);
   const registration = source("features/registration/pages/NewResidentRegistration.jsx");
   assert.match(registration, /residentRegistrationDraft/);
   assert.match(registration, /sessionStorage\.removeItem\("residentRegistrationDraft"\)/);

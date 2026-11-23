@@ -1,5 +1,5 @@
 import React from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 /**
  * Shared toolbar for the verification queues.
@@ -31,6 +31,16 @@ export default function VerificationQueueToolbar({
           aria-label={searchPlaceholder}
           className="min-w-0 flex-1 bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70 dark:text-foreground"
         />
+        {searchValue && (
+          <button
+            type="button"
+            onClick={() => onSearchChange("")}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-brand-gray hover:bg-brand-bg hover:text-brand-ink"
+            aria-label="Clear search"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </label>
 
       <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:items-center sm:gap-2.5">

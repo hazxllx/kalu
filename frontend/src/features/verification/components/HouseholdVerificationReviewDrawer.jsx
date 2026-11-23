@@ -96,11 +96,11 @@ export default function HouseholdVerificationReviewDrawer({
         className="absolute inset-0 bg-brand-deep/60"
       />
       <motion.aside
-        initial={{ x: "100%" }}
-        animate={{ x: 0 }}
-        exit={{ x: "100%" }}
-        transition={{ type: "tween", duration: 0.25, ease: "easeOut" }}
-        className="absolute right-0 top-0 flex h-full w-full flex-col bg-brand-bg shadow-2xl sm:max-w-xl"
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.98 }}
+        transition={{ type: "tween", duration: 0.16, ease: "easeOut" }}
+        className="absolute left-1/2 top-1/2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card bg-brand-bg shadow-2xl sm:max-h-[calc(100vh-2rem)] sm:w-[calc(100%-2rem)] sm:max-w-2xl"
         role="dialog"
         aria-modal="true"
         aria-label={`Household verification review for ${household.head}`}
@@ -116,7 +116,16 @@ export default function HouseholdVerificationReviewDrawer({
                 <h3 className="truncate font-heading font-semibold text-brand-ink">
                   Household {household.householdId}
                 </h3>
-                <VerificationBadge status="pending" size="sm" />
+                <VerificationBadge
+                  status={
+                    household.verificationStatus === "Verified"
+                      ? "approved"
+                      : household.verificationStatus === "Returned for Correction"
+                        ? "resubmission_required"
+                        : "pending"
+                  }
+                  size="sm"
+                />
               </div>
               <p className="text-xs text-brand-gray">
                 HH Head: {household.head} · Barangay {household.barangay}
@@ -207,97 +216,6 @@ export default function HouseholdVerificationReviewDrawer({
             </div>
           </section>
 
-          {/* Verification decision */}
-          <section className="rounded-btn border border-brand-border bg-white p-4">
-            <SectionTitle>Verification Decision</SectionTitle>
-            {!returning ? (
-              <div className="space-y-2.5">
-                <button
-                  onClick={() => setShowVerifyConfirm(true)}
-                  disabled={saving}
-                  className="flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue py-3 text-sm font-medium text-white shadow-soft transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Verify Household
-                </button>
-                <button
-                  onClick={() => {
-                    setReturning(true);
-                    setReason("");
-                    setRemarks("");
-                    setError("");
-                  }}
-                  disabled={saving}
-                  className="flex w-full items-center justify-center gap-2 rounded-btn border border-brand-danger/30 bg-brand-danger/5 py-3 text-sm font-medium text-brand-danger transition-colors hover:bg-brand-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <XCircle className="w-4 h-4" /> Return for Correction
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3.5">
-                <p className="text-sm text-brand-gray">
-                  Select the reason for returning household{" "}
-                  <span className="font-medium text-brand-ink">{household.householdId}</span> to the
-                  collector. The reason is recorded with the verification history.
-                </p>
-                <div className="space-y-1.5">
-                  {HOUSEHOLD_RETURN_REASONS.map((r) => (
-                    <label
-                      key={r}
-                      className={`flex cursor-pointer items-center gap-2.5 rounded-btn border px-3.5 py-2.5 text-sm transition-colors ${
-                        reason === r
-                          ? "border-brand-danger/40 bg-brand-danger/5 text-brand-ink"
-                          : "border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="household-return-reason"
-                        checked={reason === r}
-                        onChange={() => {
-                          setReason(r);
-                          setError("");
-                        }}
-                        className="h-4 w-4 accent-brand-danger"
-                      />
-                      {r}
-                    </label>
-                  ))}
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-brand-ink">
-                    Remarks {reason === "Other" && <span className="text-red-500">*</span>}
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={remarks}
-                    onChange={(e) => {
-                      setRemarks(e.target.value);
-                      setError("");
-                    }}
-                    placeholder="Add custom remarks (required when choosing 'Other')..."
-                    className="w-full resize-none rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm text-brand-ink outline-none transition-colors focus:border-brand-blue"
-                  />
-                </div>
-                {error && <p className="text-xs text-red-600">{error}</p>}
-                <div className="flex items-center justify-end gap-3">
-                  <button
-                    onClick={() => setReturning(false)}
-                    className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmReturn}
-                    disabled={saving}
-                    className="flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-danger/90 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <XCircle className="w-4 h-4" /> {saving ? "Saving…" : "Confirm Return"}
-                  </button>
-                </div>
-              </div>
-            )}
-          </section>
-
           {/* Audit information */}
           <section className="rounded-btn border border-brand-border bg-white p-4">
             <SectionTitle>Audit Information</SectionTitle>
@@ -316,6 +234,72 @@ export default function HouseholdVerificationReviewDrawer({
             </div>
           </section>
         </div>
+
+        {/* Dedicated action footer */}
+        {household.verificationStatus === "Pending Verification" && (
+          <div className="shrink-0 border-t border-brand-border bg-white">
+            {returning ? (
+              <div className="max-h-[45dvh] space-y-3 overflow-y-auto px-4 py-3 sm:px-5">
+                <p className="text-xs text-brand-gray">Reason for returning household {household.householdId}</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {HOUSEHOLD_RETURN_REASONS.map((r) => (
+                    <label
+                      key={r}
+                      className={`flex cursor-pointer items-center gap-2 rounded-btn border px-3 py-2 text-xs transition-colors ${
+                        reason === r ? "border-brand-danger/40 bg-brand-danger/5 text-brand-ink" : "border-brand-border text-brand-ink"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="household-return-reason"
+                        checked={reason === r}
+                        onChange={() => { setReason(r); setError(""); }}
+                        className="h-4 w-4 accent-brand-danger"
+                      />
+                      {r}
+                    </label>
+                  ))}
+                </div>
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-brand-ink">Remarks {reason === "Other" && <span className="text-red-500">*</span>}</span>
+                  <textarea
+                    rows={2}
+                    value={remarks}
+                    onChange={(e) => { setRemarks(e.target.value); setError(""); }}
+                    placeholder="Explain the correction needed"
+                    className="w-full resize-none rounded-btn border border-brand-border px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                  />
+                </label>
+                {error && <p className="text-xs text-red-600">{error}</p>}
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setReturning(false)} className="h-10 rounded-btn px-4 text-sm font-medium text-brand-gray">Cancel</button>
+                  <button type="button" onClick={confirmReturn} disabled={saving} className="h-10 rounded-btn bg-brand-danger px-4 text-sm font-medium text-white disabled:opacity-60">
+                    {saving ? "Saving…" : "Confirm Return"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-2 sm:px-5">
+                <button
+                  type="button"
+                  onClick={() => setShowVerifyConfirm(true)}
+                  disabled={saving}
+                  className="flex h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue text-sm font-medium text-white disabled:opacity-60"
+                >
+                  <CheckCircle2 className="h-4 w-4" /> Verify Household
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setReturning(true); setReason(""); setRemarks(""); setError(""); }}
+                  disabled={saving}
+                  className="flex h-10 items-center justify-center gap-2 rounded-btn border border-brand-danger/30 bg-brand-danger/5 text-sm font-medium text-brand-danger disabled:opacity-60"
+                >
+                  <XCircle className="h-4 w-4" /> Return for Correction
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Verify confirmation dialog */}
         {showVerifyConfirm && (

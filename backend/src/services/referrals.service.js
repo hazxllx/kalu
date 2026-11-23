@@ -118,7 +118,7 @@ const sameInstant = (left, right) => {
 };
 
 export const assertReferralDates = (payload, { existing = null, now = new Date() } = {}) => {
-  const referralDate = payload.referral_date;
+  const referralDate = payload.referral_date ?? existing?.referral_date;
   const scheduledAt = payload.scheduled_at;
   // Schedules are entered in Philippine local time throughout KALUSAGAP.
   // Never trust the browser's timezone (which may differ from the facility).
@@ -134,8 +134,8 @@ export const assertReferralDates = (payload, { existing = null, now = new Date()
     } catch {
       throw ApiError.unprocessable('Enter a valid local time zone.', { field: 'client_time_zone' });
     }
-    if (referralDate > today) {
-      throw ApiError.unprocessable('Referral date cannot be later than today.', { field: 'referral_date' });
+    if (referralDate < today) {
+      throw ApiError.unprocessable('Referral date cannot be earlier than today.', { field: 'referral_date' });
     }
   }
 
@@ -151,6 +151,9 @@ export const assertReferralDates = (payload, { existing = null, now = new Date()
     if (existing && sameInstant(scheduledAt, existing.scheduled_at)) return;
     if (Date.parse(scheduledAt) <= now.getTime()) {
       throw ApiError.unprocessable('Scheduled date and time cannot be in the past.', { field: 'scheduled_at' });
+    }
+    if (referralDate && isValidDateOnly(referralDate) && dateTimeMatch[1] < referralDate) {
+      throw ApiError.unprocessable('Scheduled date cannot be earlier than the referral date.', { field: 'scheduled_at' });
     }
   }
 };

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { classifyBloodPressure as frontend, parseBloodPressure } from '../../src/features/consultations/utils/bpClassification.js';
 import { classifyBloodPressure as backend } from '../../../backend/src/config/bpThresholds.js';
 import { classifyWithConfig, getBpConfig, updateThresholds } from '../../../backend/src/services/bpConfig.service.js';
-import { DEFAULT_BP_THRESHOLDS } from '../../../shared/bloodPressure.js';
+import { DEFAULT_BP_THRESHOLDS, setBloodPressureConfig } from '../../../shared/bloodPressure.js';
 
 const examples = [
   ['110/70', 'Normal Blood Pressure'], ['119/79', 'Normal Blood Pressure'], ['120/75', 'Elevated Blood Pressure'],
@@ -16,19 +16,57 @@ const examples = [
   ['185/125', 'Hypertensive Urgency or Emergency'], ['85/65', 'Normal Blood Pressure'], ['125/55', 'Elevated Blood Pressure'],
 ];
 
-test('the configuration API reports effective clinical rules and rejects conflicting settings', async () => {
-  const repo = { getBpThresholdSettings: async () => ({ stage1DiastolicMin: 90, labels: { stage1: 'Wrong label' } }),
-    saveBpThresholdSettings: async () => assert.fail('Conflicting thresholds must not be saved') };
+test('the configuration API loads, saves and classifies from authorized thresholds', async () => {
+  const configuredThresholds = { ...DEFAULT_BP_THRESHOLDS, stage1SystolicMin: 125 };
+  const repo = { getBpThresholdSettings: async () => ({
+    ...configuredThresholds,
+    updatedBy: 'admin-user',
+    labels: { stage1: 'Wrong label' },
+  }) };
   const config = await getBpConfig({ repo });
-  assert.deepEqual(config.thresholds, DEFAULT_BP_THRESHOLDS);
+  assert.deepEqual(config.thresholds, configuredThresholds);
+  assert.equal(config.source, 'configured');
+  try {
+    assert.equal(setBloodPressureConfig(config), true);
+    assert.equal(frontend('126/70').code, 'stage1');
+  } finally {
+    setBloodPressureConfig({ thresholds: DEFAULT_BP_THRESHOLDS, source: 'default' });
+  }
   assert.equal(config.categories.find(({ code }) => code === 'stage1').label, 'Stage 1 Hypertension');
   assert.equal(config.categories.length, 5);
   assert.equal(config.categories.find(({ code }) => code === 'normal').label, 'Normal Blood Pressure');
   assert.equal(config.categories.find(({ code }) => code === 'elevated').label, 'Elevated Blood Pressure');
   assert.equal(config.categories.find(({ code }) => code === 'crisis').label, 'Hypertensive Urgency or Emergency');
-  await assert.rejects(updateThresholds({ user: { role: 'admin' }, repo,
-    payload: { ...DEFAULT_BP_THRESHOLDS, stage2SystolicMin: 135 } }), { statusCode: 422 });
+  assert.equal((await classifyWithConfig('126/70', { repo })).code, 'stage1');
+
+  let saved;
+  const writeRepo = {
+    getBpThresholdSettings: async () => saved,
+    saveBpThresholdSettings: async (settings) => {
+      saved = { ...settings, updatedBy: settings.updatedBy };
+      return saved;
+    },
+  };
+  const updated = await updateThresholds({
+    user: { id: 'admin-user', role: 'admin' },
+    repo: writeRepo,
+    payload: { ...DEFAULT_BP_THRESHOLDS, stage2SystolicMin: 135 },
+  });
+  assert.equal(updated.thresholds.stage2SystolicMin, 135);
+  assert.equal(updated.source, 'configured');
+  await assert.rejects(updateThresholds({ user: { role: 'admin' }, repo: writeRepo,
+    payload: { ...DEFAULT_BP_THRESHOLDS, stage2SystolicMin: 125 } }), { statusCode: 422 });
 });
+
+test('BP configuration storage failures are not returned as default settings', async () => {
+  const repo = {
+    getBpThresholdSettings: async () => {
+      throw new Error('settings storage unavailable');
+    },
+  };
+  await assert.rejects(getBpConfig({ repo }), /settings storage unavailable/);
+});
+
 for (const [reading, category] of examples) {
   test(`${reading} is ${category} in frontend and backend`, async () => {
     const expected = backend(reading);

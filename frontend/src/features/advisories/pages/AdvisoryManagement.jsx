@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Edit2, Megaphone, Plus, Trash2 } from 'lucide-react';
-import PageHeader from '@/components/system/PageHeader';
+import PageHeader from '@/components/common/PageHeader';
 import ConfirmDialog from '@/components/system/ConfirmDialog';
 import { useToast } from '@/components/ui/use-toast';
 import { advisoriesApi } from '@/services/api/advisoriesApi';
@@ -112,9 +112,10 @@ const AdvisoryManagement = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Administration"
+        management
+        crumbs={[{ label: 'Admin', to: '/app/admin/dashboard' }, 'Advisory Management']}
         title="Advisory Management"
-        context="Create and manage announcements shown in the public advisory ticker."
+        subtitle="Create and manage announcements shown in the public advisory ticker."
       />
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="advisory-form-title">

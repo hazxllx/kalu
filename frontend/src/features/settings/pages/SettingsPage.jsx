@@ -10,10 +10,9 @@ import VerificationBanner from "@/features/verification/components/VerificationB
 import SubmittedRequests from "@/features/settings/components/SubmittedRequests";
 import OfficialLogosSection from "@/features/settings/components/OfficialLogosSection";
 import { fetchMyVerification } from "@/services/api/verificationsApi";
-import { residentsApi, authApi } from "@/services/api";
+import { authApi } from "@/services/api";
 import { supabase } from "@/lib/supabase";
-import { useLocation, useOutletContext } from "react-router-dom";
-import { NavTabs } from "@/layouts/NavTabsLayout";
+import { useLocation } from "react-router-dom";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
   Calendar, Monitor, LogOut, Sun, Moon, MonitorCog, Palette, RefreshCw,
@@ -39,7 +38,6 @@ function checkPasswordStrength(pw) {
 }
 
 export default function SettingsPage({ roleKey = "resident" }) {
-  const { navItem } = useOutletContext() || {};
   const location = useLocation();
   const isProfileRoute = location.pathname.endsWith("/profile");
   const role = ROLES[roleKey];
@@ -57,11 +55,10 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const isResident = roleKey === "resident" || roleKey === "resident-limited";
   const isLimitedResident = roleKey === "resident-limited";
 
-  // Account Information for a resident comes from the SAME authoritative source
-  // as the dashboard/verification banner (GET /verifications/me -> residents
-  // table), so registration date, reference number and verification status are
-  // the real persisted values, never stale or hardcoded.
+  // Official resident details and verification status come from the resident
+  // record; account details remain available from the authenticated profile.
   const [account, setAccount] = useState(null);
+  const [hasResidentRecord, setHasResidentRecord] = useState(null);
   const [accountLoading, setAccountLoading] = useState(isResident);
   const [accountError, setAccountError] = useState("");
 
@@ -73,9 +70,9 @@ export default function SettingsPage({ roleKey = "resident" }) {
       .then((res) => {
         const v = res?.verification || null;
         setAccount(v);
-        setContactInput(v?.contactNumber || "");
+        setHasResidentRecord(res?.hasResidentRecord === true);
       })
-      .catch(() => setAccountError("We couldn't load your account information. Please try again."))
+      .catch(() => setAccountError("We couldn't load linked resident details. Your account information remains available."))
       .finally(() => setAccountLoading(false));
   }, [isResident]);
 
@@ -104,15 +101,15 @@ export default function SettingsPage({ roleKey = "resident" }) {
   }, [refreshProfile]);
 
   // Unified "account info could not be loaded" flag for the two info cards.
-  const showAccountError = (isResident && Boolean(accountError)) || staffProfileMissing;
+  const showAccountError = staffProfileMissing;
   const accountErrorText = staffProfileMissing
     ? "We couldn't load your account information. Please try again."
     : accountError;
   const retryAccount = staffProfileMissing ? handleStaffReload : loadAccount;
   const retryBusy = staffProfileMissing && staffReloading;
 
-  const displayName = user?.name || role.name;
-  const displayEmail = user?.email || "—";
+  const displayName = user?.name || "Not provided";
+  const displayEmail = user?.email || "Not provided";
 
   // Settings is an account page — the working scope is not shown as a picker.
   // Only the barangay-assigned Health Supervisor (and BHW accounts that carry
@@ -123,18 +120,15 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const assignedBarangay = getAssignedBarangay(user) || (user?.barangay || "");
   const showAssignedBarangay = !isPhn && !isRhuPersonnel && Boolean(assignedBarangay);
 
-  // Resident-editable profile field(s). Contact number is the only editable
-  // field; name/email/municipality are system-/verification-controlled.
+  // Contact number is the only self-service editable account field.
   const [contactInput, setContactInput] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState(null); // { type: 'success' | 'error', text }
 
-  // Staff accounts edit their contact number too. Their value comes from the
-  // authoritative profile (GET /api/auth/me -> profiles.contact); seed the input
-  // from it so the field is pre-filled and editable (not a read-only "—").
+  // Seed the editable field from the authenticated account profile.
   useEffect(() => {
-    if (!isResident) setContactInput(user?.contact || "");
-  }, [isResident, user?.contact]);
+    setContactInput(user?.contact || "");
+  }, [user?.contact]);
 
   const phoneValid = (v) => {
     const cleaned = String(v || "").replace(/[\s-]/g, "");
@@ -257,20 +251,12 @@ export default function SettingsPage({ roleKey = "resident" }) {
     setSavingProfile(true);
     setProfileMsg(null);
     try {
-      if (isResident) {
-        const result = await residentsApi.updateMine({ cellphoneNo: contactInput.trim() });
-        const saved = result?.profile || null;
-        // Reflect the persisted value (keeps the displayed data in step with the DB).
-        setAccount((prev) => (prev ? { ...prev, contactNumber: saved?.cellphoneNo ?? contactInput.trim() } : prev));
-        setContactInput(saved?.cellphoneNo ?? contactInput.trim());
-      } else {
-        // Staff: persist to profiles.contact via the self-scoped endpoint, then
-        // re-resolve the authoritative profile so the session reflects the DB.
-        const result = await authApi.updateMe({ contact: contactInput.trim() });
-        const saved = result?.user || null;
-        setContactInput(saved?.contact ?? contactInput.trim());
-        await refreshProfile();
-      }
+      // Persist only to the authenticated account's own profiles row. Official
+      // resident demographics and verification status are never modified here.
+      const result = await authApi.updateMe({ contact: contactInput.trim() });
+      const saved = result?.user || null;
+      setContactInput(saved?.contact ?? contactInput.trim());
+      await refreshProfile();
       setProfileMsg({ type: "success", text: "Profile updated successfully." });
       setTimeout(() => setProfileMsg(null), 2500);
     } catch (err) {
@@ -282,18 +268,24 @@ export default function SettingsPage({ roleKey = "resident" }) {
   };
 
   return (
-    <div className={isResident && isProfileRoute ? `mx-auto w-full ${isLimitedResident ? "max-w-[900px]" : "max-w-[1000px]"}` : undefined}>
-      <PageHeader management={roleKey === "admin"} crumbs={[isProfileRoute ? "Profile" : "Settings"]} title={isProfileRoute ? "Profile" : "Settings"} subtitle={isProfileRoute ? "View and update your account information." : "Manage your account security and information."} />
-      {roleKey === "admin" && <NavTabs item={navItem} compact showIcons />}
+    <div className={isResident && isProfileRoute ? "mx-auto w-full max-w-[1120px]" : undefined}>
+      <PageHeader
+        management={roleKey === "admin"}
+        crumbs={roleKey === "admin"
+          ? [{ label: "Admin", to: "/app/admin/dashboard" }, isProfileRoute ? "Profile" : "System Settings"]
+          : [isProfileRoute ? "Profile" : "Settings"]}
+        title={isProfileRoute ? "Profile" : roleKey === "admin" ? "System Settings" : "Settings"}
+        subtitle={isProfileRoute
+          ? "View and update your account information."
+          : roleKey === "admin"
+            ? "Manage system branding and administrative configuration."
+            : "Manage your account security and information."}
+      />
 
       <div className="space-y-5">
         {roleKey === "admin" && !isProfileRoute && <OfficialLogosSection />}
 
-        {isResident && isProfileRoute && (
-          <section aria-label="Verification Status">
-            <VerificationBanner showVerificationMethod />
-          </section>
-        )}
+        {isResident && isProfileRoute && <VerificationBanner showVerificationMethod />}
         {isResident && isProfileRoute && <SubmittedRequests />}
 
         {isResident && isProfileRoute && (
@@ -301,25 +293,38 @@ export default function SettingsPage({ roleKey = "resident" }) {
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3 sm:mb-5">
               <div>
                 <h2 className="font-display text-lg font-semibold text-brand-ink dark:text-foreground">Resident details</h2>
-                <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Your profile information held by the barangay health office.</p>
+                <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Your account information and linked official resident record.</p>
               </div>
               {isLimitedResident && <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"><ShieldCheck className="h-3.5 w-3.5" /> Pending verification</span>}
             </div>
+            {accountError && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3" role="alert">
+                <p className="text-sm text-brand-danger">{accountError}</p>
+                <button type="button" onClick={loadAccount} className="inline-flex min-h-10 items-center gap-2 rounded-btn border border-brand-border px-3 py-2 text-xs font-semibold text-brand-blue">
+                  <RefreshCw className="h-3.5 w-3.5" /> Retry
+                </button>
+              </div>
+            )}
             <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 sm:gap-y-4">
               {[
                 { label: "Resident name", value: account?.name || displayName },
-                { label: "Barangay", value: account?.barangay },
+                { label: "Barangay", value: account?.barangay || user?.barangay },
+                { label: "Municipality", value: account?.municipality || user?.municipality },
                 { label: "Birthday", value: account?.birthDate ? formatAccountDate(account.birthDate) : null },
-                { label: "Age", value: account?.age },
+                { label: "Age", value: account?.age ?? null },
                 { label: "Sex", value: account?.sex },
                 { label: "Email", value: displayEmail },
-                { label: "Contact number", value: account?.contactNumber },
+                { label: "Contact number", value: account?.contactNumber || user?.contact },
                 { label: "Address", value: account?.address },
               ].map((item) => (
                 <div key={item.label} className="min-w-0 border-b border-brand-border pb-3 dark:border-border">
                   <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-gray dark:text-muted-foreground">{item.label}</dt>
                   <dd className="mt-1 min-w-0 break-words text-sm font-medium leading-relaxed text-brand-ink dark:text-foreground">
-                    {accountLoading ? "Loading…" : item.value || "—"}
+                    {accountLoading && hasResidentRecord === null && ["Barangay", "Birthday", "Age", "Sex", "Address"].includes(item.label)
+                      ? "Loading…"
+                      : item.value !== null && item.value !== undefined && String(item.value).trim()
+                        ? item.value
+                        : "Not yet available"}
                   </dd>
                 </div>
               ))}
@@ -349,7 +354,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Full Name</label>
                   <input
-                    value={isResident && accountLoading ? "Loading…" : (isResident ? (account?.name || displayName) : displayName)}
+                    value={displayName}
                     readOnly
                     className="mt-1.5 min-h-11 w-full rounded-input border border-brand-border bg-brand-bg px-3.5 py-2.5 text-sm text-brand-gray outline-none dark:border-border dark:bg-input dark:text-muted-foreground"
                   />
@@ -369,10 +374,10 @@ export default function SettingsPage({ roleKey = "resident" }) {
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Contact Number</label>
                   <input
-                    value={isResident && accountLoading ? "" : contactInput}
+                    value={contactInput}
                     onChange={(e) => setContactInput(e.target.value)}
-                    disabled={(isResident && accountLoading) || savingProfile}
-                    placeholder={isResident && accountLoading ? "Loading…" : "e.g. 0917 123 4567"}
+                    disabled={savingProfile}
+                    placeholder="e.g. 0917 123 4567"
                     className="mt-1.5 min-h-11 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue disabled:bg-brand-bg dark:border-border dark:bg-input dark:text-foreground"
                   />
                 </div>
@@ -392,7 +397,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Municipality</label>
                   <input
-                    value={isResident ? (accountLoading ? "Loading…" : (account?.municipality || "—")) : (user?.municipality || "Pili, Camarines Sur")}
+                    value={user?.municipality || account?.municipality || "Not yet available"}
                     readOnly
                     className="mt-1.5 min-h-11 w-full rounded-input border border-brand-border bg-brand-bg px-3.5 py-2.5 text-sm text-brand-gray outline-none dark:border-border dark:bg-input dark:text-muted-foreground"
                   />
@@ -414,7 +419,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
               <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-3">
                 <button
                   onClick={handleProfileSave}
-                  disabled={savingProfile || (isResident && accountLoading)}
+                  disabled={savingProfile || !user?.id}
                   className="min-h-11 w-full rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark disabled:opacity-60 sm:w-auto"
                 >
                   {savingProfile ? "Saving…" : "Save Changes"}

@@ -294,9 +294,8 @@ export const fileRepository = {
     if (q) rows = rows.filter((r) => matchesQuery(r, q));
     if (barangay) rows = rows.filter((r) => r.barangay === barangay);
     rows.sort((a, b) =>
-      String(a.submittedForVerificationAt || a.createdAt || '').localeCompare(
-        String(b.submittedForVerificationAt || b.createdAt || ''),
-      ),
+      (Date.parse(b.submittedForVerificationAt || b.createdAt || '') || 0) -
+      (Date.parse(a.submittedForVerificationAt || a.createdAt || '') || 0),
     );
     const total = rows.length;
     return { rows: clone(rows.slice(offset, offset + limit)), total };

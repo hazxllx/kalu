@@ -25,15 +25,15 @@ import { Search, Plus, Eye, Edit2, Trash2, X, ClipboardCheck, MoreVertical } fro
 import { formatStatusLabel, getStatusColor, getRiskColor } from "@/lib/statusFormatter";
 import TablePagination from "@/components/tables/TablePagination";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
-import { consultationAssessment, consultationRiskLevel, consultationServiceName, consultationRiskReasons } from "@/features/consultations/lib/consultationRisk";
+import { consultationAssessment, consultationFollowUp, consultationRiskLevel, consultationServiceName, consultationRiskReasons } from "@/features/consultations/lib/consultationRisk";
 import { validateConsultationDateTime, calculateConsultationBmi, assessConsultationRisk } from "../../../../../shared/consultationClinical.js";
 
 const inputCls = "w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue focus:border-2";
 const fieldNames = {
-  consultationDate: "Encounter Date", consultationTime: "Encounter Time", chiefComplaint: "Chief Complaint", findings: "Examination Findings", diagnosis: "Diagnosis / Assessment", treatmentGiven: "Treatment Given", medicationPrescribed: "Medication Notes", adviceGiven: "Advice / Recommendations", remarks: "Clinical History / Remarks", bloodPressure: "Blood Pressure", temperature: "Temperature (C)", pulseRate: "Pulse Rate", respiratoryRate: "Respiratory Rate", height: "Height (cm)", weight: "Weight (kg)", bmi: "BMI (kg/m2)", oxygenSaturation: "Oxygen Saturation (%)", nextVisitDate: "Next Visit Date",
+  consultationDate: "Encounter Date", consultationTime: "Encounter Time", chiefComplaint: "Chief Complaint", findings: "Examination Findings", diagnosis: "Diagnosis / Assessment", bloodPressure: "Blood Pressure", temperature: "Temperature (C)", pulseRate: "Pulse Rate", respiratoryRate: "Respiratory Rate", height: "Height (cm)", weight: "Weight (kg)", bmi: "BMI (kg/m2)", oxygenSaturation: "Oxygen Saturation (%)", nextVisitDate: "Next Visit Date",
 };
 const vitalFields = ["bloodPressure", "temperature", "pulseRate", "respiratoryRate", "height", "weight", "oxygenSaturation"];
-const textFields = ["chiefComplaint", "findings", "diagnosis", "treatmentGiven", "medicationPrescribed", "adviceGiven", "remarks"];
+const textFields = ["chiefComplaint", "findings", "diagnosis"];
 const riskLabel = (level) => level === "Moderate" ? "Medium" : level || "Unassessed";
 const generalIndicators = [
   ["severeBreathingDifficulty", "Severe breathing difficulty"], ["suspectedStroke", "Suspected stroke"],
@@ -47,9 +47,20 @@ const maternalIndicators = [
   ["bleeding", "Vaginal bleeding"], ["severeHeadache", "Severe headache"], ["visualDisturbance", "Visual disturbance"],
   ["severeAbdominalPain", "Severe abdominal pain"], ["reducedFetalMovement", "Reduced fetal movement"],
 ];
+const compactRiskFindings = (assessment = {}) => {
+  const reasons = Array.isArray(assessment.reasons) ? assessment.reasons : [];
+  const ruleIds = new Set(reasons.map((reason) => reason?.ruleId));
+  const findings = [];
+  if ([...ruleIds].some((rule) => String(rule).startsWith("bp_stage") || ["stage1", "bp_stage1_hypertension"].includes(rule)) || reasons.some((reason) => /stage 1|130.*80/i.test(reason?.message || ""))) findings.push("Stage 1 hypertension reading");
+  if ([...ruleIds].some((rule) => String(rule).includes("respiratory")) && reasons.some((reason) => /dangerous|urgent/i.test(reason?.message || ""))) findings.push("Dangerous respiratory rate");
+  if (reasons.some((reason) => String(reason?.ruleId) === "oxygen_danger" || /oxygen saturation at or below 92/i.test(reason?.message || ""))) findings.push("Oxygen saturation at or below 92%");
+  if (reasons.some((reason) => String(reason?.ruleId) === "bmi_abnormal" || /BMI/i.test(reason?.message || ""))) findings.push("BMI requires clinical review");
+  if (assessment.missingMeasurements?.includes("temperature") || reasons.some((reason) => /temperature.*missing|missing or invalid.*temperature/i.test(reason?.message || ""))) findings.push("Missing or invalid temperature measurement");
+  return findings;
+};
 
 function Modal({ title, onClose, busy = false, children }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><Card role="dialog" aria-label={title} aria-modal="true" className="w-full max-w-4xl max-h-[92vh] overflow-y-auto p-5 sm:p-7"><div className="mb-5 flex items-center justify-between gap-3"><h2 className="text-lg font-semibold text-brand-ink">{title}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="text-brand-gray disabled:opacity-40"><X className="h-5 w-5" /></button></div>{children}</Card></div>;
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4"><Card role="dialog" aria-label={title} aria-modal="true" className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[92vh]"><div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6"><h2 className="text-base font-semibold text-brand-ink sm:text-lg">{title}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="flex h-9 w-9 items-center justify-center rounded-btn text-brand-gray disabled:opacity-40"><X className="h-5 w-5" /></button></div><div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">{children}</div></Card></div>;
 }
 
 export default function PhnHealthRecords() {
@@ -339,8 +350,8 @@ export default function PhnHealthRecords() {
          </div>
        </Card>
         <Card className="clinical-table-card p-0 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="clinical-table w-full text-left text-sm border-collapse">
+          <div className="hidden overflow-x-auto md:block">
+            <table className="clinical-table w-full min-w-[980px] text-left text-sm border-collapse">
               <thead>
                 <tr>
                   <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-25364a" style={{ width: '24%', minWidth: '180px' }}>Resident</th>
@@ -482,6 +493,36 @@ export default function PhnHealthRecords() {
               </tbody>
             </table>
           </div>
+          <div className="divide-y divide-brand-border md:hidden">
+            {pageRecords.map((record) => {
+              const resident = record.resident || {};
+              const riskLevel = consultationRiskLevel(record);
+              return (
+                <article key={record.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-base font-semibold text-brand-ink">{resident.name || "Name not recorded"}</p>
+                      <p className="mt-0.5 break-words text-xs text-brand-gray">{resident.gender || resident.sex || "Unknown"} · {resident.age ? `${resident.age}y` : "Age unknown"}</p>
+                    </div>
+                    <button type="button" disabled={busy} onClick={() => setOpenMenuId(openMenuId === record.id ? null : record.id)} className="clinical-action flex shrink-0 items-center justify-center" aria-label={`Actions for ${resident.name || "resident"}`}><MoreVertical className="h-4 w-4" /></button>
+                  </div>
+                  {openMenuId === record.id && <div className="mt-3 grid grid-cols-1 gap-2 border-t border-brand-border pt-3">
+                    <button type="button" onClick={() => { setOpenMenuId(null); openRecord(record, false); }} className="text-left text-sm font-medium text-brand-blue">View Record</button>
+                    <button type="button" onClick={() => { setOpenMenuId(null); openRecord(record, true); }} className="text-left text-sm font-medium text-brand-blue">Edit Record</button>
+                  </div>}
+                  <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3">
+                    <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Barangay</dt><dd className="mt-1 break-words text-sm text-brand-ink">{resident.barangay || "Not recorded"}</dd></div>
+                    <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Resident ID</dt><dd className="mt-1 break-words text-sm text-brand-ink">{resident.id || record.residentId || "Not recorded"}</dd></div>
+                    <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Service</dt><dd className="mt-1 break-words text-sm text-brand-ink">{consultationServiceName(record) || "Not recorded"}</dd></div>
+                    <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Last Visit</dt><dd className="mt-1 text-sm text-brand-ink">{record.consultationDate ? formatClinicalDate(record.consultationDate) : "Not recorded"}{record.consultationTime && ` · ${record.consultationTime}`}</dd></div>
+                    <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Risk</dt><dd className="mt-1"><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${getRiskColor(riskLevel)}`}>{riskLabel(riskLevel)}</span></dd></div>
+                    <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Status</dt><dd className="mt-1"><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${getStatusColor(record.status)}`}>{formatStatusLabel(record.status)}</span></dd></div>
+                  </dl>
+                </article>
+              );
+            })}
+            {filtered.length === 0 && <p className="p-6 text-center text-sm text-brand-gray">No persisted consultations match this scope and filter.</p>}
+          </div>
         </Card>
         <TablePagination
           total={filtered.length}
@@ -496,7 +537,7 @@ export default function PhnHealthRecords() {
       {failure && <p role="alert" className="mb-4 text-sm text-brand-danger">{failure}</p>}
       <label className="mb-4 block text-sm font-medium">Resident Registry Record<select aria-label="Resident Registry Record" disabled={editor === "edit" || busy} value={form.residentId} onChange={(event) => setForm((current) => ({ ...current, residentId: event.target.value, clinicalContext: { pregnancyStatus: "unknown", existingConditions: [] }, clinicalIndicators: { dangerSignsReviewed: false }, maternal: null }))} className={`${inputCls} mt-1`}><option value="">Select an authorized resident...</option>{registry.map((resident) => <option key={resident.id} value={resident.id}>{resident.name || "Name not recorded"} · {resident.barangay || "Barangay not recorded"} · {String(resident.id).slice(-8)}</option>)}{original && form.residentId && !residentById.has(form.residentId) && <option value={form.residentId}>{original.resident?.name || "Saved resident record"} · Saved resident ID: {form.residentId}</option>}</select>{errors.residentId && <span role="alert" className="text-xs text-brand-danger">{errors.residentId}</span>}</label>
       {selectedResident && <p className="mb-4 rounded-btn bg-brand-bg p-3 text-xs text-brand-gray">Resident ID: {selectedResident.id} · Age: {selectedResident.age ?? "Not recorded"} · Sex: {selectedResident.gender || selectedResident.sex || "Not recorded"} · Barangay: {selectedResident.barangay || "Not recorded"}. Demographics are maintained in the resident registry.</p>}
-      {original && <p className="mb-4 text-xs text-brand-gray">Recorded service: {consultationServiceName(original) || "Not recorded"}. The saved service association and maternal care snapshot are retained.</p>}
+      {original && <p className="mb-4 text-xs text-brand-gray">Recorded service: {consultationServiceName(original) || "Not recorded"}</p>}
       <div className="mb-5 grid gap-4 sm:grid-cols-2">{field("consultationDate", "date")}{field("consultationTime", "time")}</div>
       <h3 className="mb-2 text-sm font-semibold">Recorded Vitals</h3>
       <p className="mb-3 text-xs text-brand-gray">All 8 vital fields, including calculated BMI, are required for a new record or clinical correction. Metadata-only edits retain partial historical measurements.</p>
@@ -505,36 +546,12 @@ export default function PhnHealthRecords() {
         <label className="block text-xs font-medium text-brand-gray">{fieldNames.bmi}{requireClinical && " *"}<input aria-label="BMI" aria-required={requireClinical} aria-invalid={Boolean(errors.bmi)} readOnly value={bmi === null ? "" : bmi.toFixed(1)} className={`${inputCls} mt-1 bg-brand-bg`} /><span className="mt-1 block text-xs">Calculated from measured height and weight.</span>{errors.bmi && <span role="alert" className="mt-1 block text-xs text-brand-danger">{errors.bmi}</span>}</label>
       </div>
       <div className="mb-5 grid gap-4 sm:grid-cols-2">{textFields.map((name) => <label key={name} className="text-xs font-medium text-brand-gray">{fieldNames[name]}{requireClinical && ["chiefComplaint", "findings"].includes(name) && " *"}<textarea aria-label={fieldNames[name]} aria-required={requireClinical && ["chiefComplaint", "findings"].includes(name)} aria-invalid={Boolean(errors[name])} disabled={busy} rows={3} value={form[name]} onChange={(event) => setForm((current) => ({ ...current, [name]: event.target.value }))} className={`${inputCls} mt-1 resize-y`} />{errors[name] && <span role="alert" className="text-xs text-brand-danger">{errors[name]}</span>}</label>)}</div>
-      <section aria-label="Consultation clinical context" className="mb-5 rounded-btn border border-brand-border p-4">
-        <h3 className="text-sm font-semibold">Clinical Context and Danger Signs</h3>
-        <p role="status" className="mt-2 text-xs text-brand-gray">{!online ? "Offline: clinical sources cannot be verified; risk is not assumed Low."
-          : contextLoading ? "Loading resident clinical sources for this encounter date..."
-            : clinicalContext ? `Clinical source status: ${clinicalContext.sourceStatus}. Source records are reconciled again by the server on save.`
-              : scopedContextState?.error || "Select a resident and valid encounter date to load clinical sources. No absence of pregnancy or conditions has been assumed."}</p>
-        {online && scopedContextState?.error && <button type="button" disabled={busy || contextLoading} onClick={() => setContextRetry((current) => current + 1)} className="mt-2 text-xs font-medium text-brand-blue">Retry Clinical Context</button>}
-        {clinicalContext?.pregnancy && <p className="mt-2 text-xs text-brand-gray">Recorded maternal context: {clinicalContext.pregnancy.isPregnant ? "Pregnant" : clinicalContext.pregnancy.isPostpartum ? "Postpartum" : "Recorded episode"}. An entered status cannot silently dismiss a recorded maternal episode.</p>}
-        {form.maternal && <p className="mt-2 text-xs text-brand-gray">Retained maternal care: {form.maternal.careType || "Not recorded"} · Pregnancy ID: {form.maternal.pregnancyId || "Unlinked"} · LMP: {form.maternal.lmpDate || "Not recorded"} · EDD: {form.maternal.eddDate || "Not recorded"} · Gestational age: {form.maternal.gestationalAgeWeeks ?? "Not recorded"}</p>}
-        <label className="mt-3 block text-xs font-medium text-brand-gray">Reported Pregnancy Status<select aria-label="Reported Pregnancy Status" disabled={busy} value={reportedStatus} onChange={(event) => setForm((current) => ({ ...current, clinicalContext: { ...current.clinicalContext, pregnancyStatus: event.target.value } }))} className={`${inputCls} mt-1`}><option value="unknown">Not yet confirmed</option><option value="not_pregnant">Not pregnant</option><option value="pregnant">Pregnant</option><option value="postpartum">Postpartum</option></select></label>
-        {clinicalContext?.existingConditions.length > 0 && <div className="mt-3 text-xs text-brand-gray"><p className="font-medium">Conditions in verified source records</p><ul className="mt-1 list-disc pl-4">{clinicalContext.existingConditions.map((condition, index) => <li key={index}>{consultationCondition(condition).name} · {consultationCondition(condition).status}{condition.significant === true ? " · Significant" : ""}</li>)}</ul></div>}
-        <div className="mt-4 flex items-center justify-between gap-3"><h4 className="text-xs font-semibold">Reported Existing Conditions</h4><button type="button" disabled={busy || form.clinicalContext.existingConditions.length >= 50} onClick={() => setForm((current) => ({ ...current, clinicalContext: { ...current.clinicalContext, existingConditions: [...current.clinicalContext.existingConditions, { name: "", status: "stable", significant: false }] } }))} className="text-xs font-medium text-brand-blue disabled:opacity-50">Add Condition</button></div>
-        {form.clinicalContext.existingConditions.map((condition, index) => <div key={index} className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
-          <label className="text-xs text-brand-gray">Condition<input aria-label={`Condition ${index + 1}`} disabled={busy} maxLength={160} value={condition.name} onChange={(event) => setForm((current) => ({ ...current, clinicalContext: { ...current.clinicalContext, existingConditions: current.clinicalContext.existingConditions.map((item, position) => position === index ? { ...item, name: event.target.value } : item) } }))} className={`${inputCls} mt-1`} /></label>
-          <label className="text-xs text-brand-gray">Control<select aria-label={`Condition ${index + 1} control`} disabled={busy} value={condition.status} onChange={(event) => setForm((current) => ({ ...current, clinicalContext: { ...current.clinicalContext, existingConditions: current.clinicalContext.existingConditions.map((item, position) => position === index ? { ...item, status: event.target.value } : item) } }))} className={`${inputCls} mt-1`}><option value="stable">Stable / monitored</option><option value="uncontrolled">Uncontrolled</option></select></label>
-          <button type="button" aria-label={`Remove condition ${index + 1}`} disabled={busy} onClick={() => setForm((current) => ({ ...current, clinicalContext: { ...current.clinicalContext, existingConditions: current.clinicalContext.existingConditions.filter((_, position) => position !== index) } }))} className="text-xs text-brand-danger">Remove</button>
-          <label className="flex items-center gap-2 text-xs text-brand-gray sm:col-span-3"><input aria-label={`Condition ${index + 1} is significant`} type="checkbox" disabled={busy} checked={condition.significant === true} onChange={(event) => setForm((current) => ({ ...current, clinicalContext: { ...current.clinicalContext, existingConditions: current.clinicalContext.existingConditions.map((item, position) => position === index ? { ...item, significant: event.target.checked } : item) } }))} />Significant clinical condition</label>
-        </div>)}
-        {Object.entries(errors).filter(([name]) => name.startsWith("clinicalContext") || name.startsWith("maternal")).map(([name, message]) => <p key={name} role="alert" className="mt-2 text-xs text-brand-danger">{message}</p>)}
-        <details className="mt-4"><summary className="cursor-pointer text-xs font-semibold text-brand-blue">Warning Signs and Monitoring Needs</summary><div className="mt-3 grid gap-3 sm:grid-cols-2">{[...generalIndicators, ...(pregnancy ? maternalIndicators : [])].map(([name, label]) => <label key={name} className="flex items-start gap-2 text-xs text-brand-ink"><input aria-label={label} type="checkbox" disabled={busy} checked={form.clinicalIndicators[name] === true} onChange={(event) => setForm((current) => ({ ...current, clinicalIndicators: { ...current.clinicalIndicators, [name]: event.target.checked } }))} />{label}</label>)}</div></details>
-        <label className="mt-4 flex items-start gap-2 border-t border-brand-border pt-3 text-xs font-medium text-brand-ink"><input aria-label="Clinical history, pregnancy status and danger signs reviewed" aria-required={requireClinical} type="checkbox" disabled={busy} checked={form.clinicalIndicators.dangerSignsReviewed === true} onChange={(event) => setForm((current) => ({ ...current, clinicalIndicators: { ...current.clinicalIndicators, dangerSignsReviewed: event.target.checked } }))} />Clinical history, pregnancy status and danger signs reviewed{requireClinical && " *"}</label>
-        {Object.entries(errors).filter(([name]) => name.startsWith("clinicalIndicators")).map(([name, message]) => <p key={name} role="alert" className="mt-2 text-xs text-brand-danger">{message}</p>)}
-      </section>
       <section aria-label="Automatic risk preview" className="mb-5 rounded-btn border border-brand-border p-4">
-        <h3 className="text-sm font-semibold">Automatic Risk Preview: <span className={getRiskColor(riskPreview.level)}>{riskLabel(riskPreview.level)}</span></h3>
-        <p className="mt-2 text-xs text-brand-gray">Decision support only, not a diagnosis or an approved local protocol. The server recomputes and saves the assessment and reasons.</p>
-        <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-brand-gray">{riskPreview.reasons.map((reason, index) => <li key={`${reason.ruleId}-${index}`}>{reason.message}</li>)}</ul>
-        {riskPreview.referralEvaluationRequired && <p role="alert" className="mt-3 text-xs font-semibold text-brand-danger">{riskPreview.urgency === "immediate" ? "Immediate professional evaluation is needed. Do not delay emergency care to complete this form." : "Prompt professional assessment or referral evaluation is needed."}</p>}
-        {original && <p className="mt-3 border-t border-brand-border pt-3 text-xs text-brand-gray">Saved server classification: {riskLabel(consultationRiskLevel(original))}. {consultationRiskReasons(original) || "No saved reasons recorded."}</p>}
-        {originalAssessment?.review && <p className="mt-2 text-xs text-brand-gray">Saved professional review: {riskLabel(originalAssessment.review.level)} · {originalAssessment.review.reason} · {originalAssessment.review.reviewedAt || "Not recorded"}. This saved review is retained unless a new reassessment is submitted.</p>}
+        <h3 className="text-sm font-semibold">Automatic Risk Assessment</h3>
+        <p className={`mt-2 text-lg font-bold ${getRiskColor(riskPreview.level)}`}>{riskLabel(riskPreview.level)}</p>
+        {compactRiskFindings(riskPreview).length > 0 && <div className="mt-3"><h4 className="text-xs font-semibold text-brand-ink">Assessment Findings</h4><ul className="mt-1.5 list-disc space-y-1 pl-5 text-xs text-brand-gray">{compactRiskFindings(riskPreview).map((finding) => <li key={finding}>{finding}</li>)}</ul></div>}
+        {riskPreview.referralEvaluationRequired && <p role="alert" className="mt-3 text-xs font-semibold text-brand-danger">Recommended Action: Professional assessment or referral may be required.</p>}
+        <p className="mt-3 text-[11px] text-brand-gray">Clinical decision support only; not a medical diagnosis.</p>
       </section>
       {canReviewRisk && <fieldset className="mb-5 rounded-btn border border-brand-border p-4">
         <legend className="px-1 text-sm font-semibold">Professional Risk Review</legend>
@@ -550,17 +567,60 @@ export default function PhnHealthRecords() {
       <h3 className="mb-3 text-sm font-semibold">Structured Prescriptions</h3>
       <MedicineSelector value={form.medications} onChange={(medications) => setForm((current) => ({ ...current, medications }))} errors={errors} disabled={busy} />
       <div className="mt-5 grid gap-4 sm:grid-cols-3">{["followUpRequired", "referralRequired"].map((name) => <label key={name} className="text-xs font-medium text-brand-gray">{name === "followUpRequired" ? "Follow-up Required" : "Referral Required"}<select aria-label={name === "followUpRequired" ? "Follow-up Required" : "Referral Required"} disabled={busy} value={form[name]} onChange={(event) => setForm((current) => ({ ...current, [name]: event.target.value }))} className={`${inputCls} mt-1`}><option>No</option><option>Yes</option></select></label>)}{field("nextVisitDate", "date")}</div>
-      <p className="mt-4 text-xs text-brand-gray">The original recorded timestamp, server status, prescriptions, maternal snapshot and clinical assessment history are preserved on edit. Diagnosis is optional and separate from required findings. Referral-required is a clinical flag; recipient routing is completed through the referral workflow.</p>
-      <div className="mt-6 flex justify-end gap-3"><button disabled={busy} onClick={() => setEditor(null)} className="rounded-btn border border-brand-border px-4 py-2 text-sm">Cancel</button><button disabled={busy || (editor === "edit" && !online)} onClick={save} className="rounded-btn bg-brand-blue px-5 py-2 text-sm text-white disabled:opacity-50">{busy ? "Saving..." : "Save Clinical Record"}</button></div>
+      <div className="sticky bottom-0 -mx-4 mt-5 flex justify-end gap-3 border-t border-brand-border bg-white px-4 py-3 sm:-mx-6 sm:px-6"><button disabled={busy} onClick={() => setEditor(null)} className="rounded-btn border border-brand-border px-4 py-2 text-sm">Cancel</button><button disabled={busy || (editor === "edit" && !online)} onClick={save} className="rounded-btn bg-brand-blue px-5 py-2 text-sm text-white disabled:opacity-50">{busy ? "Saving..." : "Save Clinical Record"}</button></div>
     </Modal>}
     {viewing && <Modal title="Persisted Clinical Record" onClose={() => setViewing(null)}>
-      <p className="mb-4 text-xs text-brand-gray">Server visit: {viewing.id} · Resident: {viewing.resident?.name || viewing.resident?.id} · Encounter: {viewing.consultationDate} {viewing.consultationTime} · Status: {viewing.status}</p>
-      <section aria-label="Saved consultation risk" className="mb-5 rounded-btn border border-brand-border p-4"><h3 className="text-sm font-semibold">Recorded Service: {consultationServiceName(viewing) || "Not recorded"}</h3><p className="mt-2 text-sm">Saved Risk: <span className={getRiskColor(consultationRiskLevel(viewing))}>{riskLabel(consultationRiskLevel(viewing))}</span></p><p className="mt-2 text-xs text-brand-gray">{consultationRiskReasons(viewing) || "No saved encounter assessment reasons recorded."}</p>{viewingAssessment?.referralEvaluationRequired && <p className="mt-2 text-xs font-semibold text-brand-danger">Professional referral evaluation required{viewingAssessment.urgency ? `: ${viewingAssessment.urgency}` : ""}.</p>}{viewingAssessment?.review && <p className="mt-2 text-xs text-brand-gray">Professional review: {riskLabel(viewingAssessment.review.level)} · {viewingAssessment.review.reason} · Reviewer: {viewingAssessment.review.reviewedBy} · {viewingAssessment.review.reviewedAt}</p>}</section>
-      <div className="grid gap-4 sm:grid-cols-2">{textFields.map((name) => <div key={name}><p className="text-xs font-medium text-brand-gray">{fieldNames[name]}</p><p className="mt-1 whitespace-pre-wrap text-sm">{viewing[name] || "Not recorded"}</p></div>)}</div>
-      <h3 className="mt-6 mb-3 text-sm font-semibold">Recorded Vitals and Prescriptions</h3><div className="grid gap-3 sm:grid-cols-3">{vitalFields.map((name) => <div key={name}><p className="text-xs text-brand-gray">{fieldNames[name]}</p><p className="text-sm">{viewingForm[name] || "Not recorded"}</p></div>)}<div><p className="text-xs text-brand-gray">{fieldNames.bmi}</p><p className="text-sm">{viewing.vitals?.bmi ?? calculateConsultationBmi(viewingForm.height, viewingForm.weight) ?? "Not recorded"}</p></div></div>
-      <div className="mt-4 space-y-2">{(viewing.medications || []).map((medication, index) => <p key={index} className="rounded-btn border border-brand-border p-3 text-sm">{Object.entries(medication).filter(([name, item]) => !["medicineId", "custom", "source"].includes(name) && item !== null && item !== "").map(([name, item]) => `${name}: ${String(item)}`).join(" · ")}</p>)}</div>
-      <h3 className="mt-6 mb-3 text-sm font-semibold">Clinical History / Workflow</h3><p className="text-xs text-brand-gray">Originally recorded: {viewing.recordedAt || "Not recorded"} · Last server update: {viewing.updatedAt || "Not recorded"} · Attending personnel: {viewing.attendingPersonnel?.fullName || "Not recorded"}</p>
-      {viewing.consultationDetails && <details className="mt-3 rounded-btn border border-brand-border p-3"><summary className="cursor-pointer text-sm font-medium">Full Retained Clinical Details</summary><pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs">{JSON.stringify(viewing.consultationDetails, null, 2)}</pre></details>}
+      {(() => {
+        const followUp = consultationFollowUp(viewing);
+        const referrals = Array.isArray(viewing.referrals) ? viewing.referrals : [];
+        const referral = referrals[0] || viewing.referral || null;
+        return (
+          <div className="space-y-5">
+            <section aria-label="Consultation overview" className="rounded-btn border border-brand-border p-4">
+              <h3 className="text-sm font-semibold text-brand-ink">Consultation Overview</h3>
+              <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div><dt className="text-xs font-medium text-brand-gray">Resident</dt><dd className="mt-1 text-sm">{viewing.resident?.name || "Not recorded"}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray">Resident ID</dt><dd className="mt-1 break-words text-sm">{viewing.resident?.id || viewing.residentId || "Not recorded"}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray">Encounter Date</dt><dd className="mt-1 text-sm">{viewing.consultationDate ? formatClinicalDate(viewing.consultationDate) : "Not recorded"}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray">Encounter Time</dt><dd className="mt-1 text-sm">{viewing.consultationTime || "Not recorded"}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray">Recorded Service</dt><dd className="mt-1 text-sm">{consultationServiceName(viewing) || "Not recorded"}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray">Record Status</dt><dd className="mt-1 text-sm">{formatStatusLabel(viewing.status)}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray">Attending Personnel</dt><dd className="mt-1 text-sm">{viewing.attendingPersonnel?.fullName || viewing.recordedByName || "Not recorded"}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray">Record Timestamps</dt><dd className="mt-1 text-sm">Recorded: {viewing.recordedAt || "Not recorded"}<br />Updated: {viewing.updatedAt || "Not recorded"}</dd></div>
+              </dl>
+            </section>
+            <section aria-label="Saved consultation risk" className="rounded-btn border border-brand-border p-4">
+              <h3 className="text-sm font-semibold text-brand-ink">Risk Classification</h3>
+              <p className="mt-2 text-lg font-bold"><span className={getRiskColor(consultationRiskLevel(viewing))}>{riskLabel(consultationRiskLevel(viewing))}</span></p>
+              <p className="mt-2 whitespace-pre-wrap text-xs text-brand-gray">{consultationRiskReasons(viewing) || "No saved encounter assessment reasons recorded."}</p>
+              {viewingAssessment?.review && <p className="mt-2 text-xs text-brand-gray">Professional review: {riskLabel(viewingAssessment.review.level)} · {viewingAssessment.review.reason} · Reviewer: {viewingAssessment.review.reviewedBy || "Not recorded"} · {viewingAssessment.review.reviewedAt || "Not recorded"}</p>}
+            </section>
+            <section aria-label="Recorded vital signs" className="rounded-btn border border-brand-border p-4">
+              <h3 className="text-sm font-semibold text-brand-ink">Vital Signs</h3>
+              <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">{vitalFields.map((name) => <div key={name}><dt className="text-xs text-brand-gray">{fieldNames[name]}</dt><dd className="mt-1 text-sm font-medium">{viewingForm[name] || "Not recorded"}</dd></div>)}
+                <div><dt className="text-xs text-brand-gray">{fieldNames.bmi}</dt><dd className="mt-1 text-sm font-medium">{viewing.vitals?.bmi ?? calculateConsultationBmi(viewingForm.height, viewingForm.weight) ?? "Not recorded"}</dd></div>
+              </dl>
+            </section>
+            <section aria-label="Clinical findings" className="rounded-btn border border-brand-border p-4">
+              <h3 className="text-sm font-semibold text-brand-ink">Clinical Findings</h3>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2"><div><p className="text-xs font-medium text-brand-gray">Chief Complaint</p><p className="mt-1 whitespace-pre-wrap text-sm">{viewing.chiefComplaint || "Not recorded"}</p></div><div><p className="text-xs font-medium text-brand-gray">Examination Findings</p><p className="mt-1 whitespace-pre-wrap text-sm">{viewing.findings || "Not recorded"}</p></div></div>
+              <div className="mt-4"><p className="text-xs font-medium text-brand-gray">Diagnosis / Assessment</p><p className="mt-1 whitespace-pre-wrap text-sm">{viewing.diagnosis || "Not recorded"}</p></div>
+            </section>
+            <section aria-label="Prescribed medications" className="rounded-btn border border-brand-border p-4">
+              <h3 className="text-sm font-semibold text-brand-ink">Prescriptions</h3>
+              {(viewing.medications || []).length > 0 ? <div className="mt-3 space-y-3">{viewing.medications.map((medication, index) => <article key={index} className="border-t border-brand-border pt-3 first:border-0 first:pt-0"><p className="break-words text-sm font-semibold">{medication.genericName || medication.brandName || "Medication not named"}</p><dl className="mt-2 grid gap-2 sm:grid-cols-3"><div><dt className="text-xs text-brand-gray">Dose</dt><dd className="text-sm">{medication.dose || "Not recorded"}</dd></div><div><dt className="text-xs text-brand-gray">Route</dt><dd className="text-sm">{medication.route || "Not recorded"}</dd></div><div><dt className="text-xs text-brand-gray">Frequency</dt><dd className="text-sm">{medication.frequency || "Not recorded"}</dd></div><div><dt className="text-xs text-brand-gray">Duration</dt><dd className="text-sm">{medication.duration || "Not recorded"}</dd></div><div><dt className="text-xs text-brand-gray">Quantity</dt><dd className="text-sm">{medication.quantity || "Not recorded"}</dd></div><div className="sm:col-span-2"><dt className="text-xs text-brand-gray">Instructions</dt><dd className="whitespace-pre-wrap text-sm">{medication.instructions || "Not recorded"}</dd></div></dl></article>)}</div> : <p className="mt-2 text-sm text-brand-gray">No medications prescribed.</p>}
+            </section>
+            <section aria-label="Follow-up information" className="rounded-btn border border-brand-border p-4">
+              <h3 className="text-sm font-semibold text-brand-ink">Follow-up Information</h3>
+              <dl className="mt-3 grid gap-3 sm:grid-cols-2"><div><dt className="text-xs text-brand-gray">Follow-up Required</dt><dd className="mt-1 text-sm">{followUp.has ? "Yes" : "No"}</dd></div><div><dt className="text-xs text-brand-gray">Scheduled Date</dt><dd className="mt-1 text-sm">{followUp.date ? formatClinicalDate(followUp.date) : "Not scheduled"}</dd></div><div><dt className="text-xs text-brand-gray">Status</dt><dd className="mt-1 text-sm">{followUp.status || "Not recorded"}</dd></div></dl>
+            </section>
+            <section aria-label="Referral information" className="rounded-btn border border-brand-border p-4">
+              <h3 className="text-sm font-semibold text-brand-ink">Referral Information</h3>
+              <dl className="mt-3 grid gap-3 sm:grid-cols-2"><div><dt className="text-xs text-brand-gray">Referral Required</dt><dd className="mt-1 text-sm">{viewing.referralRequired === "Yes" || viewing.referral_required === true || referral ? "Yes" : "No"}</dd></div><div><dt className="text-xs text-brand-gray">Referral Status</dt><dd className="mt-1 text-sm">{referral?.status || referral?.referralStatus || "Not recorded"}</dd></div><div className="sm:col-span-2"><dt className="text-xs text-brand-gray">Referral Details</dt><dd className="mt-1 whitespace-pre-wrap text-sm">{referral?.reason || referral?.notes || referral?.destinationFacilityName || (referral ? "Referral record available" : "No referral information recorded.")}</dd></div></dl>
+            </section>
+          </div>
+        );
+      })()}
       <LabResultsPanel residentId={viewing.resident?.id || viewing.residentId} consultationId={viewing.offline ? undefined : viewing.id} compact />
       {patientsByVisit.has(String(viewing.id)) && <button onClick={() => { setCheckup(patientsByVisit.get(String(viewing.id))); setViewing(null); }} className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm text-white">Open Linked PHN Check-up</button>}
     </Modal>}

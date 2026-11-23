@@ -1,4 +1,4 @@
-import { getServiceClient } from '../config/supabase.js';
+import { getServiceClient, getUserClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { extractExpectedRevision } from '../utils/syncConcurrency.js';
 import { assignedBarangay } from '../config/scope.js';
@@ -17,6 +17,10 @@ const TABLES = Object.freeze({
 });
 const STAFF = new Set(['health_supervisor', 'phn', 'mho']);
 const FOLLOW_UP_PAGE_SIZE = 200;
+const PREDEFINED_VACCINES = new Set([
+  'BCG', 'Hepatitis B', 'Pentavalent (DPT-HepB-Hib)', 'OPV', 'IPV', 'PCV', 'MMR', 'Measles',
+  'Tetanus Toxoid', 'COVID-19', 'Influenza',
+]);
 const text = (v) => String(v ?? '').trim();
 const normalizeKind = (kind) => {
   const candidate = String(kind ?? '').trim().toLowerCase();
@@ -36,6 +40,50 @@ const dateIsDateOnly = (value) =>
   typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
   && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`))
   && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+
+export const normalizeImmunizationVaccine = (payload = {}) => {
+  const selection = text(payload.vaccine_selection ?? payload.vaccineSelection);
+  const vaccine = text(payload.vaccine);
+  const customName = text(payload.custom_vaccine_name ?? payload.customVaccineName);
+  const isCustom = selection === 'Other' || (!selection && vaccine === 'Other');
+  if (selection && selection !== 'Other' && !PREDEFINED_VACCINES.has(selection)) {
+    throw ApiError.unprocessable('Select a valid predefined vaccine or choose Other.');
+  }
+  if (isCustom && !customName) {
+    throw ApiError.unprocessable('Specify the vaccine name when selecting Other.', {
+      custom_vaccine_name: 'Enter a vaccine name.',
+    });
+  }
+  if (customName.length > 120) {
+    throw ApiError.unprocessable('Vaccine names must be 120 characters or fewer.', {
+      custom_vaccine_name: 'Use 120 characters or fewer.',
+    });
+  }
+  const normalizedSelection = isCustom ? 'Other' : selection || vaccine;
+  const normalizedVaccine = isCustom ? customName : normalizedSelection;
+  return {
+    ...payload,
+    vaccine: normalizedVaccine,
+    vaccine_selection: normalizedSelection,
+    custom_vaccine_name: isCustom ? customName : null,
+  };
+};
+
+const validateImmunization = (row) => {
+  if (!text(row.vaccine)) throw ApiError.unprocessable('A vaccine is required.');
+  if (row.next_dose && !dateIsDateOnly(row.next_dose)) {
+    throw ApiError.unprocessable('The next-dose date is invalid.');
+  }
+  if (row.administered_date && !dateIsDateOnly(row.administered_date)) {
+    throw ApiError.unprocessable('The administered date is invalid.');
+  }
+  if (text(row.status) === 'Completed' && !row.administered_date) {
+    throw ApiError.unprocessable('Date administered is required for a completed immunization.');
+  }
+  if (!['Due', 'Completed', 'Missed', 'Cancelled'].includes(text(row.status || 'Due'))) {
+    throw ApiError.unprocessable('Select a valid immunization status.');
+  }
+};
 
 /**
  * Follow-up lifecycle guard (enforced on the server).
@@ -142,10 +190,11 @@ export const assertFollowUpTransition = (existing = {}, nextStatus, { today = ma
  * Notification text deliberately avoids clinical detail — it points the
  * resident to the relevant record without exposing sensitive information.
  */
-const notificationFor = (kind, action, record) => {
+export const notificationFor = (kind, action, record) => {
   const when = record?.scheduled_date
     ? ` on ${record.scheduled_date}${record.scheduled_time ? ` at ${String(record.scheduled_time).slice(0, 5)}` : ''}`
     : '';
+  const isTbProgram = /\btb\b|tuberculosis/i.test(String(record?.program || ''));
   switch (`${kind}:${action}`) {
     case 'followups:created':
       return { category: 'reminder', title: 'Follow-up scheduled', message: `A health worker scheduled a follow-up${when}.` };
@@ -160,8 +209,9 @@ const notificationFor = (kind, action, record) => {
     case 'maternal:created':
       return { category: 'information', title: 'Maternal record added', message: 'A maternal health record was added to your account.' };
     case 'immunizations:created':
-      return { category: 'information', title: 'Immunization recorded', message: 'A new immunization record was added to your account.' };
+      return null;
     case 'tcl:created':
+      if (isTbProgram) return null;
       return { category: 'information', title: 'Health program update', message: 'You were added to a health monitoring program.' };
     default:
       return null;
@@ -582,10 +632,15 @@ const assertNoDuplicateFollowUp = async ({ supabase, residentId, row }) => {
   }
 };
 
-export const create = async ({ user, kind, payload = {}, idempotencyKey = null, isSync = false, supabase = getServiceClient() }) => {
+export const create = async ({ user, kind, payload = {}, idempotencyKey = null, isSync = false, supabase = null }) => {
   const normalizedKind = normalizeKind(kind);
   assertStaff(user);
   assertTclAssignment(user, normalizedKind);
+  const serviceSupabase = supabase || getServiceClient();
+  const recordSupabase = normalizedKind === 'followups'
+    ? supabase || (user?.accessToken ? getUserClient(user.accessToken) : null)
+    : serviceSupabase;
+  if (!recordSupabase) throw ApiError.unauthorized('A verified user session is required to create a follow-up.');
   const table = TABLES[normalizedKind] || TABLES[kind];
   const maternalRecordPatch = payload.maternal_record_patch || payload.maternalRecordPatch || null;
   const atomicMaternalEncounter = normalizedKind === 'maternalvisits' && maternalRecordPatch !== null;
@@ -597,7 +652,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   if (isSync && !opKey) {
     throw ApiError.badRequest('Synchronization create requires an Idempotency-Key.').withCode('IDEMPOTENCY_KEY_REQUIRED');
   }
-  const resident = await residentFor(supabase, user, payload.residentId || payload.resident_id, normalizedKind);
+  const resident = await residentFor(recordSupabase, user, payload.residentId || payload.resident_id, normalizedKind);
   const followUpId = normalizedKind === 'immunizations' ? text(payload.followUpId || payload.follow_up_id) : '';
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
@@ -616,9 +671,16 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   delete row.follow_up_id;
   delete row.maternal_record_patch;
   delete row.maternalRecordPatch;
+  delete row.vaccineSelection;
+  delete row.customVaccineName;
+
+  if (normalizedKind === 'immunizations') {
+    Object.assign(row, normalizeImmunizationVaccine(row));
+    validateImmunization(row);
+  }
 
   if (followUpId) {
-    const { data: followUp, error: followUpError } = await supabase.from('follow_ups')
+    const { data: followUp, error: followUpError } = await recordSupabase.from('follow_ups')
       .select('id,resident_id,status,linked_service_id').eq('id', followUpId).maybeSingle();
     throwOnError(followUpError, 'Could not verify the source follow-up');
     if (!followUp || followUp.resident_id !== resident.id) throw ApiError.unprocessable('The selected follow-up does not belong to this resident.');
@@ -629,14 +691,14 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   const linkImmunization = async (recordId, status) => {
     if (!followUpId || !recordId) return;
     const completed = status === 'Completed';
-    const { error } = await supabase.from('follow_ups').update({
+    const { error } = await serviceSupabase.from('follow_ups').update({
       linked_service_type: 'immunization', linked_service_id: String(recordId),
       status: completed ? 'Completed' : 'Ongoing', completed_at: completed ? new Date().toISOString() : null,
     }).eq('id', followUpId).eq('resident_id', resident.id).eq('linked_service_id', '');
     throwOnError(error, 'Could not link the immunization to its follow-up');
   };
 
-  if (normalizedKind === 'tcl') await normalizeTclWorker({ row, user, resident, supabase });
+  if (normalizedKind === 'tcl') await normalizeTclWorker({ row, user, resident, supabase: serviceSupabase });
 
   if (normalizedKind === 'maternal') Object.assign(row, validateMaternalRecord(row));
 
@@ -645,7 +707,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     if (!maternalCaseId) {
       throw ApiError.unprocessable('A maternal case is required for each visit.');
     }
-    const { data: maternalCase, error: maternalError } = await supabase
+    const { data: maternalCase, error: maternalError } = await serviceSupabase
       .from('maternal_records')
       .select('id, resident_id')
       .eq('id', maternalCaseId)
@@ -663,7 +725,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
 
   if (opKey) {
     const existing = await findOperationalByOperationKey({
-      supabase,
+      supabase: recordSupabase,
       table,
       normalizedKind,
       idempotencyKey: opKey,
@@ -679,10 +741,13 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   // confirm attendance or submit schedule-change requests through the separate
   // schedule-request workflow. Never trust client-supplied response fields.
   if (normalizedKind === 'followups') {
+    // This field is accepted only when updating a schedule so it can be
+    // included in the audit entry; it is not a follow_ups table column.
+    delete row.schedule_change_reason;
     const consultationId = text(payload.consultation_id);
     delete row.consultation_id;
     if (consultationId) {
-      const { data: consultation, error: consultationError } = await supabase
+      const { data: consultation, error: consultationError } = await recordSupabase
         .from('visits')
         .select('id, resident_id')
         .eq('id', consultationId)
@@ -704,16 +769,16 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
       throw ApiError.unprocessable('A new follow-up cannot be created as Completed or Missed; it must be scheduled first.');
     }
     const sched = text(row.scheduled_date);
-    if (sched && Number.isNaN(Date.parse(sched))) {
-      throw ApiError.unprocessable('The scheduled date is invalid.');
+    if (!dateIsDateOnly(sched)) {
+      throw ApiError.unprocessable('A valid scheduled date is required.');
     }
     assertFollowUpScheduleNotInPast(sched, row.scheduled_time);
-    await assertNoDuplicateFollowUp({ supabase, residentId: resident.id, row });
+    await assertNoDuplicateFollowUp({ supabase: recordSupabase, residentId: resident.id, row });
   }
   let data;
   if (atomicMaternalEncounter) {
     const validatedPatch = validateMaternalRecord(maternalRecordPatch);
-    const { data: savedVisit, error } = await supabase.rpc('save_maternal_encounter', {
+    const { data: savedVisit, error } = await serviceSupabase.rpc('save_maternal_encounter', {
       p_maternal_record_id: row.maternal_case_id,
       p_resident_id: resident.id,
       p_actor_id: user.id,
@@ -733,7 +798,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     if (error) {
       if (error.code === '23505' && opKey) {
         const existing = await findOperationalByOperationKey({
-          supabase,
+          supabase: serviceSupabase,
           table,
           normalizedKind,
           idempotencyKey: opKey,
@@ -749,10 +814,10 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     data = Array.isArray(savedVisit) ? savedVisit[0] : savedVisit;
     if (!data) throw new ApiError(500, 'Could not confirm the maternal encounter was saved.');
   } else {
-    const { data: inserted, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
+    const { data: inserted, error } = await recordSupabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
     if (error?.code === '23505' && opKey) {
       const existing = await findOperationalByOperationKey({
-        supabase,
+        supabase: recordSupabase,
         table,
         normalizedKind,
         idempotencyKey: opKey,
@@ -767,9 +832,9 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   }
   await linkImmunization(data.id, data.status);
   if (!atomicMaternalEncounter) {
-    await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
+    await audit(serviceSupabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
   }
-  await notifyResident(supabase, resident, normalizedKind, 'created', data);
+  await notifyResident(serviceSupabase, resident, normalizedKind, 'created', data);
   if (normalizedKind === 'followups') {
     await notifyHealthSupervisorsOnce({
       barangayId: resident.barangay_id,
@@ -780,7 +845,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
       relatedType: 'follow_up_assigned',
       relatedId: data.id,
       eventKey: `follow_up_assigned:${data.id}`,
-      supabase,
+      supabase: serviceSupabase,
     });
   }
   return formatOperationalRecord(normalizedKind, data);
@@ -859,6 +924,18 @@ export const update = async ({
   delete row.baseRevision;
   delete row.consultation_id;
   delete row.consultationId;
+  delete row.vaccineSelection;
+  delete row.customVaccineName;
+  if (normalizedKind === 'immunizations' && (
+    Object.prototype.hasOwnProperty.call(payload, 'vaccine')
+    || Object.prototype.hasOwnProperty.call(payload, 'vaccine_selection')
+    || Object.prototype.hasOwnProperty.call(payload, 'vaccineSelection')
+    || Object.prototype.hasOwnProperty.call(payload, 'custom_vaccine_name')
+    || Object.prototype.hasOwnProperty.call(payload, 'customVaccineName')
+  )) {
+    Object.assign(row, normalizeImmunizationVaccine(row));
+  }
+  if (normalizedKind === 'immunizations') validateImmunization({ ...existing, ...row });
   if (normalizedKind === 'tcl') await normalizeTclWorker({ row, existing, user, resident, supabase });
   if (normalizedKind === 'maternalvisits') {
     const maternalCaseId = text(row.maternal_case_id || row.maternalCaseId || row.maternal_record_id || row.maternalRecordId);

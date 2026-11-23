@@ -4,7 +4,7 @@ import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
 import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
-import { X, Search, Activity, User, MapPin, Stethoscope, Plus, CheckCircle2 } from "lucide-react";
+import { X, Search, Activity, User, MapPin, Stethoscope, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
 import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
@@ -39,7 +39,7 @@ import {
  * (barangay-scope middleware + service-level filter + RLS) already applies.
  *
  * Only fields that exist on `tcl_entries` are shown — program, assigned_bhw,
- * priority, status, last_visit, next_visit(+time), notes, created_at,
+ * priority, status, last_visit, next_visit, notes, created_at,
  * updated_at — plus the resident resolved from the live directory by id (the
  * `tcl` list select does not embed the resident, so the name/age/sex/barangay
  * are joined client-side exactly as the TCL page does).
@@ -110,7 +110,6 @@ export default function TBRecords() {
     status: "Active",
     lastVisit: todayIso(),
     nextVisit: "",
-    nextVisitTime: "",
     notes: "",
   }));
   const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
@@ -272,7 +271,6 @@ export default function TBRecords() {
       status: "Active",
       lastVisit: todayIso(),
       nextVisit: "",
-      nextVisitTime: "",
       notes: "",
     });
     setResidentQuery("");
@@ -291,7 +289,6 @@ export default function TBRecords() {
       status: record.status || "Active",
       lastVisit: record.lastVisit || "",
       nextVisit: record.nextVisit || "",
-      nextVisitTime: record.nextVisitTime || "",
       notes: record.notes || "",
     });
     setResidentQuery("");
@@ -360,9 +357,9 @@ export default function TBRecords() {
         action={
           <button
             onClick={openAdd}
-            className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+            className="inline-flex items-center rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
           >
-            <Plus className="h-4 w-4" /> Add TB Record
+            Add TB Record
           </button>
         }
       />
@@ -422,7 +419,7 @@ export default function TBRecords() {
             <thead className="bg-brand-bg border-b border-brand-border">
               <tr>
                 {["Resident", "Program", "Assigned BHW", "Priority", "Status", "Last Visit", "Last Updated", "Actions"].map((h) => (
-                  <th key={h} className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">{h}</th>
+                  <th key={h} className={`text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3 ${h === "Actions" ? "w-[180px] min-w-[180px]" : ""}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -439,10 +436,20 @@ export default function TBRecords() {
                   <td className="px-4 py-3">{r.status ? <StatusBadge value={r.status} /> : "—"}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{formatDate(r.lastVisit)}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{formatDateTime(r.updatedAt)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => setDetail(r)} className="text-sm font-medium text-brand-blue hover:underline">View</button>
-                      <button onClick={() => openEdit(r)} className="text-sm font-medium text-brand-gray hover:text-brand-ink">Edit</button>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setDetail(r)}
+                        className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-btn border border-brand-blue px-3 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
+                      >
+                        View
+                      </button>
+                      <button
+                        onClick={() => openEdit(r)}
+                        className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-ink transition-colors hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
+                      >
+                        Edit
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -527,9 +534,7 @@ export default function TBRecords() {
                     </div>
                     <div>
                       <p className="text-[11px] text-brand-gray uppercase tracking-wide">Next Follow-up</p>
-                      <p className="mt-0.5 text-sm font-medium text-brand-ink">
-                        {formatDate(detail.nextVisit)}{detail.nextVisitTime ? ` · ${detail.nextVisitTime}` : ""}
-                      </p>
+                      <p className="mt-0.5 text-sm font-medium text-brand-ink">{formatDate(detail.nextVisit)}</p>
                     </div>
                     <div>
                       <p className="text-[11px] text-brand-gray uppercase tracking-wide">Date Recorded</p>
@@ -716,10 +721,6 @@ export default function TBRecords() {
                       <label className={labelCls}>Next Follow-up</label>
                       <input type="date" value={form.nextVisit} onChange={(e) => setForm((p) => ({ ...p, nextVisit: e.target.value }))} className={inputCls()} />
                     </div>
-                    <div>
-                      <label className={labelCls}>Next Follow-up Time</label>
-                      <input type="time" value={form.nextVisitTime} onChange={(e) => setForm((p) => ({ ...p, nextVisitTime: e.target.value }))} className={inputCls()} />
-                    </div>
                     {formErrors.dates && <p className={`sm:col-span-2 ${errorCls}`}>{formErrors.dates}</p>}
                     <div className="sm:col-span-2">
                       <label className={labelCls}>Notes / History</label>
@@ -740,9 +741,9 @@ export default function TBRecords() {
               <button
                 onClick={saveRecord}
                 disabled={saving}
-                className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+                className="inline-flex items-center rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
               >
-                <Plus className="h-4 w-4" /> {saving ? "Saving…" : editingRecord ? "Save Changes" : "Add TB Record"}
+                {saving ? "Saving…" : editingRecord ? "Save Changes" : "Add TB Record"}
               </button>
             </div>
           </Card>

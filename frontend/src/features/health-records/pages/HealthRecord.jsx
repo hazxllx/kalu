@@ -8,8 +8,11 @@ import {
   Loader2,
   RotateCcw,
   Download,
+  X,
 } from "lucide-react";
-import { residentsApi, visitPlansApi } from "@/services/api";
+import { residentsApi, visitPlansApi, referralsApi } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
+import { downloadReferralPdf } from "@/features/referrals/lib/referralPdf";
 import { downloadHealthRecordPdf, medicalHistoryForRecord } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
@@ -104,6 +107,7 @@ const dateRangeError = (from, to) => {
 };
 
 export default function HealthRecord() {
+  const { user } = useAuth();
   const [resident, setResident] = useState(null);
   const [consultations, setConsultations] = useState([]);
   const [latestRecord, setLatestRecord] = useState(null);
@@ -111,6 +115,10 @@ export default function HealthRecord() {
   const [vaccinations, setVaccinations] = useState([]);
   const [healthServiceRecords, setHealthServiceRecords] = useState([]);
   const [referrals, setReferrals] = useState([]);
+  const [selectedReferral, setSelectedReferral] = useState(null);
+  const [referralDetailLoading, setReferralDetailLoading] = useState(false);
+  const [referralDownloadId, setReferralDownloadId] = useState("");
+  const [referralActionError, setReferralActionError] = useState("");
   const [followUps, setFollowUps] = useState([]);
   const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -301,6 +309,35 @@ export default function HealthRecord() {
     [resident?.sex],
   );
 
+  const openReferral = useCallback(async (record) => {
+    if (!record?.id || !user?.id) return;
+    setReferralDetailLoading(true);
+    setReferralActionError("");
+    try {
+      const data = await referralsApi.get(record.id, { ownerId: user.id, cache: "no-store" });
+      setSelectedReferral(data?.record || record);
+    } catch (err) {
+      setReferralActionError(err?.message || "Could not load the selected referral.");
+    } finally {
+      setReferralDetailLoading(false);
+    }
+  }, [user?.id]);
+
+  const downloadReferral = useCallback(async (record) => {
+    if (!record?.id || !user?.id || referralDownloadId) return;
+    setReferralDownloadId(record.id);
+    setReferralActionError("");
+    try {
+      const data = await referralsApi.get(record.id, { ownerId: user.id, cache: "no-store" });
+      if (!data?.record?.id) throw new Error("Could not load the saved referral.");
+      await downloadReferralPdf(data.record);
+    } catch (err) {
+      setReferralActionError(err?.message || "Could not generate the referral PDF.");
+    } finally {
+      setReferralDownloadId("");
+    }
+  }, [user?.id, referralDownloadId]);
+
   /**
    * Export the resident's own health record as a formatted PDF document. The
     * PDF is generated in the browser (jsPDF) from the records selected by the
@@ -329,6 +366,8 @@ export default function HealthRecord() {
         resident: data?.resident || resident || {},
         consultations: data?.consultations || [],
         vaccinations: (data?.vaccinations || []).filter((item) => matchesDateRange(item.date, filters.from, filters.to)),
+        healthServiceRecords: data?.healthServiceRecords || [],
+        referrals: data?.referrals || [],
         labs,
         medicalHistory: medicalHistoryForRecord(data || {}),
       });
@@ -406,6 +445,103 @@ export default function HealthRecord() {
   useEffect(() => {
     setServiceRecordPage((page) => Math.min(page, serviceRecordPageCount));
   }, [serviceRecordPageCount]);
+
+  const renderReferralHistory = () => (
+    <section aria-labelledby="referral-history-title">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="referral-history-title" className="text-lg font-semibold leading-6 text-brand-ink">Referral History</h2>
+          <p className="mt-1 text-sm text-brand-gray">Referrals created for you by authorized health personnel.</p>
+        </div>
+        <p className="text-sm text-brand-gray">{referrals.length} referral{referrals.length === 1 ? "" : "s"}</p>
+      </div>
+      {referralActionError && <p role="alert" className="mb-3 text-sm text-brand-danger">{referralActionError}</p>}
+      {referrals.length === 0 ? (
+        <Card className="p-8 text-center text-sm text-brand-gray">No referral records are available.</Card>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-brand-border bg-white">
+          <div className="hidden grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] gap-3 border-b border-brand-border bg-brand-bg/50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-brand-gray md:grid">
+            <span>Date</span><span>Destination</span><span>Reason</span><span>Status</span><span>Action</span>
+          </div>
+          <ul className="divide-y divide-brand-border md:divide-y-0">
+            {referrals.map((record) => {
+              const status = record.serviceProgressStatus || record.status || "Pending";
+              const statusClass = /Completed/.test(status) ? "bg-green-50 text-green-800"
+                : /Rejected|Cancelled/.test(status) ? "bg-red-50 text-red-800"
+                  : /Pending/.test(status) ? "bg-amber-50 text-amber-800"
+                    : "bg-blue-50 text-blue-800";
+              return (
+                <li key={record.id} className="grid gap-3 px-4 py-4 md:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] md:items-center">
+                  <div><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Referral Date</p><p className="mt-0.5 text-sm text-brand-ink">{formatDate(record.date)}</p></div>
+                  <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Destination</p><p className="mt-0.5 break-words text-sm font-medium text-brand-ink">{record.facility || "Not recorded"}</p></div>
+                  <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Reason</p><p className="mt-0.5 break-words text-sm text-brand-gray">{record.reason || "Not recorded"}</p></div>
+                  <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClass}`}>{status}</span></div>
+                  <div className="flex flex-wrap gap-3">
+                    <button type="button" onClick={() => openReferral(record)} disabled={referralDetailLoading} className="text-xs font-semibold text-brand-blue hover:underline">View details</button>
+                    <button type="button" onClick={() => downloadReferral(record)} disabled={referralDownloadId === record.id} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-blue hover:underline disabled:opacity-60">
+                      {referralDownloadId === record.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {selectedReferral && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Referral details">
+          <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-brand-border bg-white shadow-float">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-brand-border bg-white px-5 py-3">
+              <h3 className="text-sm font-semibold text-brand-ink">Referral Details</h3>
+              <button type="button" onClick={() => setSelectedReferral(null)} className="grid h-8 w-8 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close referral details"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="space-y-5 p-5">
+              <section>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Referral Overview</h4>
+                <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                  {[
+                    ["Referral reference", selectedReferral.reference_no || selectedReferral.referralNo || selectedReferral.id],
+                    ["Referral date", formatDate(selectedReferral.referral_date || selectedReferral.referralDate)],
+                    ["Referring facility", selectedReferral.referring_facility || "Not recorded"],
+                    ["Receiving facility", selectedReferral.external_receiving_facility || selectedReferral.recipient_facility?.name || selectedReferral.destination_facility || "Not recorded"],
+                    ["Assigned recipient", selectedReferral.recipient?.full_name || selectedReferral.external_recipient_name || "Not assigned"],
+                    ["Priority", selectedReferral.priority || "Not recorded"],
+                    ["Status", selectedReferral.status || "Pending"],
+                  ].map(([label, value]) => <div key={label}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink">{value || "Not recorded"}</dd></div>)}
+                </dl>
+              </section>
+              <section className="border-t border-brand-border pt-4">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Clinical Information</h4>
+                <dl className="mt-3 grid gap-3 text-sm">
+                  {[
+                    ["Referral reason", selectedReferral.reason],
+                    ["Clinical history", selectedReferral.medicalHistory || selectedReferral.medical_history || selectedReferral.encounter?.clinical_history],
+                    ["Working diagnosis", selectedReferral.impression || selectedReferral.encounter?.phn_assessment],
+                    ["Laboratory requirements", selectedReferral.laboratory_test_required ? selectedReferral.laboratory_test : "Not required"],
+                    ["Clinical notes", selectedReferral.additional_instructions || selectedReferral.notes],
+                  ].map(([label, value]) => <div key={label}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-brand-ink">{value || "Not recorded"}</dd></div>)}
+                </dl>
+              </section>
+              <section className="border-t border-brand-border pt-4">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Referral Progress</h4>
+                <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                  {[
+                    ["Date referred", formatDate(selectedReferral.referral_date || selectedReferral.created_at)],
+                    ["Scheduled appointment", selectedReferral.scheduled_at ? new Date(selectedReferral.scheduled_at).toLocaleString() : "Not scheduled"],
+                    ["Status updates", selectedReferral.stage || selectedReferral.status || "Pending"],
+                    ["Date completed", formatDate(selectedReferral.completed_at)],
+                  ].map(([label, value]) => <div key={label}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink">{value || "Not recorded"}</dd></div>)}
+                </dl>
+              </section>
+              <button type="button" onClick={() => downloadReferral(selectedReferral)} disabled={referralDownloadId === selectedReferral.id} className="inline-flex h-9 items-center justify-center gap-2 rounded-btn bg-brand-blue px-3 text-sm font-semibold text-white disabled:opacity-60">
+                {referralDownloadId === selectedReferral.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Referral
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 
   const renderHealthServiceHistory = () => (
     <section aria-labelledby="health-service-history-title">
@@ -696,6 +832,7 @@ export default function HealthRecord() {
       <PageHeader
         title="My Health Record"
         subtitle="A complete view of your medical history and vitals."
+        dense
         action={
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end sm:justify-end">
             <button
@@ -746,11 +883,12 @@ export default function HealthRecord() {
           </Card>
 
           {/* Section tabs — Consultation History is a subsection of this page. */}
-          <div className="mb-5 flex flex-wrap gap-1 border-b border-brand-border" role="tablist" aria-label="Health record sections">
+          <div className="mb-5 flex overflow-x-auto gap-1 border-b border-brand-border" role="tablist" aria-label="Health record sections">
             {[
               { key: "overview", label: "Overview" },
               { key: "consultations", label: "Consultation History" },
               { key: "service-history", label: "Health Service History" },
+              { key: "referrals", label: "Referral History" },
             ].map((tab) => {
               const active = activeTab === tab.key;
               return (
@@ -772,7 +910,7 @@ export default function HealthRecord() {
             })}
           </div>
 
-          {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : (
+          {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : activeTab === "referrals" ? renderReferralHistory() : (
             <>
               <div className="mb-2 flex items-center gap-2">
                 <RiskBadge level={consultationRiskLevel(latestRecord?.consultations?.[0])} mediumLabel="Medium" />
@@ -827,6 +965,26 @@ export default function HealthRecord() {
 
                 <Card className="rounded-lg p-5 shadow-none">
                   <LabResultsPanel canUpload />
+                </Card>
+
+                <Card className="rounded-lg p-5 shadow-none">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h3 className="text-base font-semibold leading-5 text-brand-ink">Recent Referrals</h3>
+                    <button type="button" onClick={() => setActiveTab("referrals")} className="shrink-0 text-xs font-semibold text-brand-blue hover:underline">View all</button>
+                  </div>
+                  {!latestRecord?.referrals?.length ? (
+                    <p className="text-sm text-brand-gray">No referral records available.</p>
+                  ) : (
+                    <ul className="divide-y divide-brand-border">
+                      {latestRecord.referrals.slice(0, 3).map((record) => (
+                        <li key={record.id} className="py-2.5 first:pt-0 last:pb-0">
+                          <p className="text-sm font-medium text-brand-ink">{record.facility || "Receiving facility not recorded"}</p>
+                          <p className="mt-0.5 line-clamp-2 text-xs text-brand-gray">{record.reason || "Referral reason not recorded"}</p>
+                          <div className="mt-1 flex items-center justify-between gap-2 text-xs text-brand-gray"><span>{formatDate(record.referralDate || record.date)}</span><span>{record.serviceProgressStatus || "Pending"}</span></div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </Card>
               </div>
 

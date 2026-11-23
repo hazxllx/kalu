@@ -82,12 +82,10 @@ export default function NavTabsLayout({ roleKey, navId }) {
 
   if (!item) return <Outlet />;
   const compact = navId === "user-personnel" || navId === "barangay-access";
-  const inlineManagementTabs = navId === "health-system";
-
   return (
     <>
-      {!compact && !inlineManagementTabs && <NavTabs item={item} />}
-      <Outlet context={compact || inlineManagementTabs ? { navItem: item } : undefined} />
+      {!compact && <NavTabs item={item} />}
+      <Outlet context={compact ? { navItem: item } : undefined} />
     </>
   );
 }

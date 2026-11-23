@@ -27,7 +27,7 @@ const M1ReportRedirect = () => {
  * for debugging.
  */
 class RouteErrorBoundary extends React.Component {
-  state = { hasError: false };
+  state = { hasError: false, retryKey: 0 };
 
   static getDerivedStateFromError() {
     return { hasError: true };
@@ -38,11 +38,11 @@ class RouteErrorBoundary extends React.Component {
   }
 
   handleRetry = () => {
-    this.setState({ hasError: false });
+    this.setState((state) => ({ hasError: false, retryKey: state.retryKey + 1 }));
   };
 
   render() {
-    if (!this.state.hasError) return this.props.children;
+    if (!this.state.hasError) return <React.Fragment key={this.state.retryKey}>{this.props.children}</React.Fragment>;
 
     return (
       <section className="mx-auto w-full max-w-xl rounded-card border border-brand-border bg-white p-8 text-center shadow-card" role="alert">
@@ -141,10 +141,6 @@ const RegistrationSuccess = publicPage(
     import(
       '@/features/registration/pages/RegistrationSuccess'
     )
-);
-
-const RegistrationIncomplete = appPage(
-  () => import('@/features/registration/pages/RegistrationIncomplete')
 );
 
 const StaffResidentRegistration = appPage(
@@ -725,10 +721,9 @@ const AppRoutes = () => (
       element={<RegistrationSuccess />}
     />
     <Route
-      element={<ProtectedRoute allow={ROUTE_ROLES['resident-incomplete']} />}
-    >
-      <Route path="/registration-incomplete" element={<RegistrationIncomplete />} />
-    </Route>
+      path="/registration-incomplete"
+      element={<Navigate to="/app/resident-limited/dashboard" replace />}
+    />
     <Route
       path="/verification-status"
       element={<VerificationStatus />}
@@ -1427,10 +1422,7 @@ const AppRoutes = () => (
           path="profile"
           element={<SettingsPage roleKey="admin" />}
         />
-        {/*
-          Merged sidebar items. Each tab keeps its original route and page;
-          NavTabsLayout only adds the tab strip (see NAV.admin `tabs`).
-        */}
+        {/* Related account and access pages remain grouped under one destination. */}
         {/* User & Personnel Management */}
         <Route
           element={<NavTabsLayout roleKey="admin" navId="user-personnel" />}
@@ -1466,37 +1458,42 @@ const AppRoutes = () => (
           path="permissions"
           element={<Navigate to="/app/admin/role-access" replace />}
         />
-        {/* Health & System Settings */}
         <Route
-          element={<NavTabsLayout roleKey="admin" navId="health-system" />}
-        >
-          {/* Unified resident risk + early intervention configuration. */}
-          <Route
-            path="risk-settings"
-            element={<RiskInterventionSettings />}
-          />
-          {/* Medicine catalog + blood-pressure classification configuration. */}
-          <Route
-            path="medicines"
-            element={<MedicineCatalog />}
-          />
-          <Route
-            path="advisories"
-            element={<AdvisoryManagement />}
-          />
-          <Route
-            path="settings"
-            element={<SettingsPage roleKey="admin" />}
-          />
-        </Route>
-        {/* Backward-compatible redirects for the former split pages. */}
+          path="risk-early-intervention"
+          element={<RiskInterventionSettings />}
+        />
+        <Route
+          path="medicines"
+          element={<MedicineCatalog />}
+        />
+        <Route
+          path="advisories"
+          element={<AdvisoryManagement />}
+        />
+        <Route
+          path="settings"
+          element={<SettingsPage roleKey="admin" />}
+        />
+        {/* Backward-compatible redirects for former risk settings routes. */}
         <Route
           path="risk-rules"
-          element={<Navigate to="/app/admin/risk-settings" replace />}
+          element={<Navigate to="/app/admin/risk-early-intervention?tab=intervention" replace />}
         />
         <Route
           path="risk-assessment"
-          element={<Navigate to="/app/admin/risk-settings" replace />}
+          element={<Navigate to="/app/admin/risk-early-intervention" replace />}
+        />
+        <Route
+          path="follow-up-policies"
+          element={<Navigate to="/app/admin/risk-early-intervention?tab=intervention" replace />}
+        />
+        <Route
+          path="risk-settings"
+          element={<Navigate to="/app/admin/risk-early-intervention" replace />}
+        />
+        <Route
+          path="early-intervention"
+          element={<Navigate to="/app/admin/risk-early-intervention?tab=intervention" replace />}
         />
         <Route
           path="audit"

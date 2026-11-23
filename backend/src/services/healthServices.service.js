@@ -19,6 +19,8 @@
  *     services and every barangay service in their municipality;
  *   - a barangay-scoped role (Health Supervisor / BHW) sees municipality-wide
  *     services plus the services in THEIR barangay;
+ *   - residents receive only active public service fields for their profile's
+ *     municipality and barangay; this catalog does not require a residents row;
  *   - additionally, any service ASSIGNED to a personnel appears in that
  *     personnel's account regardless of their barangay scope;
  *   - services are never globally visible.
@@ -60,6 +62,7 @@ const MANAGE_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR]);
 const MUNICIPALITY_WIDE_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.RHU_PERSONNEL]);
 const BARANGAY_SCOPED_ROLES = new Set([ROLES.HEALTH_SUPERVISOR, ROLES.BHW]);
 const PERSONNEL_ROLES = new Set([...MUNICIPALITY_WIDE_ROLES, ...BARANGAY_SCOPED_ROLES]);
+const RESIDENT_CATALOG_ROLES = new Set([ROLES.RESIDENT, ROLES.RESIDENT_LIMITED]);
 
 const text = (v) => String(v ?? '').trim();
 const hhmm = (v) => (v ? String(v).slice(0, 5) : null);
@@ -251,6 +254,43 @@ const toService = (row) => {
   };
 };
 
+/** Public service fields scoped from the authenticated resident profile, without requiring a residents row. */
+const listResidentCatalog = async ({ user, category, supabase }) => {
+  if (!user.municipalityId || !user.barangayId) return [];
+
+  let query = supabase.from(TABLE)
+    .select(`id, name, category, description, municipality_id, barangay_id, facility_id, custom_location, start_date, start_time, end_date, end_time, registration_deadline, visit_policy, active, ${FACILITY_EMBED}, ${BARANGAY_EMBED}`)
+    .eq('municipality_id', user.municipalityId)
+    .eq('active', true)
+    .order('name');
+  if (category) query = query.eq('category', category);
+
+  const rows = await readAllRows(query, 'Could not load health services');
+  return rows
+    .filter((row) => row.municipality_id === user.municipalityId
+      && (row.barangay_id === null || row.barangay_id === user.barangayId))
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      category: row.category || 'Other',
+      description: row.description || '',
+      barangayId: row.barangay_id || null,
+      barangay: row.barangay?.name || user.barangay || '',
+      facilityName: row.custom_location || row.facility?.name
+        || (row.barangay_id ? row.barangay?.name || user.barangay || 'Barangay Health Center' : 'Rural Health Unit'),
+      facilityType: row.barangay_id ? 'BHC' : 'RHU',
+      visitPolicy: row.visit_policy === 'by_notice' ? 'by_notice' : 'walk_in',
+      schedule: {
+        startDate: row.start_date || null,
+        startTime: hhmm(row.start_time),
+        endDate: row.end_date || null,
+        endTime: hhmm(row.end_time),
+        registrationDeadline: row.registration_deadline || null,
+      },
+      active: row.active === true,
+    }));
+};
+
 /** Enforce that the caller is authenticated and holds a service-management role (MHO, PHN, or Health Supervisor). */
 const assertManager = (user) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
@@ -299,6 +339,9 @@ const attachRegistrationCounts = async (user, services, supabase) => {
  */
 export const list = async ({ user, mine = false, category = null, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  if (RESIDENT_CATALOG_ROLES.has(user.role)) {
+    return listResidentCatalog({ user, category, supabase });
+  }
   if (!user.municipalityId || (!PERSONNEL_ROLES.has(user.role) && user.role !== ROLES.ADMIN)) return [];
 
   // An assignment is a barangay exception, never a municipality exception.

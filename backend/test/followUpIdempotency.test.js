@@ -61,7 +61,13 @@ const input = (supabase) => ({
     residentId: RESIDENT.id,
     purpose: 'Check-up',
     scheduled_date: '2026-10-20',
+    scheduled_time: '09:00',
+    priority: 'High',
+    location: 'Barangay Health Station',
+    assigned_provider: 'Nurse Test',
+    notes: 'Bring the monitoring record.',
     status: 'Scheduled',
+    schedule_change_reason: '',
   },
   supabase,
 });
@@ -73,9 +79,30 @@ test('a lost follow-up create response is deduplicated by its persisted operatio
 
   assert.equal(first.id, 'follow-up-1');
   assert.equal(replay.id, first.id);
+  assert.equal(supabase.stored.resident_id, RESIDENT.id);
+  assert.equal(supabase.stored.scheduled_date, '2026-10-20');
+  assert.equal(supabase.stored.scheduled_time, '09:00');
+  assert.equal(supabase.stored.priority, 'High');
+  assert.equal(supabase.stored.location, 'Barangay Health Station');
+  assert.equal(supabase.stored.assigned_provider, 'Nurse Test');
+  assert.equal(supabase.stored.notes, 'Bring the monitoring record.');
   assert.equal(supabase.stored.client_operation_key, 'offline-op-1');
+  assert.equal(Object.hasOwn(supabase.stored, 'schedule_change_reason'), false);
   assert.equal(supabase.followUpInsertCount, 1);
   assert.equal(supabase.auditInsertCount, 1);
+});
+
+test('a follow-up create rejects impossible calendar dates before insertion', async () => {
+  const supabase = makeSupabase();
+
+  await assert.rejects(
+    create({
+      ...input(supabase),
+      payload: { ...input(supabase).payload, scheduled_date: '2026-02-31' },
+    }),
+    { statusCode: 422 },
+  );
+  assert.equal(supabase.followUpInsertCount, 0);
 });
 
 test('an operation key cannot replay a follow-up belonging to another resident', async () => {

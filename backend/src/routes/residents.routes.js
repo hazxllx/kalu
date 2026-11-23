@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import idempotency, { createIdempotencyMiddleware } from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
-import { FEATURE_ROLES } from '../config/roles.js';
+import { FEATURE_ROLES, ROLES } from '../config/roles.js';
 import * as residentsController from '../controllers/residents.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/apiError.js';
@@ -96,7 +96,7 @@ router.post(
 // - PATCH /me                : Updates editable self-service contact/profile fields in `req.body`.
 // - GET   /me/health-records : Returns the authenticated resident's own clinical/program records.
 router.patch('/me', authorize(FEATURE_ROLES.residentSelf), asyncHandler(residentsController.updateMyProfile));
-router.get('/me/health-records', authorize(FEATURE_ROLES.residentSelf), asyncHandler(residentsController.getMyHealthRecords));
+router.get('/me/health-records', authorize([ROLES.RESIDENT]), asyncHandler(residentsController.getMyHealthRecords));
 
 router.get(
   '/:id/health-history',

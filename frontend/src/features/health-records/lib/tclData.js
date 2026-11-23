@@ -90,7 +90,6 @@ export const mapTbRecord = (row = {}) => {
     status: row.status || '',
     lastVisit: row.last_visit || '',
     nextVisit: row.next_visit || '',
-    nextVisitTime: row.next_visit_time || '',
     notes: row.notes || '',
     createdAt: row.created_at || '',
     updatedAt: row.updated_at || '',
@@ -115,7 +114,6 @@ export const validateTbRecordForm = ({
   const dateError = tclDateError({
     lastVisit: form.lastVisit,
     nextVisit: form.nextVisit,
-    nextVisitTime: form.nextVisitTime,
   });
   if (dateError) errs.dates = dateError;
 
@@ -139,7 +137,6 @@ export const buildTbRecordPayload = (form = {}, editingRecord = null) => {
     status: form.status,
     last_visit: form.lastVisit || null,
     next_visit: form.nextVisit || null,
-    next_visit_time: form.nextVisitTime || null,
     notes: form.notes || '',
   };
   if (editingRecord) return base;

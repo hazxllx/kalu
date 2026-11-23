@@ -23,6 +23,42 @@ export const BP_CATEGORIES = Object.freeze({
   crisis: { code: 'crisis', label: 'Hypertensive Urgency or Emergency', severity: 4, alertLevel: 'crisis', message: 'Urgency-range blood pressure requires immediate clinical assessment. Follow the applicable emergency protocol; a single reading alone does not diagnose a hypertensive emergency.' },
 });
 
+let activeThresholds = { ...DEFAULT_BP_THRESHOLDS };
+let activeSource = 'default';
+const configListeners = new Set();
+
+export const subscribeBloodPressureConfig = (listener) => {
+  configListeners.add(listener);
+  return () => {
+    configListeners.delete(listener);
+  };
+};
+
+export const getBloodPressureConfig = () => ({
+  thresholds: { ...activeThresholds },
+  source: activeSource,
+});
+
+export const setBloodPressureConfig = ({ thresholds = {}, source = 'configured' } = {}) => {
+  const next = { ...DEFAULT_BP_THRESHOLDS };
+  for (const key of Object.keys(DEFAULT_BP_THRESHOLDS)) {
+    const value = Number(thresholds[key]);
+    if (!Number.isFinite(value) || value <= 0 || value > BP_READING_BOUNDS.max) return false;
+    next[key] = Math.round(value);
+  }
+  if (!(next.lowSystolicMax < next.elevatedSystolicMin
+    && next.elevatedSystolicMin < next.stage1SystolicMin
+    && next.stage1SystolicMin < next.stage2SystolicMin
+    && next.stage2SystolicMin < next.crisisSystolicMin
+    && next.lowDiastolicMax < next.stage1DiastolicMin
+    && next.stage1DiastolicMin < next.stage2DiastolicMin
+    && next.stage2DiastolicMin < next.crisisDiastolicMin)) return false;
+  activeThresholds = next;
+  activeSource = source === 'configured' ? 'configured' : 'default';
+  configListeners.forEach((listener) => listener());
+  return true;
+};
+
 export function parseBloodPressure(value) {
   if (value !== null && typeof value === 'object') {
     if (Array.isArray(value)) return null;
@@ -70,7 +106,17 @@ export function bloodPressureSymptomsFromText(value = '') {
   return symptoms;
 }
 
-export function classifyBloodPressure(reading, context = {}) {
+export function classifyBloodPressure(reading, context = {}, thresholdConfig = null) {
+  if (!thresholdConfig && context && typeof context === 'object'
+    && Object.keys(DEFAULT_BP_THRESHOLDS).some((key) => Object.prototype.hasOwnProperty.call(context, key))) {
+    thresholdConfig = { thresholds: context, source: 'configured' };
+    context = {};
+  }
+  const selectedThresholds = thresholdConfig?.thresholds || activeThresholds;
+  const source = thresholdConfig
+    ? thresholdConfig.source === 'configured' ? 'configured' : 'default'
+    : activeSource;
+  const thresholds = { ...DEFAULT_BP_THRESHOLDS, ...selectedThresholds };
   const parsed = parseBloodPressure(reading);
   if (!parsed) return null;
   const { systolic, diastolic } = parsed;
@@ -82,12 +128,12 @@ export function classifyBloodPressure(reading, context = {}) {
     'visualDisturbance', 'acuteCardiovascularSymptoms',
   ].some((key) => symptoms[key] === true || context?.symptoms?.[key] === true
     || context?.indicators?.[key] === true || context?.[key] === true);
-  const severe = systolic >= 180 || diastolic >= 120;
-  const hypotensionPresent = systolic < 90 || diastolic < 60;
+  const severe = systolic >= thresholds.crisisSystolicMin || diastolic >= thresholds.crisisDiastolicMin;
+  const hypotensionPresent = systolic <= thresholds.lowSystolicMax || diastolic <= thresholds.lowDiastolicMax;
   const code = severe ? 'crisis'
-    : systolic >= 140 || diastolic >= 90 ? 'stage2'
-      : systolic >= 130 || diastolic >= 80 ? 'stage1'
-        : systolic >= 120 ? 'elevated' : 'normal';
+    : systolic >= thresholds.stage2SystolicMin || diastolic >= thresholds.stage2DiastolicMin ? 'stage2'
+      : systolic >= thresholds.stage1SystolicMin || diastolic >= thresholds.stage1DiastolicMin ? 'stage1'
+        : systolic >= thresholds.elevatedSystolicMin ? 'elevated' : 'normal';
   const meta = BP_CATEGORIES[code];
   const emergency = severe && emergencySymptomsPresent;
   const message = emergency
@@ -96,7 +142,6 @@ export function classifyBloodPressure(reading, context = {}) {
       ? 'Low reading. Recheck and assess symptoms, baseline and clinical context; this classification is not a diagnosis.'
       : meta.message;
   return { ...meta, ...parsed, category: meta.label, message, emergency, emergencySymptomsPresent,
-    hypotensionPresent, referralEvaluationRequired: severe,
-    urgency: severe ? 'immediate' : null,
-    source: 'default' };
+    hypotensionPresent, referralEvaluationRequired: severe, source,
+    urgency: severe ? 'immediate' : null };
 }

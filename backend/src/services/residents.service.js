@@ -661,7 +661,7 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
   const [followUpResult, referralResult] = await Promise.all([
     supabase ? supabase.from('follow_ups').select('id,consultation_id,purpose,scheduled_date,scheduled_time,location,assigned_provider,status,schedule_response_status,linked_service_type,linked_service_id,notes')
       .eq('resident_id', resident.id).order('scheduled_date', { ascending: false }).limit(500) : { data: [] },
-    supabase ? supabase.from('health_referrals').select('id,treatment_visit_id,reason,destination_facility,scheduled_at,referral_date,created_at,status,schedule_response_status,recipient:profiles!recipient_personnel_id(full_name),facility:facilities!recipient_facility_id(name,type)')
+    supabase ? supabase.from('health_referrals').select('id,referring_facility,reason,destination_facility,destination_service,priority,recipient_personnel_id,recipient_role,recipient_station,external_receiving_facility,external_recipient_name,external_receiving_role,laboratory_test_required,laboratory_test,additional_instructions,completed_at,treatment_visit_id,scheduled_at,referral_date,created_at,status,schedule_response_status,recipient:profiles!recipient_personnel_id(full_name),facility:facilities!recipient_facility_id(name,type)')
       .eq('resident_id', resident.id).order('referral_date', { ascending: false }).limit(500) : { data: [] },
   ]);
   const followUps = followUpResult.error ? [] : (followUpResult.data || []).map((row) => ({
@@ -672,8 +672,12 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
     consultationId: row.consultation_id || null, notes: row.notes || '',
   }));
   const referrals = referralResult.error ? [] : (referralResult.data || []).map((row) => ({
-    id: row.id, reason: row.reason || '', date: row.scheduled_at || row.referral_date || row.created_at || '', facility: row.facility?.name || row.destination_facility || '',
-    assignedPersonnel: row.recipient?.full_name || '', facilityType: row.facility?.type || '',
+    id: row.id, reason: row.reason || '', date: row.scheduled_at || row.referral_date || row.created_at || '', facility: row.external_receiving_facility || row.facility?.name || row.destination_facility || '',
+    referringFacility: row.referring_facility || '', destinationService: row.destination_service || '', priority: row.priority || 'Medium',
+    assignedPersonnel: row.recipient?.full_name || row.external_recipient_name || '', facilityType: row.facility?.type || '',
+    laboratoryTestRequired: Boolean(row.laboratory_test_required), laboratoryTest: row.laboratory_test || '',
+    additionalInstructions: row.additional_instructions || '', completedAt: row.completed_at || '',
+    scheduledAt: row.scheduled_at || '', referralDate: row.referral_date || '',
     scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed', serviceProgressStatus: row.status || 'Pending',
     consultationId: row.treatment_visit_id || null,
   }));

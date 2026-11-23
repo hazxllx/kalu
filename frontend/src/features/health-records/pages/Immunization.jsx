@@ -14,7 +14,7 @@ import { listResidentsOffline } from "@/services/offline/residentOfflineService"
 import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { immunizationsApi } from "@/services/api";
-import { X, Plus, CheckCircle2, Search, Syringe, Pencil } from "lucide-react";
+import { X, Plus, CheckCircle2, Search, Syringe, Pencil, Eye } from "lucide-react";
 import { formatClinicalDate } from "@/lib/dateUtils";
 
 const VACCINES = [
@@ -22,7 +22,7 @@ const VACCINES = [
   "Tetanus Toxoid", "COVID-19", "Influenza", "Other",
 ];
 const DOSES = ["1st dose", "2nd dose", "3rd dose", "Booster", "Annual", "Single dose", "Other"];
-const STATUSES = ["Due", "Completed", "Missed"];
+const STATUSES = ["Due", "Completed", "Missed", "Cancelled"];
 const NOTES_MAX = 500;
 
 const formatDate = (iso) => {
@@ -61,24 +61,36 @@ function ResidentSummary({ resident }) {
 }
 
 /** persisted immunizations row (snake_case) → view shape. */
-const mapRecord = (row) => ({
-  id: row.id,
-  residentId: row.resident_id,
-  residentName: row.resident
-    ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
-    : row.residentName || "Resident",
-  barangay: row.resident?.barangay || row.barangay || "",
-  vaccine: row.vaccine || "",
-  dose: row.dose || "",
-  administeredDate: row.administered_date || "",
-  nextDose: row.next_dose || "",
-  provider: row.provider || "",
-  status: row.status || "Due",
-  notes: row.notes || "",
-});
+const vaccineSelectionFor = (row) => {
+  const selection = row.vaccine_selection;
+  if (selection === "Other" || VACCINES.includes(selection)) return selection;
+  return VACCINES.includes(row.vaccine) ? row.vaccine : "Other";
+};
+
+const mapRecord = (row) => {
+  const vaccineSelection = vaccineSelectionFor(row);
+  return {
+    id: row.id,
+    residentId: row.resident_id,
+    residentName: row.resident
+      ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
+      : row.residentName || "Resident",
+    barangay: row.resident?.barangay || row.barangay || "",
+    vaccine: row.vaccine || "",
+    vaccineSelection,
+    customVaccineName: row.custom_vaccine_name || (vaccineSelection === "Other" && row.vaccine !== "Other" ? row.vaccine : ""),
+    dose: row.dose || "",
+    administeredDate: row.administered_date || "",
+    nextDose: row.next_dose || "",
+    provider: row.provider || "",
+    status: row.status || "Due",
+    notes: row.notes || "",
+  };
+};
 
 const EMPTY_FORM = () => ({
   vaccine: VACCINES[0],
+  customVaccineName: "",
   dose: "",
   administeredDate: todayIso(),
   nextDose: "",
@@ -89,7 +101,11 @@ const EMPTY_FORM = () => ({
 
 function ImmunizationFormModal({ initial, resident, residents, saving, onClose, onSave, onSelectResident, followUpId = "" }) {
   const isEdit = Boolean(initial);
-  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initial ? { ...initial } : { ...EMPTY_FORM(), followUpId }));
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (
+    initial
+      ? { ...initial, vaccine: initial.vaccineSelection || initial.vaccine, customVaccineName: initial.customVaccineName || "" }
+      : { ...EMPTY_FORM(), followUpId }
+  ));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -120,6 +136,9 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
     const next = {};
     if (!isEdit && !resident) next.resident = "Please select a resident.";
     if (!form.vaccine) next.vaccine = "Select a vaccine.";
+    if (form.vaccine === "Other" && !String(form.customVaccineName || "").trim()) {
+      next.customVaccineName = "Specify the vaccine name.";
+    }
     if (form.status === "Completed" && !form.administeredDate) next.administeredDate = "Date administered is required when completed.";
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -178,6 +197,22 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
                   </select>
                   {errors.vaccine && <p className={errorCls}>{errors.vaccine}</p>}
                 </div>
+                {form.vaccine === "Other" && (
+                  <div>
+                    <label htmlFor="custom-vaccine-name" className={labelCls}>Specify Vaccine <span className="text-brand-danger">*</span></label>
+                    <input
+                      id="custom-vaccine-name"
+                      type="text"
+                      value={form.customVaccineName || ""}
+                      onChange={(e) => set("customVaccineName")(e.target.value)}
+                      placeholder="Enter vaccine name"
+                      maxLength={120}
+                      required
+                      className={inputCls(errors.customVaccineName)}
+                    />
+                    {errors.customVaccineName && <p className={errorCls}>{errors.customVaccineName}</p>}
+                  </div>
+                )}
                 <div>
                   <label className={labelCls}>Dose</label>
                   <select value={form.dose} onChange={(e) => set("dose")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
@@ -346,8 +381,11 @@ export default function Immunization() {
 
   const handleSave = async (form) => {
     setSaving(true);
+    const customVaccineName = form.vaccine === "Other" ? String(form.customVaccineName || "").trim() : "";
     const payload = {
-      vaccine: form.vaccine,
+      vaccine: customVaccineName || form.vaccine,
+      vaccine_selection: form.vaccine,
+      custom_vaccine_name: customVaccineName || null,
       dose: form.dose,
       administered_date: form.administeredDate || null,
       next_dose: form.nextDose || null,
@@ -454,15 +492,27 @@ export default function Immunization() {
                     <p className="text-sm font-medium text-brand-ink">{r.residentName}</p>
                     <p className="text-xs text-brand-gray">{r.barangay}</p>
                   </td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{r.vaccine}</td>
+                  <td className="px-4 py-3 text-sm text-brand-ink">{r.vaccine || "—"}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{r.dose || "—"}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{formatDate(r.administeredDate)}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{r.provider || "—"}</td>
                   <td className="px-4 py-3"><StatusBadge value={r.status} /></td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setDetail(r)} className="text-sm font-medium text-brand-blue hover:underline">View</button>
-                      <button onClick={() => openEdit(r)} className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"><Pencil className="h-3.5 w-3.5" /> Edit</button>
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setDetail(r)}
+                        title="View immunization"
+                        aria-label={`View immunization for ${r.residentName}`}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-btn border border-brand-border bg-white px-2.5 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 active:bg-brand-light/70"
+                      ><Eye className="h-3.5 w-3.5" aria-hidden="true" /> View</button>
+                      <button
+                        type="button"
+                        onClick={() => openEdit(r)}
+                        title="Edit immunization"
+                        aria-label={`Edit immunization for ${r.residentName}`}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-btn border border-brand-border bg-white px-2.5 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 active:bg-brand-light/70"
+                      ><Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Edit</button>
                     </div>
                   </td>
                 </tr>
@@ -488,7 +538,7 @@ export default function Immunization() {
 
       {/* Detail modal */}
       {detail && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Immunization details">
           <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
             <div className="p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
@@ -503,6 +553,9 @@ export default function Immunization() {
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
+                  ["Resident Name", detail.residentName || "—"],
+                  ["Barangay", detail.barangay || "—"],
+                  ["Vaccine", detail.vaccine || "—"],
                   ["Dose", detail.dose || "—"],
                   ["Date Administered", formatDate(detail.administeredDate)],
                   ["Next Dose", formatDate(detail.nextDose)],
@@ -521,7 +574,6 @@ export default function Immunization() {
               </div>
               <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
                 <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
-                <button onClick={() => openEdit(detail)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"><Pencil className="h-4 w-4" /> Edit</button>
               </div>
             </div>
           </Card>

@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
-import { FEATURE_ROLES } from '../config/roles.js';
+import { ROLES } from '../config/roles.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/apiError.js';
 import * as controller from '../controllers/residentFollowups.controller.js';
@@ -28,7 +28,7 @@ import * as controller from '../controllers/residentFollowups.controller.js';
  */
 const router = Router();
 
-const RESIDENT_ROLES = FEATURE_ROLES.residentSelf; // ['resident', 'resident-limited']
+const RESIDENT_ROLES = [ROLES.RESIDENT];
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 // Validates `:id` format up front and returns HTTP 404 for malformed UUIDs

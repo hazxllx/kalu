@@ -1294,7 +1294,7 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.households)
-      .select('*, members:household_members(count), cluster_assignment:household_risk_workflow(risk_cluster_level)', { count: 'exact' })
+      .select('*, members:household_members(resident_id), visits:household_visits(visit_date,status), cluster_assignment:household_risk_workflow(risk_cluster_level)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .order('id', { ascending: true })
       .range(offset, offset + limit - 1);
@@ -1318,12 +1318,67 @@ export const supabaseRepository = {
     if (!Array.isArray(data) || !Number.isInteger(count) || count < data.length) {
       throw Object.assign(new Error('Could not list households because the exact total count is unavailable.'), { statusCode: 500 });
     }
+
+    const residentIds = new Set();
+    for (const row of data) {
+      for (const member of row.members || []) {
+        if (member?.resident_id) residentIds.add(member.resident_id);
+      }
+    }
+    const followUpsByResident = new Map();
+    const residentIdList = [...residentIds];
+    for (let index = 0; index < residentIdList.length; index += 100) {
+      const { data: followUps, error: followUpError } = await supabase
+        .from('follow_ups')
+        .select('resident_id,scheduled_date,status')
+        .in('resident_id', residentIdList.slice(index, index + 100))
+        .not('scheduled_date', 'is', null);
+      throwOnError(followUpError, 'Could not load household follow-up schedules');
+      for (const followUp of followUps || []) {
+        const status = String(followUp.status || '').trim().toLower()
+          .replace(/[_-]+/g, ' ');
+        if (['completed', 'cancelled', 'missed'].includes(status)) continue;
+        const list = followUpsByResident.get(followUp.resident_id) || [];
+        list.push(followUp.scheduled_date);
+        followUpsByResident.set(followUp.resident_id, list);
+      }
+    }
+
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const latestActiveDate = (dates) => {
+      const valid = [...new Set((dates || []).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date))))]
+        .sort((a, b) => a.localeCompare(b));
+      return valid.find((date) => date >= today) || null;
+    };
+
     return {
-      rows: data.map((row) => ({
-        ...householdFromRow(row),
-        memberCount: row.members?.[0]?.count ?? 0,
-        riskClusterLevel: (Array.isArray(row.cluster_assignment) ? row.cluster_assignment[0] : row.cluster_assignment)?.risk_cluster_level ?? null,
-      })),
+      rows: data.map((row) => {
+        const memberRows = Array.isArray(row.members) ? row.members : [];
+        const visitRows = (row.visits || [])
+          .filter((visit) => {
+            const status = String(visit.status || '').trim().toLower();
+            return !['cancelled', 'pending', 'incomplete', 'incomplete visit'].includes(status);
+          })
+          .map((visit) => visit.visit_date)
+          .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date)));
+        const residentDates = memberRows.flatMap((member) =>
+          followUpsByResident.get(member.resident_id) || [],
+        );
+        const household = householdFromRow(row);
+        return {
+          ...household,
+          memberCount: memberRows.length,
+          riskClusterLevel: (Array.isArray(row.cluster_assignment) ? row.cluster_assignment[0] : row.cluster_assignment)?.risk_cluster_level ?? null,
+          lastVisitDate: [...visitRows].sort((a, b) => b.localeCompare(a))[0] || null,
+          nextFollowUpDate: latestActiveDate(residentDates),
+          indicatorCount: Array.isArray(household.riskFactors) ? household.riskFactors.length : 0,
+        };
+      }),
       total: count,
     };
   },
@@ -1909,8 +1964,7 @@ export const supabaseRepository = {
 
   /**
    * Manual-verification queue: residents filtered by verification status,
-   * scope and search term. Oldest submission first so the reviewer works
-   * through the queue in order. Returns { rows, total }.
+   * scope and search term. Newest submission first. Returns { rows, total }.
    */
   async listResidentsByVerificationStatus({
     statuses = null,
@@ -1924,7 +1978,7 @@ export const supabaseRepository = {
     let query = supabase
       .from(TABLES.residents)
       .select('*', { count: 'exact' })
-      .order('submitted_for_verification_at', { ascending: true, nullsFirst: false })
+      .order('submitted_for_verification_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
     if (statuses && statuses.length) query = query.in('verification_status', statuses);
     if (q) {
@@ -3147,6 +3201,7 @@ export const supabaseRepository = {
       crisisSystolicMin: data.crisis_systolic_min,
       crisisDiastolicMin: data.crisis_diastolic_min,
       labels: data.labels || {},
+      updatedBy: data.updated_by || null,
       updatedAt: data.updated_at,
     };
   },

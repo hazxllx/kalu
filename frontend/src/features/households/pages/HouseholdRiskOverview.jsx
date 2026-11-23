@@ -447,6 +447,29 @@ export default function HouseholdRiskOverview() {
                 </tbody>
               </table>
             </div>
+            <div className="grid gap-2 sm:hidden">
+              {paginatedData.map((h) => {
+                const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
+                return (
+                  <article key={h.id} className="rounded-btn border border-brand-border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-brand-ink">{h.head} Household</p>
+                        <p className="mt-0.5 font-mono text-xs text-brand-gray">{h.id}</p>
+                        <p className="mt-1 text-xs text-brand-gray">{h.barangay || "—"}</p>
+                      </div>
+                      <Link to={householdDetailPath(h.id)} className="shrink-0 text-xs font-semibold text-blue-600">View</Link>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-brand-border pt-3">
+                      <div><dt className="text-[11px] text-brand-gray">Risk Level</dt><dd className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tone.chip}`}>{clusterLabel(h.risk?.level)}</dd></div>
+                      <div><dt className="text-[11px] text-brand-gray">Indicators</dt><dd className="mt-1 text-sm font-semibold tabular-nums text-brand-ink">{h.indicatorCount}</dd></div>
+                      <div><dt className="text-[11px] text-brand-gray">Last Visit</dt><dd className="mt-1 text-sm text-brand-ink">{h.lastHouseholdVisit ? formatDate(h.lastHouseholdVisit) : "—"}</dd></div>
+                      <div><dt className="text-[11px] text-brand-gray">Follow-up</dt><dd className="mt-1 text-sm text-brand-ink">{h.nextScheduledFollowUp ? formatDate(h.nextScheduledFollowUp) : "—"}</dd></div>
+                    </dl>
+                  </article>
+                );
+              })}
+            </div>
           )}
         </div>
 
@@ -526,70 +549,59 @@ export default function HouseholdRiskOverview() {
           <h2 className="text-lg font-semibold tracking-tight text-brand-ink">Risk by barangay</h2>
           <p className="mt-1 text-sm text-brand-gray">Risk distribution among households matching the current filters</p>
 
-          <div className="mt-6 overflow-x-auto">
-            <table className="w-full min-w-[640px]">
+          <div className="mt-6 hidden sm:block">
+            <table className="w-full table-fixed">
               <thead>
                 <tr className="border-b border-brand-border bg-brand-bg dark:bg-hover">
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Barangay</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Priority</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Intervention</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Monitor</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Stable</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Unassigned</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Total</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Action</th>
+                  <th className="w-[40%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Barangay</th>
+                  <th className="w-[20%] px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Priority</th>
+                  <th className="w-[20%] px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Intervention</th>
+                  <th className="w-[20%] px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Monitor</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {byBarangay.map(([name, c]) => (
                   <tr key={name} className="transition-colors hover:bg-brand-bg dark:bg-hover">
-                    <td className="px-4 py-3 text-sm font-medium text-brand-ink">{name}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-3 py-3 text-sm font-medium text-brand-ink">{name}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">
                       <span className={`text-sm font-semibold ${c.priority > 0 ? "text-rose-600" : "text-brand-gray"}`}>
                         {c.priority}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-3 py-3 text-right tabular-nums">
                       <span className={`text-sm font-semibold ${c.intervention > 0 ? "text-orange-600" : "text-brand-gray"}`}>
                         {c.intervention}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-3 py-3 text-right tabular-nums">
                       <span className={`text-sm font-semibold ${c.monitor > 0 ? "text-blue-600" : "text-brand-gray"}`}>
                         {c.monitor}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`text-sm font-semibold ${c.stable > 0 ? "text-emerald-600" : "text-brand-gray"}`}>
-                        {c.stable}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="text-sm font-semibold text-brand-gray">{c.unassessed}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm font-semibold text-brand-ink">{c.total}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => {
-                          setBarangayFilter(name);
-                          window.scrollTo({ top: 0, behavior: "smooth" });
-                        }}
-                        className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                      >
-                        View
-                      </button>
                     </td>
                   </tr>
                 ))}
                 {byBarangay.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-sm text-brand-gray">
+                    <td colSpan={4} className="px-4 py-10 text-center text-sm text-brand-gray">
                       No barangay data available.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="mt-4 grid gap-2 sm:hidden">
+            {byBarangay.map(([name, c]) => (
+              <article key={name} className="rounded-btn border border-brand-border p-3">
+                <p className="mb-2 text-sm font-semibold text-brand-ink">{name}</p>
+                <dl className="grid grid-cols-3 gap-2">
+                  <div><dt className="text-[11px] text-brand-gray">Priority</dt><dd className="mt-0.5 text-base font-semibold tabular-nums text-rose-600">{c.priority}</dd></div>
+                  <div><dt className="text-[11px] text-brand-gray">Intervention</dt><dd className="mt-0.5 text-base font-semibold tabular-nums text-orange-600">{c.intervention}</dd></div>
+                  <div><dt className="text-[11px] text-brand-gray">Monitor</dt><dd className="mt-0.5 text-base font-semibold tabular-nums text-blue-600">{c.monitor}</dd></div>
+                </dl>
+              </article>
+            ))}
+            {byBarangay.length === 0 && <p className="py-8 text-center text-sm text-brand-gray">No barangay data available.</p>}
           </div>
         </div>
 
@@ -603,17 +615,17 @@ export default function HouseholdRiskOverview() {
             <span className="text-sm font-semibold text-brand-ink">{filtered.length} households</span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px]">
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full table-fixed">
               <thead>
                 <tr className="border-b border-brand-border bg-brand-bg dark:bg-hover">
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Household</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Barangay</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Risk Level</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Indicators</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Last Visit</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Follow-up</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Action</th>
+                  <th className="w-[20%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Household</th>
+                  <th className="w-[15%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Barangay</th>
+                  <th className="w-[15%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Risk Level</th>
+                  <th className="w-[10%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Indicators</th>
+                  <th className="w-[17%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Last Visit</th>
+                  <th className="w-[17%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Follow-up</th>
+                  <th className="w-[6%] px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -621,21 +633,21 @@ export default function HouseholdRiskOverview() {
                   const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
                   return (
                     <tr key={h.id} className="transition-colors hover:bg-brand-bg dark:bg-hover">
-                      <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-brand-ink">{h.head} Household</div>
+                      <td className="px-3 py-3">
+                        <div className="truncate text-sm font-medium text-brand-ink" title={`${h.head} Household`}>{h.head} Household</div>
                         <div className="mt-0.5 font-mono text-xs text-brand-gray">{h.id}</div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-brand-gray">{h.barangay}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 text-sm text-brand-gray">{h.barangay || "—"}</td>
+                      <td className="px-3 py-3">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${tone.chip}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
                           {clusterLabel(h.risk?.level)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-brand-ink">{h.environmentalRisk?.factors?.length ?? 0}</td>
-                      <td className="px-4 py-3 text-sm text-brand-gray">{daysAgo(h.lastHouseholdVisit)}</td>
-                      <td className="px-4 py-3 text-sm text-brand-gray">{h.workflowStatus || "—"}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-3 py-3 text-sm tabular-nums text-brand-ink">{h.indicatorCount}</td>
+                      <td className="px-3 py-3 text-sm text-brand-gray">{h.lastHouseholdVisit ? formatDate(h.lastHouseholdVisit) : "—"}</td>
+                      <td className="px-3 py-3 text-sm text-brand-gray">{h.nextScheduledFollowUp ? formatDate(h.nextScheduledFollowUp) : "—"}</td>
+                      <td className="px-3 py-3 text-right">
                         <Link
                           to={householdDetailPath(h.id)}
                           className="text-sm font-medium text-blue-600 hover:text-blue-700"

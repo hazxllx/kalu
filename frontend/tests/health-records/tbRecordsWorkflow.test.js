@@ -30,6 +30,7 @@ test('P0-8: mapTbRecord extracts BHW UUID cleanly into bhwId without losing bhw 
   });
   assert.equal(mapped.bhwId, BHW_UUID);
   assert.equal(mapped.bhw, 'BHW J. Santos');
+  assert.equal(Object.hasOwn(mapped, 'nextVisitTime'), false);
 });
 
 test('P0-8: validateTbRecordForm enforces BHW UUID selection in resident barangay, dates, and edit duplicate exclusion', () => {
@@ -97,13 +98,14 @@ test('P0-8: buildTbRecordPayload produces create and edit payloads with assigned
     status: 'Completed',
     lastVisit: '2026-06-10',
     nextVisit: '2026-06-25',
-    nextVisitTime: '09:30',
     notes: 'Sputum converted',
   };
 
   const createPayload = buildTbRecordPayload(form, null);
   assert.equal(createPayload.residentId, 'res-1');
   assert.equal(createPayload.assigned_bhw, BHW_UUID);
+  assert.equal(createPayload.next_visit, '2026-06-25');
+  assert.equal(Object.hasOwn(createPayload, 'next_visit_time'), false);
 
   const editPayload = buildTbRecordPayload(form, { id: 'tb-1' });
   assert.equal(Object.prototype.hasOwnProperty.call(editPayload, 'residentId'), false);
@@ -139,4 +141,7 @@ test('P0-8: TBRecords wires resident pagination, BHW UUID select, date validatio
   assert.match(src, /validateTbRecordForm/);
   assert.match(src, /updateStatus\(/);
   assert.match(src, /openEdit\(/);
+  assert.doesNotMatch(src, /Next Follow-up Time|nextVisitTime|type="time"/);
+  assert.match(src, /focus-visible:ring-2/);
+  assert.match(src, /whitespace-nowrap px-4 py-3/);
 });

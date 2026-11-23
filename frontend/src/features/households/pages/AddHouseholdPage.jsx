@@ -773,7 +773,7 @@ export default function AddHouseholdPage() {
     [form],
   );
   const flags = useMemo(
-    () => householdFlags(/** @type {{waterSource: any, toilet: any, members?: any[]}} */ (form)),
+    () => householdFlags(/** @type {{waterSource: any, toilet: any, sanitationAccess: any, members?: any[]}} */ (form)),
     [form],
   );
   // The classification is only meaningful once the required inputs that drive
@@ -1228,7 +1228,7 @@ export default function AddHouseholdPage() {
           onToggle={toggleSection}
         >
           <div className={grid2}>
-            <Field label="Number of Families in the Household" required error={errors.families} hint="A household can have more than one family">
+            <Field label="Number of Families in the Household" required error={errors.families} hint="Count of families living in this household.">
               <input
                 type="number"
                 min="1"
@@ -1237,7 +1237,7 @@ export default function AddHouseholdPage() {
                 className={inputCls(errors.families)}
               />
             </Field>
-            <Field label="Estimated Monthly Income (₱)" hint="Optional — used in risk classification" error={errors.income}>
+            <Field label="Estimated Monthly Income (₱)" hint="Optional" error={errors.income}>
               <input
                 type="number"
                 min="0"
@@ -1739,26 +1739,34 @@ export default function AddHouseholdPage() {
               </div>
             ) : (
               <>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <HHBadge value={risk.level} label={`${risk.level} Risk`} />
-                <span className="text-xs text-brand-gray">
-                  Risk score <span className="font-semibold text-brand-ink">{risk.score}/100</span> — computed live
-                </span>
-              </div>
-              <span className="text-[11px] text-brand-gray">
-                From water source, toilet, sanitation access, vulnerable members & income
-              </span>
-            </div>
-            {risk.factors.length > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {risk.factors.map((f) => (
-                  <span key={f} className="rounded-full bg-brand-light px-2.5 py-1 text-xs text-brand-blue">{f}</span>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-3 text-xs text-brand-gray">No risk factors recorded yet — fill in the sections above.</p>
-            )}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <HHBadge value={risk.level} label={`${risk.level} Risk`} />
+                    <div>
+                      <p className="text-xs text-brand-gray">Risk score</p>
+                      <p className="text-lg font-semibold text-brand-ink">{risk.score}<span className="text-sm font-normal text-brand-gray">/100</span></p>
+                    </div>
+                  </div>
+                  <p className="max-w-sm text-xs leading-5 text-brand-gray">
+                    {risk.level === "High"
+                      ? "High-risk conditions require prioritized household follow-up."
+                      : risk.level === "Moderate"
+                        ? "Some household conditions require closer monitoring."
+                        : "No high-priority risk threshold is currently indicated."}
+                  </p>
+                </div>
+                {risk.factors.length > 0 ? (
+                  <div className="mt-3">
+                    <p className="mb-1.5 text-xs font-semibold text-brand-ink">Contributing factors</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {risk.factors.map((f) => (
+                        <span key={f} className="rounded-full border border-brand-blue/15 bg-brand-light px-2.5 py-1 text-xs text-brand-blue">{f}</span>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-brand-gray">No contributing risk factors recorded.</p>
+                )}
               </>
             )}
 
@@ -1766,10 +1774,12 @@ export default function AddHouseholdPage() {
               {flags.includes("Sanitation Risk") && (
                 <div className="flex items-start gap-2.5 rounded-btn border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>
-                    <strong>Sanitation Risk</strong> — unsafe water source (Level I / Unimproved) or no toilet
-                    facility. Tagged for environmental sanitation follow-up.
-                  </span>
+                  <div>
+                    <strong className="block">Sanitation Risk Detected</strong>
+                    <span className="text-xs leading-5">
+                      Household sanitation conditions require environmental follow-up.
+                    </span>
+                  </div>
                 </div>
               )}
               {flags

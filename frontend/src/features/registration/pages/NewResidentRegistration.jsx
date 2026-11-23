@@ -22,6 +22,7 @@ import {
 import { ButtonSelectGroup } from "@/components/system";
 import { REGISTRATION_OTP_LENGTH, isValidRegistrationOtp } from "@/features/registration/otp";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
 import { guardianLinksApi } from "@/services/api/guardianLinksApi";
@@ -205,6 +206,7 @@ function ReviewDocRow({ label, slot, fileName }) {
 
 export default function NewResidentRegistration() {
   const navigate = useNavigate();
+  const { refreshProfile } = useAuth();
   const [step, setStep] = useState(1);
   const [show, setShow] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -1238,7 +1240,7 @@ export default function NewResidentRegistration() {
             idt.identityPhoto && { slot: 'identityPhoto', file: idt.identityPhoto, documentType: SLOT_DOCUMENT_TYPE.identityPhoto, label: 'your identity photo', needsIdType: false },
           ].filter(Boolean);
 
-      for (const u of uploads) {
+      const uploadResults = await Promise.all(uploads.map(async (u) => {
         const fd = new FormData();
         fd.append('file', u.file);
         fd.append('documentType', u.documentType);
@@ -1257,11 +1259,14 @@ export default function NewResidentRegistration() {
         if (!docResp?.document) {
           throw new Error(`We could not upload ${u.label}. Please go back and try again.`);
         }
+        return { u, screening: docResp.document.screening };
+      }));
+
+      for (const { u, screening } of uploadResults) {
         // Rule-based automated screening (readability only — never an
         // authenticity decision). The backend returns a resident-safe message;
         // a rejected upload keeps the resident on this step so they can replace
         // the file. Technical reason codes are never shown to residents.
-        const screening = docResp.document.screening;
         const counterpartSlot = screening?.counterpartScreening
           ? Object.keys(SLOT_DOCUMENT_TYPE).find(
             (slot) => SLOT_DOCUMENT_TYPE[slot] === screening.counterpartScreening.documentType,
@@ -1305,6 +1310,7 @@ export default function NewResidentRegistration() {
       // there is the post-registration confirmation state.
       sessionStorage.removeItem("residentRegistrationDraft");
       sessionStorage.removeItem("residentRegistrationResume");
+      await refreshProfile();
       navigate('/app/resident-limited/dashboard');
     } catch (err) {
       const status = err?.status;
@@ -2280,7 +2286,7 @@ export default function NewResidentRegistration() {
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Checking document...
+                      Submitting for review...
                     </>
                   ) : (
                     <>

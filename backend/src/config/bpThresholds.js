@@ -1,10 +1,14 @@
-// Clinical classification is fixed and shared with the frontend. Retain legacy
-// settings validation for the existing configuration API and stored settings.
+// Shared classification rules and validation for saved admin thresholds.
 import {
   DEFAULT_BP_THRESHOLDS, BP_CATEGORIES, BP_READING_BOUNDS,
-  parseBloodPressure, classifyBloodPressure,
+  parseBloodPressure, classifyBloodPressure, getBloodPressureConfig,
+  setBloodPressureConfig,
 } from '../../../shared/bloodPressure.js';
-export { DEFAULT_BP_THRESHOLDS, BP_CATEGORIES, BP_READING_BOUNDS, parseBloodPressure, classifyBloodPressure };
+export {
+  DEFAULT_BP_THRESHOLDS, BP_CATEGORIES, BP_READING_BOUNDS,
+  parseBloodPressure, classifyBloodPressure, getBloodPressureConfig,
+  setBloodPressureConfig,
+};
 
 /**
  * Coerce a candidate value to a finite number, returning `null` for blank,
@@ -87,5 +91,7 @@ export default {
   resolveThresholds,
   parseBloodPressure,
   classifyBloodPressure,
+  getBloodPressureConfig,
+  setBloodPressureConfig,
   validateThresholdPayload,
 };

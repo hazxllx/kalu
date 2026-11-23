@@ -86,6 +86,9 @@ export const toRiskCluster = (household = {}, workflow = null) => {
     purok: household.purok || "",
     address: household.address || household.streetAddress || "",
     members: memberCount,
+    indicatorCount: Number.isSafeInteger(household.indicatorCount)
+      ? household.indicatorCount
+      : (environmentalFactors.length),
     riskClusterLevel: level,
     riskLevelRaw: household.riskLevel ?? null,
     environmentalRisk: {
@@ -101,7 +104,8 @@ export const toRiskCluster = (household = {}, workflow = null) => {
     assignedWorkerRole: workflow?.assignedWorkerRole || "",
     followUpCount: workflow?.followUpCount || 0,
     lastFollowUpAt: toDateOnly(workflow?.lastFollowUpAt),
-    lastHouseholdVisit: toDateOnly(workflow?.lastFollowUpAt),
+    lastHouseholdVisit: toDateOnly(household.lastVisitDate),
+    nextScheduledFollowUp: toDateOnly(household.nextFollowUpDate),
     escalation,
     history: Array.isArray(workflow?.history) ? workflow.history.map((entry) => ({
       ...entry,

@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import validate from '../middleware/validate.js';
 import rateLimit from '../middleware/rateLimit.js';
-import { FEATURE_ROLES } from '../config/roles.js';
+import { FEATURE_ROLES, ROLES } from '../config/roles.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import * as controller from '../controllers/visitPlans.controller.js';
 import {
@@ -28,16 +28,15 @@ import {
  *   route -> authenticate -> authorize(RESIDENT_ROLES) -> [planRateLimit]
  *         -> [validate] -> visitPlans.controller -> visitPlans.service -> Supabase
  *
- * Ownership & scope guarantees:
- * Open exclusively to `resident` and `resident-limited` accounts. Both resident
- * ownership and eligible facility geography are derived server-side from the
- * authenticated session (`req.user`), preventing any `:id`, query, or body
- * tampering from reaching another resident's plans or out-of-scope services.
- * No appointment approval queue or status workflow is exposed here.
+ * The directory and availability are readable by authenticated residents and
+ * use their profile scope, so a pending account can browse without a residents
+ * row. Visit-plan reads and mutations are restricted to verified residents;
+ * ownership for those operations is derived from the session-linked resident.
  */
 const router = Router();
 
 const RESIDENT_ROLES = FEATURE_ROLES.residentSelf; // ['resident', 'resident-limited']
+const VERIFIED_RESIDENT_ROLES = [ROLES.RESIDENT];
 
 const idParam = validate(idParamValidator, 'params');
 const serviceIdParam = validate(serviceIdParamValidator, 'params');
@@ -64,12 +63,12 @@ router.get(
   asyncHandler(controller.availability),
 );
 
-// Resident visit-plan CRUD (`RESIDENT_ROLES`):
+// Resident visit-plan CRUD (verified residents only):
 // - GET    /visit-plans     : Lists the authenticated resident's visit plans (`listQueryValidator` query filters).
 // - POST   /visit-plans     : Records a new visit intent (`planRateLimit`, `createPlanValidator` body).
 // - DELETE /visit-plans/:id : Cancels/deletes caller-owned visit plan `:id` (`idParamValidator`).
-router.get('/visit-plans', authorize(RESIDENT_ROLES), validate(listQueryValidator, 'query'), asyncHandler(controller.list));
-router.post('/visit-plans', authorize(RESIDENT_ROLES), planRateLimit, validate(createPlanValidator), asyncHandler(controller.create));
-router.delete('/visit-plans/:id', authorize(RESIDENT_ROLES), idParam, asyncHandler(controller.remove));
+router.get('/visit-plans', authorize(VERIFIED_RESIDENT_ROLES), validate(listQueryValidator, 'query'), asyncHandler(controller.list));
+router.post('/visit-plans', authorize(VERIFIED_RESIDENT_ROLES), planRateLimit, validate(createPlanValidator), asyncHandler(controller.create));
+router.delete('/visit-plans/:id', authorize(VERIFIED_RESIDENT_ROLES), idParam, asyncHandler(controller.remove));
 
 export default router;

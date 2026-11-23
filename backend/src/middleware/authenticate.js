@@ -135,7 +135,7 @@ export const authenticate = asyncHandler(async (req, res, next) => {
       throw ApiError.forbidden('Your resident registration status could not be verified. Please try again.');
     }
     if (!residentRow) {
-      sessionUser.role = 'resident-incomplete';
+      sessionUser.role = 'resident-limited';
       sessionUser.status = 'incomplete_registration';
     }
   }

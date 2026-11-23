@@ -8,6 +8,8 @@ import notFoundHandler from './middleware/notFoundHandler.js';
 import rateLimit from './middleware/rateLimit.js';
 import requestLogger from './middleware/requestLogger.js';
 import apiRoutes from './routes/index.js';
+import { getBpConfig } from './services/bpConfig.service.js';
+import { DEFAULT_BP_THRESHOLDS, setBloodPressureConfig } from './config/bpThresholds.js';
 
 /**
  * KALUSAGAP Express application assembly.
@@ -64,6 +66,17 @@ const apiLimiter = rateLimit({
 });
 
 app.use('/api', apiLimiter);
+let bpConfigInitialization;
+app.use('/api', (req, res, next) => {
+  if (!bpConfigInitialization) {
+    bpConfigInitialization = getBpConfig().catch(() => {
+      setBloodPressureConfig({ thresholds: DEFAULT_BP_THRESHOLDS, source: 'default' });
+      console.error('Could not load BP threshold settings; shared defaults remain active.');
+      return null;
+    });
+  }
+  bpConfigInitialization.then(() => next()).catch(next);
+});
 app.use('/api', apiRoutes);
 
 // Unknown routes and uncaught operational/programming errors are handled last, in that order.

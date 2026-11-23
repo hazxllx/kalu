@@ -5,7 +5,7 @@ import SearchableSelect from "@/components/common/SearchableSelect";
 import { PRESCRIPTION_ROUTES, PRESCRIPTION_FREQUENCIES } from "../../../../../shared/consultationClinical.js";
 
 const inputCls =
-  "h-9 w-full rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink outline-none focus:border-brand-blue disabled:opacity-70 dark:border-border dark:bg-card dark:text-foreground";
+  "h-10 w-full min-w-0 rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue disabled:opacity-70 dark:border-border dark:bg-card dark:text-foreground";
 
 const recordedOptions = (options, value) => value && !options.some((option) => option.value === value)
   ? [{ value, label: `${value} (recorded value)` }, ...options]
@@ -153,16 +153,16 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
       {errors.medications && <p role="alert" className="mb-2 text-xs text-brand-danger">{errors.medications}</p>}
       {/* Added medicines */}
       {medications.length > 0 && (
-        <ul className="mb-3 space-y-2">
+        <ul className="mb-3 space-y-3">
           {medications.map((m, i) => (
             <li
               key={`${m.medicineId || "custom"}-${i}`}
-              className="rounded-btn border border-brand-border bg-brand-bg/40 p-3 dark:border-border dark:bg-card/40"
+              className="min-w-0 rounded-btn border border-brand-border bg-brand-bg/40 p-3 sm:p-4 dark:border-border dark:bg-card/40"
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+                <div className="flex min-w-0 items-center gap-2">
                   <Pill className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-                  <span className="truncate text-sm font-medium text-brand-ink">
+                  <span className="min-w-0 break-words text-sm font-semibold text-brand-ink">
                     {m.genericName || "(unnamed medicine)"}
                     {m.brandName && (
                       <span className="font-normal text-brand-gray"> ({m.brandName})</span>
@@ -174,7 +174,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
                   type="button"
                   disabled={disabled}
                   onClick={() => removeAt(i)}
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-brand-gray transition-colors hover:text-brand-danger"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-brand-danger hover:text-brand-danger"
                   aria-label={`Remove ${m.genericName || "medicine"}`}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -188,7 +188,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
                 </p>
               )}
 
-              <div className="mt-2 grid min-w-0 grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="mt-4 grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
                 {m.custom ? (
                   <>
                     <input

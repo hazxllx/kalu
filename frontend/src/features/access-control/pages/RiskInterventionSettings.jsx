@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   AlertTriangle,
   Check,
+  HeartPulse,
   Info,
   Pencil,
   Plus,
@@ -16,7 +17,6 @@ import {
   X,
 } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
-import { NavTabs } from "@/layouts/NavTabsLayout";
 import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
 import { riskConfigApi } from "@/services/api";
@@ -209,7 +209,10 @@ function IndicatorEditModal({ indicator, onSave, onClose }) {
 }
 
 export default function RiskInterventionSettings() {
-  const { navItem } = useOutletContext() || {};
+  const [searchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") === "intervention"
+    ? "intervention"
+    : "classification";
   // ----- Resident risk (backend) state -----
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -218,6 +221,7 @@ export default function RiskInterventionSettings() {
   const [busy, setBusy] = useState(false);
 
   const [thresholds, setThresholds] = useState({ moderateMin: 40, highMin: 70 });
+  const [savedThresholds, setSavedThresholds] = useState({ moderateMin: 40, highMin: 70 });
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_CRITERION);
@@ -261,10 +265,12 @@ export default function RiskInterventionSettings() {
     try {
       const data = await riskConfigApi.get();
       setConfig(data);
-      setThresholds({
+      const nextThresholds = {
         moderateMin: data?.thresholds?.moderateMin ?? 40,
         highMin: data?.thresholds?.highMin ?? 70,
-      });
+      };
+      setThresholds(nextThresholds);
+      setSavedThresholds(nextThresholds);
     } catch (err) {
       setError(err?.message || "Could not load the risk configuration.");
     } finally {
@@ -519,13 +525,40 @@ export default function RiskInterventionSettings() {
     <>
       <PageHeader
         management
-        crumbs={["Admin", "Risk & Intervention Settings"]}
-        title="Risk & Intervention Settings"
-        subtitle="Configure resident risk classification, early intervention rules, and follow-up policies."
+        crumbs={[{ label: "Admin", to: "/app/admin/dashboard" }, "Risk & Early Intervention"]}
+        title="Risk & Early Intervention"
+        subtitle="Configure resident risk classification, household risk scoring, intervention thresholds, and response rules."
       />
-      <NavTabs item={navItem} compact showIcons />
+
+      <nav aria-label="Risk and intervention sections" className="mb-4 overflow-x-auto border-b border-slate-200">
+        <div className="flex min-w-max gap-1">
+          {[
+            { id: "classification", label: "Risk Classification", icon: ShieldAlert },
+            { id: "intervention", label: "Intervention Rules", icon: HeartPulse },
+          ].map(({ id, label, icon: TabIcon }) => {
+            const active = activeTab === id;
+            return (
+              <Link
+                key={id}
+                to={`/app/admin/risk-early-intervention${id === "classification" ? "" : "?tab=intervention"}`}
+                aria-current={active ? "page" : undefined}
+                className={`-mb-px inline-flex h-10 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors ${
+                  active
+                    ? "border-brand-dark text-brand-dark"
+                    : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800"
+                }`}
+              >
+                <TabIcon className="h-4 w-4" />
+                {label}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
 
       <div className="space-y-5">
+        {activeTab === "classification" && (
+          <>
         {/* ============ Section A: Risk Classification ============ */}
         <Card className="p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -633,13 +666,20 @@ export default function RiskInterventionSettings() {
                     <p className="mt-1 text-[11px] leading-4 text-slate-500">Scores ≥ this value are High.</p>
                   </div>
                 </div>
-                <div className="mt-3">
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <button
+                    onClick={() => setThresholds({ ...savedThresholds })}
+                    disabled={busy || rulesEqual(thresholds, savedThresholds)}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Reset
+                  </button>
                   <button
                     onClick={saveThresholds}
                     disabled={busy}
                     className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand-dark px-3 text-xs font-medium text-white hover:bg-brand-blue disabled:opacity-50"
                   >
-                    <Save className="h-3.5 w-3.5" /> Save Thresholds
+                    <Save className="h-3.5 w-3.5" /> Save Changes
                   </button>
                 </div>
               </div>
@@ -740,8 +780,11 @@ export default function RiskInterventionSettings() {
             </>
           )}
         </Card>
+          </>
+        )}
 
         {/* ============ Section C: Early Intervention Rules ============ */}
+        {activeTab === "intervention" && (
         <Card className="overflow-hidden">
           {/* Header */}
           <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
@@ -817,7 +860,52 @@ export default function RiskInterventionSettings() {
             <div className="mt-2 flex items-center gap-1.5 rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
               <Info className="h-3.5 w-3.5 shrink-0 text-slate-400" />
               A household is classified by the highest threshold its total score meets. Escalation indicators can also promote to
-              Priority when combined with the count threshold below.
+              Priority when combined with the priority indicator count below.
+            </div>
+            <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+              <div>
+                <label className={labelClass}>Priority indicator count</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={rules.thresholds.priorityCount ?? DEFAULT_RISK_CONFIG.thresholds.priorityCount}
+                  onChange={(e) => setRuleThreshold("priorityCount", e.target.value)}
+                  className={inputClass}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">Indicators required with an escalation trigger to promote to Priority.</p>
+              </div>
+              <div>
+                <label className={labelClass}>Follow-up timeframe (days)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={rules.followUpTimeframeDays ?? DEFAULT_RISK_CONFIG.followUpTimeframeDays}
+                  onChange={(e) =>
+                    setRules((c) => ({
+                      ...c,
+                      followUpTimeframeDays: Number(e.target.value) || 14,
+                    }))
+                  }
+                  className={inputClass}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">Days before a household is considered overdue.</p>
+              </div>
+              <div>
+                <label className={labelClass}>Escalate after follow-ups</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={rules.escalationAfterFollowUps ?? DEFAULT_RISK_CONFIG.escalationAfterFollowUps}
+                  onChange={(e) =>
+                    setRules((c) => ({
+                      ...c,
+                      escalationAfterFollowUps: Number(e.target.value) || 3,
+                    }))
+                  }
+                  className={inputClass}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">Unsuccessful follow-ups before escalation.</p>
+              </div>
             </div>
           </div>
 
@@ -941,57 +1029,6 @@ export default function RiskInterventionSettings() {
             </table>
           </div>
 
-          {/* Follow-up & escalation */}
-          <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:px-6">
-            <h3 className="text-xs font-semibold text-slate-700">Follow-up &amp; escalation</h3>
-            <p className="mt-1 text-xs text-slate-500">How follow-ups and automatic escalation are handled.</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <div>
-                <label className={labelClass}>Priority indicator count</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={rules.thresholds.priorityCount ?? DEFAULT_RISK_CONFIG.thresholds.priorityCount}
-                  onChange={(e) => setRuleThreshold("priorityCount", e.target.value)}
-                  className={inputClass}
-                />
-                <p className="mt-1 text-[11px] text-slate-400">If this many indicators are present and one has escalation, promote to Priority.</p>
-              </div>
-              <div>
-                <label className={labelClass}>Follow-up timeframe (days)</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={rules.followUpTimeframeDays ?? DEFAULT_RISK_CONFIG.followUpTimeframeDays}
-                  onChange={(e) =>
-                    setRules((c) => ({
-                      ...c,
-                      followUpTimeframeDays: Number(e.target.value) || 14,
-                    }))
-                  }
-                  className={inputClass}
-                />
-                <p className="mt-1 text-[11px] text-slate-400">Days before a household is considered overdue for follow-up.</p>
-              </div>
-              <div>
-                <label className={labelClass}>Escalate after follow-ups</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={rules.escalationAfterFollowUps ?? DEFAULT_RISK_CONFIG.escalationAfterFollowUps}
-                  onChange={(e) =>
-                    setRules((c) => ({
-                      ...c,
-                      escalationAfterFollowUps: Number(e.target.value) || 3,
-                    }))
-                  }
-                  className={inputClass}
-                />
-                <p className="mt-1 text-[11px] text-slate-400">Unsuccessful follow-ups before automatic escalation.</p>
-              </div>
-            </div>
-          </div>
-
           {/* Sticky action bar when dirty */}
           {rulesDirty && (
             <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-5 py-3 sm:px-6">
@@ -1015,6 +1052,8 @@ export default function RiskInterventionSettings() {
             </div>
           )}
         </Card>
+        )}
+
       </div>
 
       {/* Criterion modal (Section B) */}
@@ -1140,8 +1179,8 @@ export default function RiskInterventionSettings() {
       />
       <ConfirmDialog
         open={confirmReset}
-        title="Reset early intervention rules?"
-        description="All indicator weights, thresholds, and follow-up settings will return to their defaults. Unsaved changes will be lost."
+        title="Reset intervention and follow-up settings?"
+        description="All indicator weights, thresholds, and follow-up policies will return to their defaults. Unsaved changes will be lost."
         confirmLabel="Reset to defaults"
         variant="danger"
         onConfirm={handleResetRules}
@@ -1150,7 +1189,7 @@ export default function RiskInterventionSettings() {
       <ConfirmDialog
         open={confirmDiscard}
         title="Discard unsaved changes?"
-        description="Your edits to early intervention rules have not been saved and will be lost."
+        description="Your edits to intervention or follow-up settings have not been saved and will be lost."
         confirmLabel="Discard changes"
         variant="danger"
         onConfirm={handleDiscardRules}

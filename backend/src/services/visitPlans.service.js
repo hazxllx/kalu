@@ -25,6 +25,7 @@
  * tables (operating weekdays, hours and closures) rather than duplicating them.
  */
 import { getServiceClient } from '../config/supabase.js';
+import { ROLES } from '../config/roles.js';
 import ApiError from '../utils/apiError.js';
 import { notifyResident } from './notifications.service.js';
 import * as storageService from './storage.service.js';
@@ -183,6 +184,12 @@ const ownResident = async (supabase, user) => {
   if (!data) throw ApiError.notFound('No resident record is linked to your account.');
   return data;
 };
+
+const residentBrowseScope = (user) => ({
+  municipality_id: user?.municipalityId || null,
+  barangay_id: user?.barangayId || null,
+  barangay: user?.barangay || '',
+});
 
 const residentFullName = (r) =>
   [r?.first_name, r?.middle_name, r?.last_name].filter(Boolean).join(' ').trim() || 'A resident';
@@ -345,18 +352,19 @@ const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityN
  * resident's own active plan (if any) so the card can render inline.
  */
 export const listDirectory = async ({ user, supabase = getServiceClient(), now = new Date() }) => {
-  const resident = await ownResident(supabase, user);
-  if (!resident.municipality_id) return { facilities: [] };
+  const resident = user?.role === ROLES.RESIDENT ? await ownResident(supabase, user) : null;
+  const scope = resident || residentBrowseScope(user);
+  if (!scope.municipality_id || !scope.barangay_id) return { facilities: [] };
 
   const { data: services, error } = await supabase
     .from(SERVICE_TABLE)
     .select('id, name, description, category, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline, registration_capacity')
-    .eq('municipality_id', resident.municipality_id)
+    .eq('municipality_id', scope.municipality_id)
     .eq('active', true)
     .order('name');
   throwOnError(error, 'Could not load services');
 
-  const inScope = (services || []).filter((s) => serviceInScope(s, resident));
+  const inScope = (services || []).filter((s) => serviceInScope(s, scope));
   if (inScope.length === 0) return { facilities: [] };
 
   const ids = inScope.map((s) => s.id);
@@ -416,22 +424,28 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
     .filter(Boolean)
     .reduce((max, end) => (end > max ? end : max), planWindowEnd);
 
-  const [schedules, blackouts, plansRes, attendanceRes, rhu] = await Promise.all([
-    loadSchedules(supabase, ids, resident),
-    loadBlackouts(supabase, ids, resident, from, to),
-    supabase
+  const plansQuery = resident
+    ? supabase
       .from(PLAN_TABLE)
       .select('id, service_id, planned_date, note, status')
       .eq('resident_id', resident.id)
       .eq('status', 'Planned')
-      .gte('planned_date', from),
-    supabase
+      .gte('planned_date', from)
+    : Promise.resolve({ data: [], error: null });
+  const attendanceQuery = resident
+    ? supabase
       .from(ATTENDANCE_TABLE)
       .select('service_id, attendance_status, scheduled_date')
       .eq('resident_id', resident.id)
       .in('service_id', ids)
-      .order('scheduled_date', { ascending: false }),
-    rhuName(supabase, resident),
+      .order('scheduled_date', { ascending: false })
+    : Promise.resolve({ data: [], error: null });
+  const [schedules, blackouts, plansRes, attendanceRes, rhu] = await Promise.all([
+    loadSchedules(supabase, ids, scope),
+    loadBlackouts(supabase, ids, scope, from, to),
+    plansQuery,
+    attendanceQuery,
+    rhuName(supabase, scope),
   ]);
   throwOnError(plansRes.error, 'Could not load your visit plans');
 
@@ -467,13 +481,13 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
     if (!attendanceByServiceDate.has(key)) attendanceByServiceDate.set(key, a.attendance_status);
   }
 
-  const bhcName = resident.barangay || 'Barangay Health Center';
+  const bhcName = scope.barangay || 'Barangay Health Center';
   const rhuDisplay = rhu;
 
   const bhc = [];
   const rhuServices = [];
   for (const service of inScope) {
-    const type = facilityTypeOf(service, resident);
+    const type = facilityTypeOf(service, scope);
     const plan = planByService.get(service.id) || null;
     // Only an attendance record for this plan's own day affects its status; a
     // future plan with no attendance for that day stays "Registered".
@@ -482,7 +496,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
       : null;
     const view = toServiceView(
       service,
-      resident,
+      scope,
       schedulesByService.get(service.id) || [],
       blackoutByService.get(service.id) || new Set(),
       type === 'BHC' ? bhcName : rhuDisplay,
@@ -533,8 +547,10 @@ const activeRegistrationCount = async (supabase, serviceId) => {
  * today + 13 days] so a resident can never plan outside the two-week horizon.
  */
 export const serviceAvailability = async ({ user, serviceId, from, to, supabase = getServiceClient(), now = new Date() }) => {
-  const resident = await ownResident(supabase, user);
-  const service = await loadScopedService(supabase, resident, serviceId);
+  const resident = user?.role === ROLES.RESIDENT ? await ownResident(supabase, user) : null;
+  const scope = resident || residentBrowseScope(user);
+  if (!scope.municipality_id || !scope.barangay_id) throw ApiError.notFound('Health service not found.');
+  const service = await loadScopedService(supabase, scope, serviceId);
   const registrationCount = service.registration_capacity == null
     ? 0
     : await activeRegistrationCount(supabase, service.id);
@@ -550,7 +566,7 @@ export const serviceAvailability = async ({ user, serviceId, from, to, supabase 
     const first = start < today ? today : start;
     const rangeTo = end < first ? first : end;
 
-    const blackouts = await loadBlackouts(supabase, [service.id], resident, first, rangeTo);
+    const blackouts = await loadBlackouts(supabase, [service.id], scope, first, rangeTo);
     const blackoutDates = new Set(blackouts.map((b) => b.blackout_date));
     const availability = evaluateAvailability(service, [], blackoutDates, now);
 
@@ -565,7 +581,7 @@ export const serviceAvailability = async ({ user, serviceId, from, to, supabase 
     return {
       serviceId: service.id,
       serviceName: service.name,
-      facilityType: facilityTypeOf(service, resident),
+      facilityType: facilityTypeOf(service, scope),
       visitPolicy: service.visit_policy === 'by_notice' ? 'by_notice' : 'walk_in',
       weekdays: [],
       windowStart: hhmm(service.start_time),
@@ -591,8 +607,8 @@ export const serviceAvailability = async ({ user, serviceId, from, to, supabase 
   const rangeTo = reqTo > windowEnd ? windowEnd : reqTo;
 
   const [schedules, blackouts] = await Promise.all([
-    loadSchedules(supabase, [service.id], resident),
-    loadBlackouts(supabase, [service.id], resident, rangeFrom, rangeTo),
+    loadSchedules(supabase, [service.id], scope),
+    loadBlackouts(supabase, [service.id], scope, rangeFrom, rangeTo),
   ]);
   const { weekdays, windowStart: wStart, windowEnd: wEnd } = summarizeSchedule(schedules);
   const weekdaySet = new Set(weekdays);
@@ -610,7 +626,7 @@ export const serviceAvailability = async ({ user, serviceId, from, to, supabase 
   return {
     serviceId: service.id,
     serviceName: service.name,
-    facilityType: facilityTypeOf(service, resident),
+    facilityType: facilityTypeOf(service, scope),
     visitPolicy: service.visit_policy === 'by_notice' ? 'by_notice' : 'walk_in',
     weekdays,
     windowStart: wStart,

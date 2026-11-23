@@ -209,6 +209,14 @@ export function riskFromScore(score) {
   return "Low";
 }
 
+export function isCriticalSanitationRisk({ waterSource, toilet, sanitationAccess } = {}) {
+  return waterSource === "unimproved"
+    || toilet === "none"
+    || toilet === "open_pit"
+    || toilet === "antipolo"
+    || sanitationAccess === "None";
+}
+
 /**
  * Compute live household risk score based on environmental and demographic factors.
  *
@@ -318,7 +326,10 @@ export function computeHouseholdRisk({ waterSource, toilet, sanitationAccess, me
     }
   }
 
-  return { score, level: riskFromScore(score), factors };
+  const level = isCriticalSanitationRisk({ waterSource, toilet, sanitationAccess }) && score < 60
+    ? "High"
+    : riskFromScore(score);
+  return { score, level, factors };
 }
 
 /**
@@ -338,11 +349,16 @@ export function computeHouseholdRisk({ waterSource, toilet, sanitationAccess, me
  *
  * @returns {string[]} Array of flag descriptions
  */
-export function householdFlags({ waterSource, toilet, members = [] }) {
+export function householdFlags({ waterSource, toilet, sanitationAccess, members = [] }) {
   const flags = [];
-  
-  // Sanitation risk: unsafe water or no toilet
-  if (waterSource === "level1" || waterSource === "unimproved" || toilet === "none") {
+
+  // Level I is a service level, not proof that a water source is unsafe.
+  // Only an actually unimproved source or an unsafe toilet condition is flagged.
+  if (waterSource === "unimproved"
+    || toilet === "none"
+    || toilet === "open_pit"
+    || toilet === "antipolo"
+    || sanitationAccess === "None") {
     flags.push("Sanitation Risk");
   }
   

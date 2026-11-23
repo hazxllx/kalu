@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import validate from '../middleware/validate.js';
-import { FEATURE_ROLES } from '../config/roles.js';
+import { FEATURE_ROLES, ROLES } from '../config/roles.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import * as controller from '../controllers/appointments.controller.js';
 import {
@@ -39,7 +39,7 @@ import {
 const router = Router();
 
 // Role groups governing resident self-service, appointment triage, and slot configuration.
-const RESIDENT = FEATURE_ROLES.residentSelf;
+const RESIDENT = [ROLES.RESIDENT];
 const MANAGER = FEATURE_ROLES.appointmentManage;
 const SCHEDULER = FEATURE_ROLES.appointmentSchedule;
 

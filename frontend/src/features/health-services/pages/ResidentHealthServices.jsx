@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, X, ZoomIn, FileText } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { CalendarDays, CheckCircle2, Clock3, FileText, HeartPulse, Loader2, MapPin, RotateCcw, X, ZoomIn } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
@@ -7,21 +8,18 @@ import { Skeleton } from "@/components/common/Skeleton";
 import TablePagination from "@/components/tables/TablePagination";
 import DateRangeFilter from "@/components/common/DateRangeFilter";
 import { useAuth } from "@/context/AuthContext";
-import { visitPlansApi } from "@/services/api";
+import { healthServicesApi, visitPlansApi } from "@/services/api";
 import VisitPlanModal from "../components/VisitPlanModal";
-import { availabilityLine, formatWeekdays, formatWindow, formatPlanDate, formatServiceSchedule, formatDeadline } from "../lib/visitPlanFormat";
+import { availabilityLine, formatWeekdays, formatWindow, formatPlanDate, formatTime, formatDeadline } from "../lib/visitPlanFormat";
 
 /**
  * Resident Health Services.
  *
  * A professional, institution-styled directory of the services the resident's
  * Barangay Health Center (BHC) and the covering Rural Health Unit (RHU) actually
- * offer, in two clearly separated white container cards (BHC first, RHU second).
- * Each service renders as a horizontal card; the primary action is a real
- * Register button that creates a registration against the authenticated resident
- * and the selected service (reusing the existing visit-plan registration
- * endpoint). All service and registration data comes from the backend — nothing
- * is hardcoded or fabricated.
+ * offer, grouped by facility (BHC first, RHU second). Compact service cards
+ * open a details dialog; registration continues through the existing visit-plan
+ * workflow. All service and registration data comes from the backend.
  */
 export default function ResidentHealthServices({ barangayOnly = false }) {
   const { user } = useAuth();
@@ -29,6 +27,7 @@ export default function ResidentHealthServices({ barangayOnly = false }) {
   const [facilities, setFacilities] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [registerModal, setRegisterModal] = useState(null); // the service being registered
+  const [detailsService, setDetailsService] = useState(null);
   const [removeTarget, setRemoveTarget] = useState(null); // { serviceId, plan }
   const [removing, setRemoving] = useState(false);
   const [toast, setToast] = useState("");
@@ -48,18 +47,27 @@ export default function ResidentHealthServices({ barangayOnly = false }) {
   const load = useCallback(() => {
     setState("loading");
     setErrorMsg("");
-    visitPlansApi
-      .directory()
+    const request = barangayOnly ? healthServicesApi.list() : visitPlansApi.directory();
+    request
       .then((res) => {
-        const groups = res?.facilities || [];
-        setFacilities(barangayOnly ? groups.filter((facility) => facility.type === "BHC") : groups);
+        if (barangayOnly) {
+          if (!Array.isArray(res?.rows)) throw new Error("The health-service response did not contain a catalog.");
+          const services = res.rows.filter((service) => service.facilityType === "BHC");
+          setFacilities(services.length ? [{
+            type: "BHC",
+            name: user?.barangay || "Barangay Health Center",
+            services,
+          }] : []);
+        } else {
+          setFacilities(res?.facilities || []);
+        }
         setState("ready");
       })
       .catch((err) => {
         setErrorMsg(err?.message || "We couldn't load the health services. Please try again.");
         setState("error");
       });
-  }, [barangayOnly]);
+  }, [barangayOnly, user?.barangay]);
 
   useEffect(() => {
     load();
@@ -153,31 +161,41 @@ export default function ResidentHealthServices({ barangayOnly = false }) {
       )}
 
       {state === "ready" && (
-        <div className="space-y-5">
-          <section className="flex flex-col flex-wrap gap-3 rounded-lg border border-brand-border bg-white px-4 py-4 dark:bg-card sm:px-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h2 className="font-display text-base text-brand-ink dark:text-foreground">{barangayOnly ? "Services in your barangay" : "Find a health service"}</h2>
-              <p className="mt-0.5 text-sm text-brand-gray dark:text-muted-foreground">{barangayOnly ? "Browse programs and services offered by your Barangay Health Center." : "Filter by availability and the facility offering the service."}</p>
+        <div className="space-y-6 font-body">
+          <section className="flex flex-col gap-4 rounded-lg border border-brand-border bg-white p-4 dark:bg-card sm:p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-brand-ink dark:text-foreground">{barangayOnly ? "Services in your barangay" : "Find a health service"}</h2>
+              <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">{barangayOnly ? "Browse programs and services offered by your Barangay Health Center." : "Filter by availability, facility, and service date."}</p>
             </div>
-            <div className={`grid grid-cols-1 gap-3 ${barangayOnly ? "sm:grid-cols-2" : "sm:flex sm:flex-wrap"}`}>
-              <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray dark:text-muted-foreground sm:flex-none">
+            {!barangayOnly && <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:w-auto lg:flex lg:items-end">
+              <label className="grid min-w-0 gap-1.5 text-[13px] font-medium text-brand-gray dark:text-muted-foreground">
                 Availability
-                <select aria-label="Availability" value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-input dark:text-foreground sm:min-w-[160px]">
+                <select aria-label="Availability" value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="h-10 w-full min-w-0 rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-input dark:text-foreground lg:min-w-[170px]">
                   <option value="all">All services</option>
                   <option value="open">Open for registration</option>
                   <option value="closed">Closed for registration</option>
                 </select>
               </label>
-              {!barangayOnly && <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray dark:text-muted-foreground sm:flex-none">
+              {!barangayOnly && <label className="grid min-w-0 gap-1.5 text-[13px] font-medium text-brand-gray dark:text-muted-foreground">
                 Facility
-                <select aria-label="Facility" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-input dark:text-foreground sm:min-w-[180px]">
+                <select aria-label="Facility" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="h-10 w-full min-w-0 rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-input dark:text-foreground lg:min-w-[180px]">
                   <option value="all">All facilities</option>
                   <option value="bhc">Barangay Health Center</option>
                   <option value="rhu">Rural Health Unit (RHU)</option>
                 </select>
               </label>}
-              <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="w-full sm:w-52" />
-            </div>
+              <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="w-full lg:w-52" />
+              {(availabilityFilter !== "all" || (!barangayOnly && scopeFilter !== "all") || dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setAvailabilityFilter("all"); setScopeFilter("all"); setDateFrom(""); setDateTo(""); }}
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-btn px-2 text-sm font-medium text-brand-blue hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 lg:self-end"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                  Clear filters
+                </button>
+              )}
+            </div>}
           </section>
 
           {!hasScopeResults && (
@@ -192,8 +210,8 @@ export default function ResidentHealthServices({ barangayOnly = false }) {
             title={`Barangay Health Center${barangayName ? ` — ${barangayName}` : ""}`}
             subtitle="Health services organized by your barangay for the community."
             services={bhcServices}
-            onRegister={(svc) => setRegisterModal(svc)}
-            onCancel={(svc) => setRemoveTarget({ serviceId: svc.id, plan: svc.plan })}
+            readOnly={barangayOnly}
+            onViewDetails={setDetailsService}
             onPreviewPubmat={setPreviewPubmat}
             onPreviewMemo={setPreviewMemo}
           />}
@@ -203,16 +221,24 @@ export default function ResidentHealthServices({ barangayOnly = false }) {
             title="Rural Health Unit (RHU)"
             subtitle="Health services provided by the Rural Health Unit for nearby barangays."
             services={rhuServices}
-            onRegister={(svc) => setRegisterModal(svc)}
-            onCancel={(svc) => setRemoveTarget({ serviceId: svc.id, plan: svc.plan })}
+            onViewDetails={setDetailsService}
             onPreviewPubmat={setPreviewPubmat}
             onPreviewMemo={setPreviewMemo}
           />}
         </div>
       )}
 
+      <ServiceDetailsDialog
+        service={detailsService}
+        readOnly={barangayOnly}
+        onClose={() => setDetailsService(null)}
+        onRegister={(service) => { setDetailsService(null); setRegisterModal(service); }}
+        onCancel={(service) => { setDetailsService(null); setRemoveTarget({ serviceId: service.id, plan: service.plan }); }}
+        onPreviewMemo={setPreviewMemo}
+      />
+
       <VisitPlanModal
-        open={Boolean(registerModal)}
+        open={!barangayOnly && Boolean(registerModal)}
         service={registerModal}
         onClose={() => setRegisterModal(null)}
         onConfirmed={onConfirmed}
@@ -302,7 +328,7 @@ export default function ResidentHealthServices({ barangayOnly = false }) {
 }
 
 /** A white container card for one facility (BHC or RHU) with its service list. */
-function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPreviewPubmat, onPreviewMemo }) {
+function FacilitySection({ title, subtitle, services, readOnly = false, onViewDetails, onPreviewPubmat }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
   const pageCount = Math.max(1, Math.ceil(services.length / pageSize));
@@ -312,21 +338,20 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
   return (
     <section className="flex flex-col gap-3">
       <header>
-        <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">{title}</p>
+        <h2 className="text-base font-semibold text-brand-ink dark:text-foreground">{title}</h2>
         <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">{subtitle}</p>
       </header>
       {services.length === 0 ? (
         <SectionEmpty />
       ) : (
-        <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {visibleServices.map((svc) => (
               <ServiceCard
                 key={svc.id}
                 service={svc}
-                onRegister={() => onRegister(svc)}
-                onCancel={() => onCancel(svc)}
+                readOnly={readOnly}
+                onViewDetails={() => onViewDetails(svc)}
                 onPreviewPubmat={onPreviewPubmat}
-                onPreviewMemo={onPreviewMemo}
               />
             ))}
         </div>
@@ -356,76 +381,49 @@ function SectionEmpty() {
   );
 }
 
-const STATUS_STYLES = {
-  Registered: "bg-brand-blue/10 text-brand-blue",
-  Attended: "bg-brand-green/10 text-brand-green",
-  Missed: "bg-brand-danger/10 text-brand-danger",
-  Cancelled: "bg-slate-100 text-slate-500",
-};
-
-/** A small status pill for a registration. */
-function StatusBadge({ status }) {
-  const label = status || "Registered";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLES[label] || STATUS_STYLES.Registered}`}>
-      {label}
-    </span>
-  );
-}
-
-/**
- * One health service, laid out horizontally on desktop and stacked on mobile:
- *   [icon]  name + type + description      date/time/location      [action]
- * The action is a real Register button whose state reflects actual backend
- * availability and the resident's current registration.
- */
-function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreviewMemo }) {
+/** Compact service summary; full information and actions live in the details dialog. */
+function ServiceCard({ service, readOnly = false, onViewDetails, onPreviewPubmat }) {
   const [pubmatFailed, setPubmatFailed] = useState(false);
-  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  const detailsId = useId();
   const schedule = formatWeekdays(service.weekdays);
   const window = formatWindow(service.windowStart, service.windowEnd);
+  const eventDate = service.schedule?.startDate ? formatPlanDate(service.schedule.startDate) : "";
   const serviceType = service.visitPolicy === "by_notice" ? "By notice" : service.visitPolicy === "walk_in" ? "Walk-in" : "";
   const avail = availabilityLine(service);
-  const plan = service.plan || null;
-  const status = plan?.status || null;
-  const isActive = status === "Registered"; // registered, not yet attended/missed
-
-  // The concrete one-off service window (set on the service record), shown so a
-  // resident sees the actual date and time before registering.
-  const serviceSchedule = formatServiceSchedule(service.schedule);
   const registerBy = formatDeadline(service.schedule?.registrationDeadline);
-  const stateLabel = status || (avail.open ? "Available" : "Closed");
-  const stateClass = status === "Attended"
+  const isCancelled = service.cancelled === true || String(service.status || "").toLowerCase() === "cancelled";
+  const stateLabel = readOnly
+    ? "Available"
+    : service.plan?.status || (isCancelled ? "Cancelled" : service.registrationFull ? "Fully booked" : avail.open ? "Available" : "Closed");
+  const stateClass = service.plan?.status === "Attended"
     ? "bg-brand-green text-white"
-    : isActive
+    : ["Registered", "Missed"].includes(service.plan?.status)
       ? "bg-brand-blue text-white"
-      : avail.open
+      : (readOnly || avail.open) && !service.registrationFull && !isCancelled
         ? "bg-brand-gold text-brand-dark"
-        : "bg-brand-bg text-brand-ink";
+        : "bg-white/95 text-brand-ink";
   const poster = (
-    <div className="relative aspect-[4/5] overflow-hidden bg-brand-dark">
+    <div className="relative h-40 overflow-hidden bg-brand-dark">
       {service.pubmatUrl && !pubmatFailed ? (
         <img
           src={service.pubmatUrl}
           alt={`${service.name} publication material`}
           loading="lazy"
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
           onError={() => setPubmatFailed(true)}
         />
-      ) : (
-        <div className="grid h-full place-items-center bg-gradient-to-br from-brand-blue to-brand-dark">
-        </div>
-      )}
-      <div className="absolute inset-0 bg-gradient-to-t from-brand-dark via-brand-dark/50 to-transparent" />
-      <span className={`absolute left-3 top-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${stateClass}`}>
+      ) : <div className="absolute inset-0 bg-brand-blue" />}
+      <div className="absolute inset-0 bg-gradient-to-t from-brand-dark/95 via-brand-dark/30 to-brand-dark/10" />
+      <span className={`absolute left-3 top-3 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${stateClass}`}>
         {stateLabel}
       </span>
-      <div className="absolute inset-x-4 bottom-4 text-left">
-        {service.category && <p className="text-xs font-semibold uppercase tracking-wide text-brand-gold">{service.category}</p>}
-        <h3 className="mt-1 font-display text-lg leading-snug text-white">{service.name}</h3>
-        <p className="mt-1 truncate text-xs font-medium uppercase tracking-wide text-white/80">{service.facilityName || "Health service"}</p>
-        {serviceSchedule && <p className="mt-0.5 text-xs text-white/75">{serviceSchedule}</p>}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <HeartPulse className="h-10 w-10 text-white/90" strokeWidth={1.5} aria-hidden="true" />
+      </div>
+      <div className="absolute inset-x-4 bottom-3 text-left">
+        {service.category && <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-gold">{service.category}</p>}
+        <h3 className="mt-0.5 line-clamp-2 text-[19px] font-semibold leading-6 text-white">{service.name}</h3>
+        <p className="mt-1 truncate text-xs text-white/85">{service.facilityName || "Health service"}</p>
+        {(eventDate || schedule || window) && <p className="mt-0.5 truncate text-xs text-white/80">{[eventDate, schedule, window].filter(Boolean).join(" · ")}</p>}
       </div>
       {service.pubmatUrl && !pubmatFailed && (
         <span className="absolute bottom-3 right-3 rounded-full bg-black/55 p-1.5 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
@@ -449,104 +447,138 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
         </button>
       ) : poster}
 
-      <div className="flex flex-1 flex-col p-4">
+      <div className="flex min-h-[106px] flex-1 flex-col justify-between gap-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
-        {serviceType && <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray dark:border-border dark:text-muted-foreground">{serviceType}</span>}
-        {registerBy && <span className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Register by {registerBy}</span>}
+          {serviceType && <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray dark:border-border dark:text-muted-foreground">{serviceType}</span>}
           {service.schedule?.registrationCapacity != null && (
-            <span className={`text-xs font-medium ${service.registrationFull ? "text-brand-danger" : "text-brand-gray"}`}>
-              {service.registrationFull ? "Registration full" : `${service.registrationRemaining} place${service.registrationRemaining === 1 ? "" : "s"} left`}
+            <span className={`text-xs font-medium ${service.registrationFull ? "text-brand-danger" : "text-brand-gray dark:text-muted-foreground"}`}>
+              {service.registrationFull ? "Fully booked" : `${service.registrationRemaining} place${service.registrationRemaining === 1 ? "" : "s"} left`}
             </span>
           )}
         </div>
-        {service.description && (
-          <div className="mt-2">
-            <p className={`whitespace-pre-line text-sm leading-relaxed text-brand-gray dark:text-muted-foreground ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
-          </div>
-        )}
-        <button type="button" aria-expanded={descriptionExpanded} aria-controls={detailsId} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="mt-2 inline-flex min-h-8 self-start items-center text-sm font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
-          {descriptionExpanded ? "Show less" : "View details"}
-        </button>
-        <div id={detailsId} hidden={!descriptionExpanded}>
-        {service.memo?.url && (
-          <button
-            type="button"
-            onClick={() => onPreviewMemo?.({ ...service.memo, name: service.name })}
-            className="mt-2 inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-            title={service.memo.filename || "View memorandum"}
-          >
-            <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
-          </button>
-        )}
-        <div className="mt-3 space-y-2 text-sm leading-relaxed text-brand-gray dark:text-muted-foreground">
-          {serviceSchedule && (
-            <p className="flex items-center gap-1.5">
-              <span><span className="font-medium text-brand-ink">Schedule: </span>{serviceSchedule}</span>
-            </p>
-          )}
-          {registerBy && (
-            <p className="flex items-center gap-1.5">
-              <span><span className="font-medium text-brand-ink">Registration deadline: </span>{registerBy}</span>
-            </p>
-          )}
-          {schedule && (
-            <p className="flex items-center gap-1.5">
-              <span><span className="font-medium text-brand-ink">Days: </span>{schedule}</span>
-            </p>
-          )}
-          {window && (
-            <p className="flex items-center gap-1.5">
-              <span><span className="font-medium text-brand-ink">Time: </span>{window}</span>
-            </p>
-          )}
-          {service.facilityName && (
-            <p className="flex items-center gap-1.5">
-              <span className="min-w-0 break-words"><span className="font-medium text-brand-ink">Facility: </span>{service.facilityName}</span>
-            </p>
-          )}
-        </div>
-        </div>
+        {registerBy && <p className="truncate text-xs text-brand-gray dark:text-muted-foreground" title={`Registration deadline: ${registerBy}`}>Register by {registerBy}</p>}
       </div>
       <footer className="mt-auto border-t border-brand-border px-4 py-3">
-          {plan ? (
-            <div className="flex flex-col items-start gap-1.5 lg:items-end">
-              <StatusBadge status={status} />
-              {isActive && (
-                <button
-                  type="button"
-                  onClick={onCancel}
-                  className="text-xs font-medium text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
-                >
-                  Cancel registration
-                </button>
-              )}
-            </div>
-          ) : avail.open && !service.registrationFull ? (
-            <button
-              type="button"
-              onClick={onRegister}
-              className="w-full rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 lg:w-auto"
-            >
-              Register
-            </button>
-          ) : (
-            <div className="flex flex-col items-start gap-1 lg:items-end">
-              <button
-                type="button"
-                disabled
-                aria-disabled="true"
-                title={service.registrationFull ? "Maximum registration capacity reached." : avail.text}
-                className="w-full cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 py-2 text-sm font-medium text-slate-400 lg:w-auto"
-              >
-                {service.registrationFull ? "Capacity Reached" : "Registration Closed"}
-              </button>
-              {(service.registrationFull || avail.text) && (
-                <span className="text-xs leading-tight text-slate-400 lg:text-right">{service.registrationFull ? "This service has reached its resident registration limit." : avail.text}</span>
-              )}
-            </div>
-          )}
+        <button type="button" onClick={onViewDetails} className="inline-flex min-h-9 w-full items-center justify-center rounded-btn border border-brand-border px-3 text-sm font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+          View details
+        </button>
       </footer>
     </article>
+  );
+}
+
+function ServiceDetailsDialog({ service, readOnly = false, onClose, onRegister, onCancel, onPreviewMemo }) {
+  if (!service) return null;
+  const availability = availabilityLine(service);
+  const isCancelled = service.cancelled === true || String(service.status || "").toLowerCase() === "cancelled";
+  const registrationOpen = availability.open && !service.registrationFull && !isCancelled;
+  const plan = service.plan || null;
+  const activePlan = plan?.status === "Registered";
+  const schedule = service.schedule || {};
+  const startDate = formatFullDate(schedule.startDate);
+  const endDate = schedule.endDate && schedule.endDate !== schedule.startDate ? formatFullDate(schedule.endDate) : "";
+  const scheduledDate = startDate ? `${startDate}${endDate ? ` – ${endDate}` : ""}` : "To be announced";
+  const times = schedule.startTime || schedule.endTime
+    ? [schedule.startTime ? formatTime(schedule.startTime) : "", schedule.endTime ? formatTime(schedule.endTime) : ""].filter(Boolean).join(" – ")
+    : formatWindow(service.windowStart, service.windowEnd) || "To be announced";
+  const registrationType = service.visitPolicy === "walk_in" ? "Walk-in" : service.visitPolicy === "by_notice" ? "Registration required (by notice)" : "Registration required";
+  const deadlineText = formatDeadline(schedule.registrationDeadline);
+  const deadlineDate = formatFullDate(String(schedule.registrationDeadline || "").slice(0, 10));
+  const deadlineTime = String(schedule.registrationDeadline || "").slice(11, 16);
+  const deadline = deadlineDate
+    ? `${deadlineDate}${deadlineTime && deadlineTime !== "00:00" ? `, ${formatTime(deadlineTime)}` : ""}`
+    : deadlineText;
+  const statusLabel = readOnly
+    ? "Available"
+    : isCancelled ? "Cancelled" : plan?.status || (service.registrationFull ? "Fully booked" : availability.open ? "Open for registration" : "Registration closed");
+
+  return (
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-[1px]" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-[85] flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-brand-border bg-white shadow-2xl focus:outline-none dark:bg-card">
+          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-brand-border px-5 py-4 sm:px-6">
+            <div className="min-w-0">
+              {service.category && <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-blue">{service.category}</p>}
+              <Dialog.Title className="mt-1 break-words text-xl font-semibold leading-tight text-brand-ink dark:text-foreground">{service.name}</Dialog.Title>
+              <Dialog.Description className="sr-only">Service information and registration options</Dialog.Description>
+              <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                statusLabel === "Attended" ? "bg-emerald-50 text-emerald-700" : ["Registered", "Missed"].includes(statusLabel) ? "bg-brand-blue/10 text-brand-blue" : service.registrationFull && !plan ? "bg-amber-50 text-amber-800" : availability.open && !isCancelled && !plan ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+              }`}>
+                {statusLabel}
+              </span>
+            </div>
+            <Dialog.Close asChild>
+              <button type="button" className="shrink-0 rounded-full p-2 text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue" aria-label="Close service details">
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </Dialog.Close>
+          </header>
+
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
+            {service.description && <p className="whitespace-pre-line text-sm leading-relaxed text-brand-gray dark:text-muted-foreground">{service.description}</p>}
+            <dl className="grid gap-4 rounded-lg bg-brand-bg/70 p-4 text-sm dark:bg-background sm:grid-cols-2">
+              <DetailItem icon={MapPin} label="Barangay or facility" value={service.facilityName || "Health facility"} />
+              <DetailItem icon={CalendarDays} label="Scheduled date" value={scheduledDate} />
+              <DetailItem icon={Clock3} label="Time" value={times} />
+              <DetailItem icon={CalendarDays} label="Registration deadline" value={deadline || "Not specified"} />
+              <DetailItem icon={HeartPulse} label="Registration type" value={registrationType} />
+              {service.weekdays?.length > 0 && <DetailItem icon={CalendarDays} label="Recurring days" value={formatWeekdays(service.weekdays)} />}
+            </dl>
+            {deadline && <p className="text-xs text-brand-gray dark:text-muted-foreground">Please register by {deadline}.</p>}
+            {service.memo?.url && (
+              <button
+                type="button"
+                onClick={() => onPreviewMemo?.({ ...service.memo, name: service.name })}
+                className="inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-card"
+                title={service.memo.filename || "View memorandum"}
+              >
+                <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
+              </button>
+            )}
+            {service.registrationFull && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">This service has reached its resident registration limit.</p>}
+            {!readOnly && !availability.open && !isCancelled && !service.registrationFull && <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-brand-gray">{availability.text}</p>}
+            {isCancelled && <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-brand-gray">This service has been cancelled.</p>}
+          </div>
+
+          <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-brand-border bg-white px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 dark:bg-card">
+            <button type="button" onClick={onClose} className="h-10 rounded-btn border border-brand-border px-4 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-muted-foreground">
+              Close
+            </button>
+            {readOnly ? (
+              <p className="self-center text-xs text-brand-gray dark:text-muted-foreground">Registration and resident-specific actions are available after verification.</p>
+            ) : <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              {activePlan && <button type="button" onClick={() => onCancel(service)} className="h-10 rounded-btn px-3 text-sm font-medium text-brand-blue hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">Cancel registration</button>}
+              {registrationOpen && !plan ? (
+                <button type="button" onClick={() => onRegister(service)} className="h-10 rounded-btn bg-brand-blue px-5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2">Register</button>
+              ) : !plan && (
+                <button type="button" disabled className="h-10 cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 text-sm font-medium text-slate-400">
+                  {isCancelled ? "Service Cancelled" : service.registrationFull ? "Fully Booked" : "Registration Closed"}
+                </button>
+              )}
+            </div>}
+          </footer>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function formatFullDate(value) {
+  const date = formatPlanDate(value);
+  return date ? `${date} ${String(value).slice(0, 4)}` : "";
+}
+
+function DetailItem({ icon: Icon, label, value }) {
+  return (
+    <div className="flex min-w-0 gap-2.5">
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
+      <div className="min-w-0">
+        <dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">{label}</dt>
+        <dd className="mt-0.5 break-words text-sm font-medium text-brand-ink dark:text-foreground">{value}</dd>
+      </div>
+    </div>
   );
 }
 
@@ -589,7 +621,7 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
   );
 }
 
-/** Loading placeholder matching the poster-card directory grid. */
+/** Loading placeholder matching the compact service-card directory grid. */
 function DirectorySkeleton() {
   return (
     <div role="status" aria-label="Loading health services" className="space-y-5">
@@ -599,18 +631,11 @@ function DirectorySkeleton() {
             <Skeleton className="h-4 w-64 max-w-full" />
             <Skeleton className="mt-2 h-3 w-80 max-w-full" />
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {Array.from({ length: s === 0 ? 3 : 2 }).map((_, i) => (
               <div key={i} className="overflow-hidden rounded-lg border border-brand-border bg-white">
-                <Skeleton className="aspect-[4/5] w-full rounded-none" />
-                <div className="space-y-2 p-4">
-                  <div className="flex gap-2">
-                    <Skeleton className="h-4 w-16 rounded-full" />
-                    <Skeleton className="h-4 w-24 rounded-full" />
-                  </div>
-                  <Skeleton className="h-3 w-full" />
-                  <Skeleton className="h-3 w-2/3" />
-                </div>
+                <Skeleton className="h-40 w-full rounded-none" />
+                <div className="space-y-3 p-4"><Skeleton className="h-4 w-24 rounded-full" /><Skeleton className="h-3 w-2/3" /><Skeleton className="h-9 w-full" /></div>
               </div>
             ))}
           </div>

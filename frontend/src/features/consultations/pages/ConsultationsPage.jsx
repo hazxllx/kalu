@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
@@ -21,28 +21,31 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
+  const requestId = useRef(0);
 
-  useEffect(() => {
-    let active = true;
+  const load = useCallback(async () => {
+    const request = ++requestId.current;
     setLoading(true);
     setLoadError(null);
-    consultationsApi
-      .list()
-      .then((res) => {
-        if (!active) return;
-        const list = Array.isArray(res) ? res : res?.rows || [];
-        setRows(list);
-      })
-      .catch((err) => {
-        if (!active) return;
+    try {
+      const response = await consultationsApi.list();
+      const list = Array.isArray(response) ? response : response?.rows;
+      if (!Array.isArray(list)) throw new Error("The server returned an invalid consultation list.");
+      if (request === requestId.current) setRows(list.filter((row) => row && typeof row === "object"));
+    } catch (err) {
+      if (request === requestId.current) {
         setLoadError(err?.message || "Unable to load consultations.");
         setRows([]);
-      })
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
+      }
+    } finally {
+      if (request === requestId.current) setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+    return () => { requestId.current += 1; };
+  }, [load]);
 
   const completed = useMemo(
     () => rows.filter((r) => String(r.status || "").toLowerCase() === "completed"),
@@ -106,9 +109,12 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
           ) : loadError ? (
             <div className="flex items-start gap-3 rounded-2xl border border-brand-danger/30 bg-brand-danger/5 p-4">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-brand-danger" />
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-brand-ink">Couldn't load consultations</p>
                 <p className="mt-0.5 text-xs text-brand-gray">{loadError}</p>
+                <button type="button" onClick={load} className="mt-3 rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                  Try Again
+                </button>
               </div>
             </div>
           ) : filtered.length === 0 ? (

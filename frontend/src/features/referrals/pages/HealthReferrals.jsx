@@ -29,6 +29,9 @@ import {
   toLocalDateTimeInput,
 } from "@/features/referrals/lib/referralDateValidation";
 import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Download, AlertTriangle, MoreVertical, CalendarClock, Ban, CheckCircle2 } from "lucide-react";
+import SearchableSelect from "@/components/common/SearchableSelect";
+import { validateConsultationVitals } from "../../../../../shared/consultationClinical.js";
+import { formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
 
 /**
  * Referral coordination page backed by the real API (`/api/referrals` ->
@@ -79,7 +82,9 @@ const bmiFromVitals = ({ heightCm, weightKg }) => {
   const height = Number.parseFloat(heightCm);
   const weight = Number.parseFloat(weightKg);
   if (!Number.isFinite(height) || !Number.isFinite(weight) || height <= 0 || weight <= 0) return "";
-  return (weight / ((height / 100) ** 2)).toFixed(2);
+  const bmi = weight / ((height / 100) ** 2);
+  if (!Number.isFinite(bmi) || bmi < 3 || bmi > 200) return "";
+  return bmi.toFixed(2);
 };
 
 const formatReferralVitals = (vitals = {}) => [
@@ -302,7 +307,6 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
   const [guest, setGuest] = useState({ firstName: "", middleName: "", lastName: "", birthDate: "", sex: "", currentAddress: "", cellphoneNo: "", barangay: "" });
   const [guestError, setGuestError] = useState("");
   const [guestSaving, setGuestSaving] = useState(false);
-  const [recipientSearch, setRecipientSearch] = useState("");
   const residentId = initial?.residentId || resident?.id;
   useEffect(() => {
     let active = true;
@@ -345,17 +349,31 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
     ...(form.laboratoryTestRequired && !form.laboratoryTest.trim()
       ? { laboratoryTest: "Laboratory test details are required when laboratory test is marked as required." }
       : {}),
+    ...(!routingOnly && !consultationLinked ? Object.fromEntries(
+      Object.entries(validateConsultationVitals({
+        bloodPressure: form.referralVitals.bp,
+        temperature: form.referralVitals.temperature,
+        pulseRate: form.referralVitals.hr,
+        respiratoryRate: form.referralVitals.rr,
+        height: form.referralVitals.heightCm,
+        weight: form.referralVitals.weightKg,
+        oxygenSaturation: form.referralVitals.o2sat,
+      }, { required: false })).map(([key, message]) => [`vital_${key}`, message])
+    ) : {}),
   });
   const liveErrors = buildErrors(now);
   const facilities = [...new Map(routes.map((route) => [route.facility_id, route.facility_name])).entries()];
   const roles = [...new Set(routes.filter((route) => route.facility_id === form.recipientFacilityId).map((route) => route.role))];
+  const availableRecipientRoutes = routes.filter((route) =>
+    (!form.recipientFacilityId || route.facility_id === form.recipientFacilityId)
+    && (!form.recipientRole || route.role === form.recipientRole)
+  );
   const chosenRoute = selectedReferralRoute(routes, form);
   const recipientLabel = (route) => [
     `${route.name}${route.station ? ` (${route.station})` : ""}`,
     route.facility_name,
     referralRoleLabel(route.role),
   ].filter(Boolean).join(" · ");
-  const recipientInputValue = chosenRoute ? recipientLabel(chosenRoute) : recipientSearch;
   const knownBarangays = [...new Set([...barangays, ...residents.map((entry) => entry.barangay)].filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const registerGuest = async () => {
     setGuestError("");
@@ -386,9 +404,9 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
-        <div className="p-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
+      <Card className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
+          <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold text-brand-ink">{routingOnly ? "Reassign Referral" : isEdit ? "Edit Referral" : "New Referral"}</h3>
               <p className="mt-0.5 text-sm text-brand-gray">{routingOnly ? "The new recipient must accept again. Clinical details and history are retained." : "Assign an authorized KALUSAGAP recipient for tracking, and optionally add an outside facility or contact."}</p>
@@ -396,7 +414,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
 
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
             {isEdit ? (
               <section className="rounded-btn border border-brand-border p-4">
                 <h4 className="text-sm font-semibold text-brand-ink">Select Patient</h4>
@@ -460,7 +478,6 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                 <label className="text-sm font-medium text-brand-ink">Receiving Facility <span className="text-brand-danger">*</span></label>
                 <select disabled={routesLoading || !residentId || routes.length === 0} value={form.recipientFacilityId} onChange={(event) => {
                   const id = event.target.value;
-                  setRecipientSearch("");
                   setForm((prior) => ({ ...prior, recipientFacilityId: id, destinationFacility: facilities.find(([key]) => key === id)?.[1] || "", recipientRole: "", recipientPersonnelId: "", recipientStation: "" }));
                 }} className={`${inputCls(liveErrors.recipient)} cursor-pointer`}>
                   <option value="">Select receiving facility</option>
@@ -469,29 +486,37 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Receiving Role <span className="text-brand-danger">*</span></label>
-                <select disabled={!form.recipientFacilityId || routesLoading} value={form.recipientRole} onChange={(event) => { setRecipientSearch(""); setForm((prior) => ({ ...prior, recipientRole: event.target.value, recipientPersonnelId: "", recipientStation: "" })); }} className={`${inputCls()} cursor-pointer`}>
+                <select disabled={!form.recipientFacilityId || routesLoading} value={form.recipientRole} onChange={(event) => { setForm((prior) => ({ ...prior, recipientRole: event.target.value, recipientPersonnelId: "", recipientStation: "" })); }} className={`${inputCls()} cursor-pointer`}>
                   <option value="">Select role</option>
                   {roles.map((role) => <option key={role} value={role}>{referralRoleLabel(role)}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Assigned Recipient <span className="text-brand-danger">*</span></label>
-                <input type="text" role="combobox" aria-autocomplete="list" aria-expanded={Boolean(routes.length)} list="referral-authorized-recipients" disabled={!residentId || routesLoading || routes.length === 0} value={recipientInputValue} onChange={(event) => {
-                  const value = event.target.value;
-                  const route = routes.find((entry) => recipientLabel(entry).toLocaleLowerCase() === value.trim().toLocaleLowerCase());
-                  setRecipientSearch(route ? "" : value);
-                  setForm((prior) => ({
-                    ...prior,
-                    recipientFacilityId: route?.facility_id || prior.recipientFacilityId,
-                    destinationFacility: route?.facility_name || prior.destinationFacility,
-                    recipientRole: route?.role || prior.recipientRole,
-                    recipientPersonnelId: route?.id || "",
-                    recipientStation: route?.station || "",
-                  }));
-                }} placeholder={routesLoading ? "Loading recipients..." : !residentId ? "Select a patient first" : "Type a name or choose an authorized recipient"} className={inputCls(liveErrors.recipient)} />
-                <datalist id="referral-authorized-recipients">
-                  {routes.map((route) => <option key={referralRouteKey(route)} value={recipientLabel(route)} />)}
-                </datalist>
+                <SearchableSelect
+                  id="referral-assigned-recipient"
+                  ariaLabel="Assigned recipient"
+                  value={chosenRoute ? referralRouteKey(chosenRoute) : ""}
+                  onChange={(value) => {
+                    const route = routes.find((entry) => referralRouteKey(entry) === value);
+                    setForm((prior) => ({
+                      ...prior,
+                      recipientFacilityId: route?.facility_id || prior.recipientFacilityId,
+                      destinationFacility: route?.facility_name || prior.destinationFacility,
+                      recipientRole: route?.role || prior.recipientRole,
+                      recipientPersonnelId: route?.id || "",
+                      recipientStation: route?.station || "",
+                    }));
+                  }}
+                  options={availableRecipientRoutes.map((route) => ({ value: referralRouteKey(route), label: recipientLabel(route) }))}
+                  placeholder={routesLoading ? "Loading recipients..." : !residentId ? "Select a patient first" : "Search authorized recipient"}
+                  emptyText={routesLoading ? "Loading authorized recipients..." : "No authorized recipient matches this facility and role."}
+                  error={liveErrors.recipient}
+                  disabled={!residentId || routesLoading || routes.length === 0 || !form.recipientFacilityId || !form.recipientRole}
+                  maxResults={6}
+                  portalDropdown
+                  compact
+                />
                 {liveErrors.recipient && <p className="mt-1 text-xs text-brand-danger">{liveErrors.recipient}</p>}
                 {!routesLoading && residentId && routes.length === 0 && !routesError && <p className="mt-1 text-xs text-brand-gray">No active recipients are configured for this patient. Ask an administrator to verify staff, facility, and station assignments.</p>}
                 {routes.length > 0 && !chosenRoute && <p className="mt-1 text-xs text-brand-gray">Choose a suggestion to assign the correct facility, role, and station.</p>}
@@ -501,7 +526,6 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                 <label className="flex cursor-pointer items-start gap-2 text-sm font-medium text-brand-ink">
                   <input type="checkbox" checked={form.externalReceivingEnabled} onChange={(event) => {
                     const enabled = event.target.checked;
-                    setRecipientSearch("");
                     setForm((prior) => ({ ...prior, externalReceivingEnabled: enabled,
                       ...(enabled ? { destinationFacility: "", recipientPersonnelId: "", recipientFacilityId: "", recipientRole: "", recipientStation: "" }
                         : { externalReceivingFacility: "", externalReceivingAddress: "", externalReceivingRole: "", externalRecipientName: "", externalRecipientPosition: "" }) }));
@@ -541,7 +565,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="text-sm font-medium text-brand-ink">Referral Date</label>
-                <input type="date" max={todayIso()} value={form.referralDate} onChange={(e) => set("referralDate")(e.target.value)} className={inputCls(liveErrors.referralDate)} />
+                <input type="date" min={todayIso()} value={form.referralDate} onChange={(e) => set("referralDate")(e.target.value)} className={inputCls(liveErrors.referralDate)} />
                 {liveErrors.referralDate && <p className="mt-1 text-xs text-brand-danger">{liveErrors.referralDate}</p>}
               </div>
               <div>
@@ -550,7 +574,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Scheduled Date &amp; Time</label>
-                <input type="datetime-local" min={referralDateTimeMinimum()} value={form.scheduledAt} onChange={(e) => set("scheduledAt")(e.target.value)} className={inputCls(liveErrors.scheduledAt)} />
+                <input type="datetime-local" min={form.referralDate ? `${form.referralDate}T00:00` : referralDateTimeMinimum()} value={form.scheduledAt} onChange={(e) => set("scheduledAt")(e.target.value)} className={inputCls(liveErrors.scheduledAt)} />
                 <p className="mt-1 text-xs text-brand-gray">Enter a future schedule in Philippine time.</p>
                 {liveErrors.scheduledAt && <p className="mt-1 text-xs text-brand-danger">{liveErrors.scheduledAt}</p>}
               </div>
@@ -663,11 +687,26 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                           value={form.referralVitals[key]}
                           onChange={(event) => setForm((prior) => ({
                             ...prior,
-                            referralVitals: { ...prior.referralVitals, [key]: event.target.value },
+                            referralVitals: {
+                              ...prior.referralVitals,
+                              [key]: key === "bp"
+                                ? formatBloodPressureInput(
+                                    event.target.value,
+                                    event.currentTarget.selectionStart,
+                                    event.currentTarget.selectionEnd,
+                                    event.nativeEvent.inputType,
+                                  )?.value || event.target.value
+                                : event.target.value,
+                            },
                           }))}
                           placeholder={placeholder}
                           className={inputCls()}
                         />
+                        {liveErrors[`vital_${{ bp: "bloodPressure", temperature: "temperature", hr: "pulseRate", rr: "respiratoryRate", heightCm: "height", weightKg: "weight", o2sat: "oxygenSaturation" }[key]}`] && (
+                          <span className="mt-1 text-xs text-brand-danger">
+                            {liveErrors[`vital_${{ bp: "bloodPressure", temperature: "temperature", hr: "pulseRate", rr: "respiratoryRate", heightCm: "height", weightKg: "weight", o2sat: "oxygenSaturation" }[key]}`]}
+                          </span>
+                        )}
                       </label>
                     ))}
                     <label className="flex min-w-0 flex-col text-xs font-medium text-brand-gray">
@@ -1395,15 +1434,21 @@ export default function HealthReferrals() {
       />
 
       <Card className="p-4 mb-5">
-        {canWrite && canCreate && <div role="group" aria-label="Referral inbox" className="mb-4 flex flex-wrap gap-2 border-b border-brand-border pb-3">
-          {[["all", "All Referrals"], ["outgoing", "Sent Referrals"]].map(([value, label]) => (
-            <button key={value} type="button" onClick={() => setBox(value)} aria-pressed={box === value}
-              className={`rounded-btn border px-3 py-1.5 text-sm font-medium transition-colors ${box === value ? "border-brand-blue bg-brand-blue/10 text-brand-blue" : "border-brand-border text-brand-gray hover:bg-brand-bg"}`}>
-              {label}
-            </button>
-          ))}
-        </div>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 xl:items-end">
+          {canWrite && canCreate && (
+            <label className="min-w-0 text-sm font-medium text-brand-gray xl:col-span-2">
+              Referral
+              <select
+                value={box}
+                onChange={(event) => setBox(event.target.value)}
+                aria-label="Referral type"
+                className="mt-1 h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink outline-none focus:border-brand-blue dark:border-border dark:bg-input"
+              >
+                <option value="all">All Referrals</option>
+                <option value="outgoing">Sent Referrals</option>
+              </select>
+            </label>
+          )}
           <label className="min-w-0 text-sm font-medium text-brand-gray sm:col-span-2 xl:col-span-5">
             Search
             <div className="mt-1 flex h-10 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input">

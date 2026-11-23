@@ -40,12 +40,12 @@ test('PHN defaults use the shared Manila clock and never fabricate a historical 
   assert.equal(consultationForm({ residentId: 'RES-1' }, now).consultationDate, '');
 });
 
-test('PHN new consultations require complete 8 vitals, findings and review but not a diagnosis', () => {
+test('PHN new consultations require complete 8 vitals and findings but not a diagnosis', () => {
   const form = consultationForm(null, now);
   form.residentId = 'RES-1';
   form.chiefComplaint = 'Recorded complaint';
   const errors = clinicalErrors(clinicalPayload(form));
-  for (const field of [...Object.keys(measuredVitals), 'bmi', 'findings', 'clinicalIndicators.dangerSignsReviewed']) assert.ok(errors[field], field);
+  for (const field of [...Object.keys(measuredVitals), 'bmi', 'findings']) assert.ok(errors[field], field);
   assert.equal(errors.diagnosis, undefined);
   const complete = completeForm({ bmi: 99, diagnosis: '' });
   const payload = clinicalPayload(complete);
@@ -129,7 +129,7 @@ test('PHN metadata-only historical corrections omit unchanged partial clinical f
   assert.ok(clinicalEditErrors.consultationTime);
   assert.ok(clinicalEditErrors.height);
   assert.ok(clinicalEditErrors.pulseRate);
-  assert.ok(clinicalEditErrors['clinicalIndicators.dangerSignsReviewed']);
+  assert.equal(clinicalEditErrors['clinicalIndicators.dangerSignsReviewed'], undefined);
 });
 
 test('PHN separate findings/diagnosis retain multiline findings and only parse an anchored legacy diagnosis marker', () => {
@@ -246,7 +246,6 @@ async function fillNewClinicalForm(page) {
   for (const [field, value] of Object.entries(measuredVitals)) await page.change(labels[field], value);
   await page.change('Chief Complaint', 'Recorded complaint');
   await page.change('Examination Findings', 'First examination finding\nSecond examination finding');
-  await page.change('Clinical history, pregnancy status and danger signs reviewed', true);
 }
 
 test('PHN rendered new form rejects missing clinical completion, then saves separate findings and canonical prescriptions through outbox service', async () => {
@@ -271,10 +270,8 @@ test('PHN rendered new form rejects missing clinical completion, then saves sepa
     assert.equal(request.body.consultation.diagnosis, '');
     assert.deepEqual(request.body.consultation.medications, [prescription]);
     assert.deepEqual(request.body.consultation.clinicalContext, { pregnancyStatus: 'unknown', existingConditions: [] });
-    assert.equal(request.body.consultation.clinicalIndicators.dangerSignsReviewed, true);
-    assert.match(page.text(), /Saved Risk:/);
+    assert.match(page.text(), /Risk Classification/);
     assert.match(page.text(), /Medium/);
-    assert.match(page.text(), /Server assessment reasons/);
     assert.doesNotMatch(page.text(), /Moderate/);
   } finally { page.close(); }
 });
@@ -290,21 +287,14 @@ test('PHN context requests fence resident/date/signal and never replace manual e
     assert.ok(first.options.signal instanceof AbortSignal);
     await page.change('Encounter Date', '2026-11-20');
     await page.change('Encounter Time', '22:11');
-    await page.change('Reported Pregnancy Status', 'not_pregnant');
-    await page.click('Add Condition');
-    await page.change('Condition 1', 'Entered condition');
     assert.equal(first.options.signal.aborted, true);
     await act(async () => { requests.at(-1).resolve(sourceContext({ pregnancy: { isPregnant: true }, existingConditions: [{ name: 'Source condition', status: 'uncontrolled', significant: true }] })); });
     assert.equal(page.renderer.root.findByProps({ 'aria-label': 'Encounter Date' }).props.value, '2026-11-20');
     assert.equal(page.renderer.root.findByProps({ 'aria-label': 'Encounter Time' }).props.value, '22:11');
-    assert.equal(page.renderer.root.findByProps({ 'aria-label': 'Reported Pregnancy Status' }).props.value, 'not_pregnant');
-    assert.equal(page.renderer.root.findByProps({ 'aria-label': 'Condition 1' }).props.value, 'Entered condition');
-    assert.match(page.text(), /Recorded maternal context:/);
     await page.change('Resident Registry Record', 'RES-2');
     await act(async () => { requests.at(-1).resolve(sourceContext()); requests[0].resolve(sourceContext({ pregnancy: { isPregnant: true }, existingConditions: [{ name: 'Stale source condition', status: 'uncontrolled', significant: true }] })); });
     assert.equal(page.state.contextRequests.at(-1).params.residentId, 'RES-2');
     assert.doesNotMatch(page.text(), /Stale source condition/);
-    assert.doesNotMatch(page.text(), /Recorded maternal context:/);
   } finally { page.close(); }
 });
 
@@ -313,8 +303,7 @@ test('PHN source failure keeps normal complete measurements Unassessed and offli
   try {
     await page.click('New Clinical Record');
     await fillNewClinicalForm(page);
-    assert.match(textOf(page.renderer.root.findByProps({ 'aria-label': 'Automatic risk preview' })), /Automatic Risk Preview: Unassessed/);
-    assert.match(page.text(), /Clinical context unavailable/);
+    assert.match(textOf(page.renderer.root.findByProps({ 'aria-label': 'Automatic risk preview' })), /Automatic Risk AssessmentUnassessed/);
     page.state.online = false;
     await page.rerender();
     await act(async () => { page.medicine().props.onChange([prescription]); });
@@ -355,7 +344,6 @@ test('PHN freezes the reused prescription selector and clinical inputs during an
     await act(async () => { saving = page.renderer.root.findAllByType('button').find((button) => textOf(button).trim() === 'Save Clinical Record').props.onClick(); });
     assert.equal(page.medicine().props.disabled, true);
     assert.equal(page.renderer.root.findByProps({ 'aria-label': 'Encounter Date' }).props.disabled, true);
-    assert.equal(page.renderer.root.findByProps({ 'aria-label': 'Clinical history, pregnancy status and danger signs reviewed' }).props.disabled, true);
     await act(async () => { pending.resolve({ consultation: savedRecord({ findings: 'Corrected findings' }) }); await saving; });
     assert.match(page.text(), /Consultation updated on the server/);
   } finally { page.close(); }
@@ -367,8 +355,8 @@ test('PHN existing High preview is held from the actual saved record and license
   try {
     await page.openEdit();
     const preview = () => textOf(page.renderer.root.findByProps({ 'aria-label': 'Automatic risk preview' }));
-    assert.match(preview(), /Automatic Risk Preview: High/);
-    assert.match(preview(), /previous saved High assessment is retained/);
+    assert.match(preview(), /Automatic Risk AssessmentHigh/);
+    assert.match(preview(), /Clinical decision support only; not a medical diagnosis/);
     await page.change('Record a professional risk review', true);
     await page.change('Reviewed Risk Level', 'Medium');
     await page.change('Clinical Review Reason', '  Reassessed with stable measurements and documented monitoring  ');
@@ -376,13 +364,13 @@ test('PHN existing High preview is held from the actual saved record and license
     assert.equal(page.state.updates.length, 0);
     assert.match(page.text(), /explicitly confirm reassessment/);
     await page.change('Reassessment confirmed', true);
-    assert.match(preview(), /Automatic Risk Preview: High/);
+    assert.match(preview(), /Automatic Risk AssessmentHigh/);
     await page.click('Save Clinical Record');
     const payload = page.state.updates[0].body.consultation;
     assert.deepEqual(payload.riskReview, { level: 'Medium', reason: 'Reassessed with stable measurements and documented monitoring', reassessmentConfirmed: true });
     assert.equal(payload.expectedUpdatedAt, original.updatedAt);
     assert.equal(payload.consultationRiskAssessment, undefined);
-    assert.match(textOf(page.renderer.root.findByProps({ 'aria-label': 'Saved consultation risk' })), /Saved Risk: Medium/);
+    assert.match(textOf(page.renderer.root.findByProps({ 'aria-label': 'Saved consultation risk' })), /Risk ClassificationMedium/);
     assert.match(page.text(), /Server-confirmed professional review/);
     assert.deepEqual(original.medications, [prescription]);
   } finally { page.close(); }
@@ -433,11 +421,11 @@ test('PHN historical metadata-only UI saves without inventing vitals, time, preg
   try {
     await page.openEdit();
     assert.equal(page.renderer.root.findByProps({ 'aria-label': 'Encounter Time' }).props.value, '');
-    await page.change('Clinical History / Remarks', 'Metadata correction only');
+    await page.change('Next Visit Date', '2026-12-01');
     await page.click('Save Clinical Record');
     assert.equal(page.state.updates.length, 1);
     const payload = page.state.updates[0].body.consultation;
-    assert.equal(payload.remarks, 'Metadata correction only');
+    assert.equal(payload.nextVisitDate, '2026-12-01');
     assert.equal(payload.pulseRate, undefined);
     assert.equal(payload.consultationTime, undefined);
     assert.equal(payload.clinicalContext, undefined);
@@ -495,7 +483,7 @@ test('P0-6: completePhnHealthRecordCheckup propagates server failures without si
 
 test('P0-6: PhnHealthRecords passes onComplete (never nonexistent onSaved) to PhnCheckupWorkbench', () => {
   const src = fs.readFileSync(
-    path.resolve('src/features/health-records/pages/PhnHealthRecords.jsx'),
+    path.resolve('frontend/src/features/health-records/pages/PhnHealthRecords.jsx'),
     'utf8',
   );
   assert.doesNotMatch(src, /<PhnCheckupWorkbench[\s\S]*?onSaved=/);

@@ -123,6 +123,8 @@ export async function downloadHealthRecordPdf(data = {}, meta = {}) {
   const resident = data.resident || {};
   const consultations = Array.isArray(data.consultations) ? data.consultations : [];
   const vaccinations = Array.isArray(data.vaccinations) ? data.vaccinations : [];
+  const healthServiceRecords = Array.isArray(data.healthServiceRecords) ? data.healthServiceRecords : [];
+  const referrals = Array.isArray(data.referrals) ? data.referrals : [];
   const labs = Array.isArray(data.laboratoryResults)
     ? data.laboratoryResults
     : Array.isArray(data.labs)
@@ -451,6 +453,28 @@ export async function downloadHealthRecordPdf(data = {}, meta = {}) {
   }
   y += 4;
 
+  // ---------------------------------------------------- health service history
+  sectionHeader("Health Service History");
+  if (healthServiceRecords.length === 0) {
+    emptyLine("No records available.");
+  } else {
+    table(
+      [
+        { header: "Date", key: "date", width: 18 },
+        { header: "Service", key: "service", width: 28 },
+        { header: "Facility / Personnel", key: "provider", width: 30 },
+        { header: "Status", key: "status", width: 24 },
+      ],
+      healthServiceRecords.map((record) => ({
+        date: record.date ? formatLongDate(record.date) : "",
+        service: record.serviceName || record.serviceProvided,
+        provider: [record.providedByName].filter(Boolean).join("; "),
+        status: "Completed",
+      })),
+    );
+  }
+  y += 4;
+
   // -------------------------------------------------------- laboratory results
   sectionHeader("Laboratory Results");
   if (labs.length === 0) {
@@ -468,6 +492,28 @@ export async function downloadHealthRecordPdf(data = {}, meta = {}) {
         test: l.test || l.name,
         result: l.result,
         remarks: l.remarks,
+      })),
+    );
+  }
+  y += 4;
+
+  // ------------------------------------------------------------- referrals
+  sectionHeader("Referral History");
+  if (referrals.length === 0) {
+    emptyLine("No records available.");
+  } else {
+    table(
+      [
+        { header: "Date", key: "date", width: 18 },
+        { header: "Destination", key: "destination", width: 28 },
+        { header: "Reason", key: "reason", width: 36 },
+        { header: "Status", key: "status", width: 18 },
+      ],
+      referrals.map((referral) => ({
+        date: referral.date ? formatLongDate(referral.date.slice(0, 10)) : "",
+        destination: referral.facility || "",
+        reason: referral.reason,
+        status: referral.serviceProgressStatus || referral.status,
       })),
     );
   }

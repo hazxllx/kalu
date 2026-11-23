@@ -1,4 +1,12 @@
 import { api } from './apiClient';
+import { setBloodPressureConfig } from '../../../../shared/bloodPressure.js';
+
+const applyConfig = (config) => {
+  if (!config?.thresholds || !setBloodPressureConfig(config)) {
+    throw new Error('The server returned an invalid blood-pressure configuration.');
+  }
+  return config;
+};
 
 /**
  * Blood-pressure threshold configuration API.
@@ -10,8 +18,8 @@ import { api } from './apiClient';
  * recorded reading; updates are admin-only (enforced server-side).
  */
 export const bpConfigApi = {
-  get: () => api.get('/bp-config'),
-  updateThresholds: (payload) => api.put('/bp-config/thresholds', payload),
+  get: async () => applyConfig(await api.get('/bp-config')),
+  updateThresholds: async (payload) => applyConfig(await api.put('/bp-config/thresholds', payload)),
 };
 
 export default bpConfigApi;

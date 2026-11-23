@@ -53,6 +53,7 @@ export default function VerificationsApprovals() {
         subtitle={activeTab === "personnel"
           ? "Manage health personnel accounts within your authorized service area."
           : "Review resident, household, and transfer requests in one place."}
+        dense
       />
 
       <section aria-label="Verification and approval workflows">
