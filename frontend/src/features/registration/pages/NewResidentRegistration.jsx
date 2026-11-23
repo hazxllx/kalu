@@ -26,7 +26,6 @@ import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
 import { guardianLinksApi } from "@/services/api/guardianLinksApi";
 import UploadComponent from "@/features/registration/components/UploadComponent";
-import ExistingResidentActivation from "@/features/registration/pages/ExistingResidentActivation";
 import {
   SLOT_STATUS,
   SLOT_DOCUMENT_TYPE,
@@ -211,11 +210,6 @@ export default function NewResidentRegistration() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [possibleExisting, setPossibleExisting] = useState(false);
-  // "I already have a barangay health record" — the simplified existing-record
-  // activation flow. When enabled, the whole page switches to the dedicated
-  // 3-step activation wizard (Resident ID → verify identity → set password);
-  // unchecking it returns to the normal new-resident registration.
-  const [claimMode, setClaimMode] = useState(false);
   const [barangayQuery, setBarangayQuery] = useState("");
   const [barangayOpen, setBarangayOpen] = useState(false);
   // Live barangay list from the backend (public.barangays for Pili). Falls back
@@ -1394,13 +1388,6 @@ export default function NewResidentRegistration() {
   const canSubmit = documentsSubmittable && !submitting;
   const blockingSlot = isAdultApplicant ? firstBlockingSlot(screening) : null;
 
-  // When the applicant indicates they already have a barangay health record,
-  // switch to the dedicated simplified activation flow. Rendered as a full
-  // replacement so the normal 4-step personal registration is never forced.
-  if (claimMode) {
-    return <ExistingResidentActivation onBack={() => setClaimMode(false)} />;
-  }
-
   return (
     <RegistrationShell
       footer={
@@ -1434,23 +1421,6 @@ export default function NewResidentRegistration() {
             {/* STEP 1: Personal Information */}
             {step === 1 && (
               <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
-                <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                  <label className="flex cursor-pointer items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={claimMode}
-                      onChange={(e) => setClaimMode(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-brand-blue"
-                    />
-                    <span className="text-[13px] leading-relaxed text-slate-700">
-                      <span className="font-semibold text-brand-ink">
-                        I already have a barangay health record.
-                      </span>
-                      <br />
-                      Enter the Resident ID provided by your Health Supervisor to retrieve your existing record.
-                    </span>
-                  </label>
-                </div>
                 <Field id="resident-first-name" label="First Name" required error={errors.firstName}>
                   <input
                     id="resident-first-name"

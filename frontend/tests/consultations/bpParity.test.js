@@ -6,14 +6,14 @@ import { classifyWithConfig, getBpConfig, updateThresholds } from '../../../back
 import { DEFAULT_BP_THRESHOLDS } from '../../../shared/bloodPressure.js';
 
 const examples = [
-  ['110/70', 'Normal'], ['119/79', 'Normal'], ['120/75', 'Elevated'],
-  ['125/79', 'Elevated'], ['129/79', 'Elevated'], ['120/80', 'Stage 1 Hypertension'],
+  ['110/70', 'Normal Blood Pressure'], ['119/79', 'Normal Blood Pressure'], ['120/75', 'Elevated Blood Pressure'],
+  ['125/79', 'Elevated Blood Pressure'], ['129/79', 'Elevated Blood Pressure'], ['120/80', 'Stage 1 Hypertension'],
   ['120/89', 'Stage 1 Hypertension'], ['130/75', 'Stage 1 Hypertension'],
-  ['135/85', 'Stage 1 Hypertension'], ['139/89', 'Stage 1 Hypertension'],
+  ['125/85', 'Stage 1 Hypertension'], ['130/80', 'Stage 1 Hypertension'], ['135/85', 'Stage 1 Hypertension'], ['139/89', 'Stage 1 Hypertension'],
   ['140/80', 'Stage 2 Hypertension'], ['130/90', 'Stage 2 Hypertension'],
-  ['150/95', 'Stage 2 Hypertension'], ['180/100', 'Hypertensive Crisis'],
-  ['130/120', 'Hypertensive Crisis'], ['181/80', 'Hypertensive Crisis'], ['150/121', 'Hypertensive Crisis'],
-  ['185/125', 'Hypertensive Crisis'], ['85/65', 'Normal'], ['125/55', 'Elevated'],
+  ['140/85', 'Stage 2 Hypertension'], ['135/90', 'Stage 2 Hypertension'], ['150/95', 'Stage 2 Hypertension'], ['180/100', 'Hypertensive Urgency or Emergency'],
+  ['130/120', 'Hypertensive Urgency or Emergency'], ['181/80', 'Hypertensive Urgency or Emergency'], ['150/120', 'Hypertensive Urgency or Emergency'],
+  ['185/125', 'Hypertensive Urgency or Emergency'], ['85/65', 'Normal Blood Pressure'], ['125/55', 'Elevated Blood Pressure'],
 ];
 
 test('the configuration API reports effective clinical rules and rejects conflicting settings', async () => {
@@ -23,7 +23,9 @@ test('the configuration API reports effective clinical rules and rejects conflic
   assert.deepEqual(config.thresholds, DEFAULT_BP_THRESHOLDS);
   assert.equal(config.categories.find(({ code }) => code === 'stage1').label, 'Stage 1 Hypertension');
   assert.equal(config.categories.length, 5);
-  assert.equal(config.categories.find(({ code }) => code === 'crisis').label, 'Hypertensive Crisis');
+  assert.equal(config.categories.find(({ code }) => code === 'normal').label, 'Normal Blood Pressure');
+  assert.equal(config.categories.find(({ code }) => code === 'elevated').label, 'Elevated Blood Pressure');
+  assert.equal(config.categories.find(({ code }) => code === 'crisis').label, 'Hypertensive Urgency or Emergency');
   await assert.rejects(updateThresholds({ user: { role: 'admin' }, repo,
     payload: { ...DEFAULT_BP_THRESHOLDS, stage2SystolicMin: 135 } }), { statusCode: 422 });
 });
@@ -57,12 +59,12 @@ test('emergency symptoms promote only severe readings and require immediate eval
     'Changes in vision', 'Difficulty speaking', 'New acute chest pressure', 'Slurred speech', 'Seizure']) {
     const context = { findings };
     const result = frontend('185/125', context);
-    assert.equal(result.category, 'Hypertensive Crisis', findings);
+    assert.equal(result.category, 'Hypertensive Urgency or Emergency', findings);
     assert.equal(result.emergency, true);
     assert.equal(result.urgency, 'immediate');
-    assert.match(result.message, /do not delay (emergency )?care/i);
+    assert.match(result.message, /immediate clinical assessment/i);
     assert.equal(backend('150/121', context).emergency, true);
-    assert.equal(frontend('180/120', context).category, 'Hypertensive Crisis');
+    assert.equal(frontend('180/120', context).category, 'Hypertensive Urgency or Emergency');
   }
 });
 
@@ -71,9 +73,9 @@ test('negated, historical, hypothetical symptoms do not establish emergency', ()
     'No chest pain or back pain', 'History of chest pain', 'Family history of stroke',
     'If chest pain occurs, seek care', 'Chest pain absent', 'Back pain resolved']) {
     const result = frontend('185/125', { findings });
-    assert.equal(result.category, 'Hypertensive Crisis', findings);
+    assert.equal(result.category, 'Hypertensive Urgency or Emergency', findings);
     assert.equal(result.emergency, false);
-    assert.equal(result.urgency, 'prompt');
+    assert.equal(result.urgency, 'immediate');
   }
   assert.equal(frontend('185/125', { findings: 'No chest pain but reports shortness of breath' }).emergency, true);
   assert.equal(frontend('185/125', { findings: 'Denies chest pain, reports back pain' }).emergency, true);

@@ -173,17 +173,17 @@ test('treatment and recommendations remain separate persisted consultation text'
 test('low readings retain a separate signal, while higher BP categories take priority', () => {
   for (const bp of ['85/65','115/55']) {
     const reading = classifyBloodPressure(bp);
-    assert.equal(reading.label, 'Normal');
+    assert.equal(reading.label, 'Normal Blood Pressure');
     assert.equal(reading.hypotensionPresent, true);
   }
-  assert.equal(classifyBloodPressure('125/55').label, 'Elevated');
+  assert.equal(classifyBloodPressure('125/55').label, 'Elevated Blood Pressure');
   assert.equal(classifyBloodPressure('125/55').hypotensionPresent, true);
   assert.equal(classifyBloodPressure('155/55').code, 'stage2');
   assert.equal(classifyBloodPressure('180/120').code, 'crisis');
-  assert.equal(classifyBloodPressure('181/90').label, 'Hypertensive Crisis');
+  assert.equal(classifyBloodPressure('181/90').label, 'Hypertensive Urgency or Emergency');
   assert.equal(classifyBloodPressure('130/121').code, 'crisis');
   const emergency = classifyBloodPressure('190/125', { indicators: { chestPain: true } });
-  assert.equal(emergency.code, 'crisis'); assert.equal(emergency.label, 'Hypertensive Crisis');
+  assert.equal(emergency.code, 'crisis'); assert.equal(emergency.label, 'Hypertensive Urgency or Emergency');
   assert.equal(emergency.urgency, 'immediate'); assert.equal(emergency.emergencySymptomsPresent, true);
 });
 
@@ -196,8 +196,8 @@ test('provisional screening separates Low, manageable Medium, danger High and pr
   const assess = (extra = {}) => assessConsultationRisk({ vitals, age: 36, ...extra });
   assert.equal(assess().level, 'Low');
   for (const bloodPressure of ['125/75','135/85','150/95','85/65']) assert.equal(assess({ vitals: { ...vitals, bloodPressure } }).level, 'Medium');
-  for (const bloodPressure of ['180/120','135/110']) {
-    const risk = assess({ vitals: { ...vitals, bloodPressure } }); assert.equal(risk.level, 'High'); assert.equal(risk.urgency, 'prompt');
+  for (const [bloodPressure, urgency] of [['180/120', 'immediate'], ['135/110', 'prompt']]) {
+    const risk = assess({ vitals: { ...vitals, bloodPressure } }); assert.equal(risk.level, 'High'); assert.equal(risk.urgency, urgency);
   }
   for (const vital of [{ oxygenSaturation: 90 }, { respiratoryRate: 32 }, { temperature: 40 }, { pulseRate: 135 }, { bloodPressure: '190/125' }]) {
     const risk = assess({ vitals: { ...vitals, ...vital } }); assert.equal(risk.level, 'High'); assert.equal(risk.referralEvaluationRequired, true);

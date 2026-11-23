@@ -139,11 +139,28 @@ export function validateStaffResidentForm(form = {}) {
         ? ''
         : 'Enter a valid PH mobile number (09XXXXXXXXX or +639XXXXXXXXX).';
     },
-    purok: (v) => maxLength(v, TEXT_LIMITS.medium, 'Purok/Zone'),
+    purok: (v) => {
+      if (!String(v || '').trim()) return '';
+      const raw = String(v).trim();
+      if (!/^(?:purok|zone)?\s*\d{1,2}$/i.test(raw)) {
+        return 'Purok/Zone must be a zone number from 1 to 8.';
+      }
+      const parsed = parsePurokZone(raw);
+      return parsed === undefined
+        ? 'Purok/Zone must be a zone number from 1 to 8.'
+        : '';
+    },
     street: (v) => maxLength(v, TEXT_LIMITS.address, 'Street / Sitio'),
-    houseNo: (v) => maxLength(v, TEXT_LIMITS.short, 'House number'),
+    houseNo: (v) => {
+      if (!String(v || '').trim()) return '';
+      const houseNo = String(v).trim();
+      if (houseNo.length > TEXT_LIMITS.short) return 'House number is too long (max 80 characters).';
+      return /^[A-Za-z0-9][A-Za-z0-9 .#/-]*$/.test(houseNo)
+        ? ''
+        : 'House number can contain letters, numbers, spaces, periods, hyphens, slashes, and # only.';
+    },
     email: (v, values) => {
-      if (!values?.createAccount && !String(v || '').trim()) return '';
+      if (!values?.createAccount) return '';
       return validateEmail(v, { label: 'Email', isRequired: Boolean(values?.createAccount) });
     },
   });

@@ -118,7 +118,8 @@ const findExistingResidentInvitationAccount = async ({ supabase, email, resident
     throw new ApiError(503, 'The existing account could not be verified. Do not create another resident account.');
   }
   if (profile.role !== 'resident' || String(authUser.user_metadata?.resident_id || '') !== String(residentId)) {
-    throw ApiError.conflict('An account already uses this email and is not linked to this resident. Contact an administrator; do not create another account.');
+    throw ApiError.conflict('An account already uses this email and is not linked to this resident. Contact an administrator; do not create another account.')
+      .withCode('ACCOUNT_ALREADY_LINKED');
   }
   if (profile.status === 'disabled') {
     throw ApiError.conflict('The resident account is disabled. Reactivate it before issuing an invitation.');

@@ -1360,48 +1360,44 @@ export default function ResidentsPage() {
                       <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Login Account</h3>
                       <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                     </div>
-                    <div className="rounded-card bg-brand-bg/70 p-3.5 dark:bg-card-nested">
-                      <div className="mb-3">
-                        <p className="text-sm font-semibold text-brand-ink dark:text-foreground">Create Resident Login Account</p>
-                        <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
-                          Enable portal access for this resident. A resident profile will be registered regardless of your selection.
-                        </p>
-                      </div>
-                      <div role="group" aria-label="Create resident login account" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setForm((p) => ({ ...p, createAccount: false, email: "" }));
-                            setErrors((p) => ({ ...p, email: "" }));
-                          }}
-                          aria-pressed={!form.createAccount}
-                          className={`min-w-0 rounded-btn border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 ${
-                            !form.createAccount
-                              ? "border-brand-blue bg-white ring-1 ring-brand-blue/20 dark:bg-input"
-                              : "border-brand-border bg-transparent hover:bg-white/70 dark:border-border dark:hover:bg-card"
-                          }`}
-                        >
-                          <span className={`block text-sm font-semibold ${!form.createAccount ? "text-brand-blue" : "text-brand-ink dark:text-foreground"}`}>NO</span>
-                          <span className="mt-0.5 block text-xs text-brand-gray dark:text-muted-foreground">
-                            Register the resident&apos;s health profile without creating login credentials.
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => set("createAccount")(true)}
-                          disabled={!canCreateLoginAccountForResident}
-                          aria-pressed={form.createAccount}
-                          className={`min-w-0 rounded-btn border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 ${
-                            form.createAccount
-                              ? "border-brand-blue bg-white ring-1 ring-brand-blue/20 dark:bg-input"
-                              : "border-brand-border bg-transparent hover:bg-white/70 dark:border-border dark:hover:bg-card"
-                          } disabled:cursor-not-allowed disabled:opacity-50`}
-                        >
-                          <span className={`block text-sm font-semibold ${form.createAccount ? "text-brand-blue" : "text-brand-ink dark:text-foreground"}`}>YES</span>
-                          <span className="mt-0.5 block text-xs text-brand-gray dark:text-muted-foreground">
-                            Create a resident login account and send an account invitation to the provided email address.
-                          </span>
-                        </button>
+                    <div className="rounded-card bg-brand-bg/70 p-3 dark:bg-card-nested">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-brand-ink dark:text-foreground">Create Resident Login Account?</p>
+                          <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
+                            Allow this resident to access the portal.
+                          </p>
+                        </div>
+                        <div role="group" aria-label="Create resident login account" className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm((p) => ({ ...p, createAccount: false, email: "" }));
+                              setErrors((p) => ({ ...p, email: "" }));
+                            }}
+                            aria-pressed={!form.createAccount}
+                            className={`min-w-14 rounded-btn px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 ${
+                              !form.createAccount
+                                ? "bg-brand-blue text-white"
+                                : "border border-[#CBD5E1] bg-white text-brand-ink hover:bg-brand-bg dark:bg-input dark:text-foreground"
+                            }`}
+                          >
+                            No
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => set("createAccount")(true)}
+                            disabled={!canCreateLoginAccountForResident}
+                            aria-pressed={form.createAccount}
+                            className={`min-w-14 rounded-btn px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 ${
+                              form.createAccount
+                                ? "bg-brand-blue text-white"
+                                : "border border-[#CBD5E1] bg-white text-brand-ink hover:bg-brand-bg dark:bg-input dark:text-foreground"
+                            } disabled:cursor-not-allowed disabled:opacity-50`}
+                          >
+                            Yes
+                          </button>
+                        </div>
                       </div>
                       {form.createAccount && (
                         <div className="mt-3 max-w-xl">
@@ -1416,7 +1412,7 @@ export default function ResidentsPage() {
                             autoComplete="email"
                           />
                           <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
-                            The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
+                            The invitation lets the resident set their password and activate the account.
                           </p>
                         </div>
                       )}

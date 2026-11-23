@@ -33,6 +33,13 @@ test("public registration offers only new and transferring residents", () => {
   assert.doesNotMatch(chooser, /\/register\/personnel/);
 });
 
+test("new resident step one starts with the standard name fields without the existing-record prompt", () => {
+  const registration = source("features/registration/pages/NewResidentRegistration.jsx");
+  assert.doesNotMatch(registration, /I already have a barangay health record|claimMode|ExistingResidentActivation/);
+  assert.doesNotMatch(registration, /Enter the Resident ID provided by your Health Supervisor/);
+  assert.match(registration, /\{step === 1 && \([\s\S]*?resident-first-name[\s\S]*?resident-middle-name/);
+});
+
 test("Hero notice offers resident-only registration and identifies personnel accounts as internal", () => {
   const hero = source("features/landing/components/Hero.jsx");
   const eligibility = hero.match(/Public resident registration<\/p>\s*<ul[^>]*>\s*\{\[([\s\S]*?)\]\.map/);

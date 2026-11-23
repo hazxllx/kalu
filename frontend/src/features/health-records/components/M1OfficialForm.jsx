@@ -107,7 +107,10 @@ const resolveCell = (get, row, rec) => {
     const [, key, band] = get.split(":");
     v = rec && rec.measures && rec.measures[key] ? rec.measures[key][band] : undefined;
   }
-  return v === undefined || v === null ? "" : v;
+  if (v === undefined || v === null || v === "") return "";
+  if (typeof v === "string" && v.trim() === "") return "";
+  const numeric = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(numeric) ? String(numeric) : "";
 };
 
 const cls = (get) => {
@@ -270,9 +273,24 @@ export default function M1OfficialForm({ data = {}, header = {}, template = M1_F
 const PRINT_CSS = `
 @media print {
   @page { size: A4 landscape; margin: 7mm 8mm; }
-  html.m1of-printing, html.m1of-printing body { background: #fff !important; }
+  html.m1of-printing,
+  html.m1of-printing body {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
   html.m1of-printing body > *:not(.m1of-print-portal) { display: none !important; }
-  html.m1of-printing .m1of-print-portal { display: block !important; }
+  html.m1of-printing .m1of-print-portal {
+    display: block !important;
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
 }
 .m1of-print-portal { display: none; }
 `;

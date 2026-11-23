@@ -3176,6 +3176,134 @@ export const supabaseRepository = {
     return { ...settings, updatedAt: data.updated_at };
   },
 
+  // ----- public advisories --------------------------------------------------
+  async listActiveAdvisories() {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('advisories')
+      .select('id, title, message, is_active, display_order, created_at, updated_at')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true });
+    throwOnError(error, 'Could not load active advisories');
+    return (data || []).map((row) => ({
+      id: row.id,
+      title: row.title,
+      message: row.message,
+      isActive: row.is_active,
+      displayOrder: row.display_order,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  },
+
+  async listAdvisories() {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('advisories')
+      .select('id, title, message, is_active, display_order, created_at, updated_at, created_by')
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: false });
+    throwOnError(error, 'Could not load advisories');
+    return (data || []).map((row) => ({
+      id: row.id,
+      title: row.title,
+      message: row.message,
+      isActive: row.is_active,
+      displayOrder: row.display_order,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      createdBy: row.created_by,
+    }));
+  },
+
+  async createAdvisory(advisory) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('advisories')
+      .insert({
+        title: advisory.title,
+        message: advisory.message,
+        is_active: advisory.isActive,
+        display_order: advisory.displayOrder,
+        created_by: advisory.createdBy,
+      })
+      .select('id, title, message, is_active, display_order, created_at, updated_at, created_by')
+      .single();
+    throwOnError(error, 'Could not create advisory');
+    return {
+      id: data.id,
+      title: data.title,
+      message: data.message,
+      isActive: data.is_active,
+      displayOrder: data.display_order,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      createdBy: data.created_by,
+    };
+  },
+
+  async updateAdvisory(id, advisory) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('advisories')
+      .update({
+        title: advisory.title,
+        message: advisory.message,
+        is_active: advisory.isActive,
+        display_order: advisory.displayOrder,
+      })
+      .eq('id', id)
+      .select('id, title, message, is_active, display_order, created_at, updated_at, created_by')
+      .maybeSingle();
+    throwOnError(error, 'Could not update advisory');
+    if (!data) return null;
+    return {
+      id: data.id,
+      title: data.title,
+      message: data.message,
+      isActive: data.is_active,
+      displayOrder: data.display_order,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      createdBy: data.created_by,
+    };
+  },
+
+  async setAdvisoryStatus(id, isActive) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('advisories')
+      .update({ is_active: isActive })
+      .eq('id', id)
+      .select('id, title, message, is_active, display_order, created_at, updated_at, created_by')
+      .maybeSingle();
+    throwOnError(error, 'Could not update advisory status');
+    if (!data) return null;
+    return {
+      id: data.id,
+      title: data.title,
+      message: data.message,
+      isActive: data.is_active,
+      displayOrder: data.display_order,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      createdBy: data.created_by,
+    };
+  },
+
+  async deleteAdvisory(id) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('advisories')
+      .delete()
+      .eq('id', id)
+      .select('id')
+      .maybeSingle();
+    throwOnError(error, 'Could not delete advisory');
+    return Boolean(data);
+  },
+
   // ----- medicine catalog ---------------------------------------------------
   async listMedicines({ q = '', source = '', includeInactive = false } = {}) {
     const supabase = getServiceClient();

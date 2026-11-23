@@ -37,6 +37,28 @@ const SERVER_ERROR_FIELDS = [
   [/email/i, "email"],
 ];
 
+const friendlyApiError = (status, code, backendMessage) => {
+  if (status === 409 && (code === 'ACCOUNT_ALREADY_LINKED'
+    || /account already uses this email/i.test(String(backendMessage || '')))) {
+    return {
+      title: 'Account Already Exists',
+      description: 'This email address is already associated with another account and is not linked to this resident. Please contact an administrator for assistance.',
+    };
+  }
+  const statusMessages = {
+    400: 'Please review the highlighted fields and enter valid resident information.',
+    401: 'Your session has expired. Please sign in again.',
+    403: 'You do not have permission to register a resident.',
+    404: 'The resident or account information could not be found.',
+    422: 'Please review the form information and correct any invalid values.',
+    500: 'The resident could not be registered right now. Please try again later.',
+  };
+  return {
+    title: status === 409 ? 'Registration Conflict' : 'Unable to Register Resident',
+    description: statusMessages[status] || 'The resident could not be registered. Please review the form and try again.',
+  };
+};
+
 /**
  * Staff Resident Registration Modal
  * 
@@ -115,6 +137,10 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
       else delete nextErrors[field];
       return nextErrors;
     });
+  };
+
+  const trimField = (field) => {
+    setForm((prev) => ({ ...prev, [field]: String(prev[field] || '').trim() }));
   };
 
   const validateField = (field) => {
@@ -201,6 +227,8 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
     } catch (error) {
       const response = error?.payload?.error || error?.response?.data?.error || error?.response?.data || {};
       const message = response.message || error?.message || "Failed to register resident";
+      const status = error?.status || error?.response?.status || 500;
+      const code = response.code || error?.code;
       const details = response.errors || response.details;
       const serverErrors = {};
       if (details && !Array.isArray(details) && typeof details === "object") {
@@ -220,7 +248,14 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
         });
       }
       if (Object.keys(serverErrors).length) setErrors((prev) => ({ ...prev, ...serverErrors }));
-      setApiError(message);
+      const notification = friendlyApiError(status, code, message);
+      setApiError(notification.description);
+      toast({
+        title: notification.title,
+        description: notification.description,
+        variant: "destructive",
+        duration: status === 409 ? 7000 : 5000,
+      });
     } finally {
       submitting.current = false;
       setLoading(false);
@@ -273,7 +308,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.firstName}
                      onChange={(e) => set("firstName")(e.target.value)}
-                     onBlur={() => validateField("firstName")}
+                     onBlur={() => { trimField("firstName"); validateField("firstName"); }}
                      aria-invalid={Boolean(errors.firstName)}
                      placeholder="e.g. Maria"
                      className={inputClass(Boolean(errors.firstName))}
@@ -286,7 +321,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.middleName}
                      onChange={(e) => set("middleName")(e.target.value)}
-                     onBlur={() => validateField("middleName")}
+                     onBlur={() => { trimField("middleName"); validateField("middleName"); }}
                      aria-invalid={Boolean(errors.middleName)}
                      placeholder="e.g. Santos"
                      className={inputClass(Boolean(errors.middleName))}
@@ -299,7 +334,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.lastName}
                      onChange={(e) => set("lastName")(e.target.value)}
-                     onBlur={() => validateField("lastName")}
+                     onBlur={() => { trimField("lastName"); validateField("lastName"); }}
                      aria-invalid={Boolean(errors.lastName)}
                      placeholder="e.g. Dela Cruz"
                      className={inputClass(Boolean(errors.lastName))}
@@ -432,7 +467,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.street}
                      onChange={(e) => set("street")(e.target.value)}
-                     onBlur={() => validateField("street")}
+                     onBlur={() => { trimField("street"); validateField("street"); }}
                      placeholder="Enter street or sitio"
                      className={inputClass(Boolean(errors.street))}
                    />
@@ -444,7 +479,7 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                      type="text"
                      value={form.houseNo}
                      onChange={(e) => set("houseNo")(e.target.value)}
-                     onBlur={() => validateField("houseNo")}
+                     onBlur={() => { trimField("houseNo"); validateField("houseNo"); }}
                      placeholder="Enter house number"
                      className={inputClass(Boolean(errors.houseNo))}
                    />

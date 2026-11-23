@@ -1,15 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, ShieldCheck, FileCheck2, Users, Megaphone, Phone } from "lucide-react";
 import GovSeal from "@/components/branding/GovSeal";
-
-const advisories = [
-  "Free anti-dengue clean-up drive — all barangays, every Saturday, 6:00 AM.",
-  "Measles-Rubella immunization ongoing at the Rural Health Unit until further notice.",
-  "Prenatal check-ups available Monday to Friday, 8:00 AM – 4:00 PM.",
-  "TB DOTS medicine refill: present your treatment card at your barangay health station.",
-];
+import { advisoriesApi } from "@/services/api/advisoriesApi";
+import { supabase } from "@/lib/supabase";
 
 const assurances = [
   { icon: ShieldCheck, title: "Data Privacy Act", copy: "Records handled under R.A. 10173." },
@@ -18,6 +13,55 @@ const assurances = [
 ];
 
 export default function Hero() {
+  const [advisories, setAdvisories] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    let loading = false;
+    let refreshQueued = false;
+    const loadAdvisories = async () => {
+      if (!active) return;
+      if (loading) {
+        refreshQueued = true;
+        return;
+      }
+      loading = true;
+      try {
+        const rows = await advisoriesApi.listActive();
+        if (active) setAdvisories(Array.isArray(rows) ? rows : []);
+      } catch (error) {
+        if (active) console.error("Could not load public advisories.", error);
+      } finally {
+        loading = false;
+        if (active && refreshQueued) {
+          refreshQueued = false;
+          void loadAdvisories();
+        }
+      }
+    };
+
+    void loadAdvisories();
+    let channel;
+    if (supabase) {
+      const refresh = () => { void loadAdvisories(); };
+      channel = supabase
+        .channel("public:advisories")
+        .on("broadcast", { event: "advisories_changed" }, refresh)
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            refresh();
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error("The advisory live-update subscription failed.", status);
+          }
+        });
+    }
+
+    return () => {
+      active = false;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, []);
+
   return (
     <section id="home" className="relative overflow-hidden bg-white">
       {/* Advisory ticker */}
@@ -29,9 +73,9 @@ export default function Hero() {
           </span>
           <div className="relative flex-1 overflow-hidden">
             <div className="marquee-track flex w-max gap-10 whitespace-nowrap">
-              {[...advisories, ...advisories].map((a, i) => (
-                <span key={i} className="text-[12.5px] text-brand-ink/80">
-                  {a}
+              {[...advisories, ...advisories].map((advisory, i) => (
+                <span key={`${advisory.id}-${i}`} className="text-[12.5px] text-brand-ink/80">
+                  {advisory.message}
                 </span>
               ))}
             </div>

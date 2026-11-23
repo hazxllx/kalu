@@ -247,23 +247,29 @@ export default function DashboardLayout({ roleKey }) {
 
   useEffect(() => {
     let active = true;
+    let unreadRequestVersion = 0;
 
-    const refreshUnread = () =>
+    const refreshUnread = () => {
+      const requestVersion = ++unreadRequestVersion;
       notificationsApi
         .list()
         .then((result) => {
-          if (!active) return;
+          if (!active || requestVersion !== unreadRequestVersion) return;
 
           const rows = result?.rows || result || [];
           setUnreadCount(rows.filter((n) => !n.read_at).length);
         })
-        .catch(() => active && setUnreadCount(0));
+        .catch(() => {
+          if (active && requestVersion === unreadRequestVersion) setUnreadCount(0);
+        });
+    };
 
     refreshUnread();
 
     // Apply optimistic counts immediately, then allow the page to request an
     // authoritative refresh after its write has settled.
     const handleUnreadChanged = (event) => {
+      unreadRequestVersion += 1;
       const count = event.detail?.unreadCount;
       if (Number.isInteger(count) && count >= 0) setUnreadCount(count);
       if (event.detail?.refresh !== false) refreshUnread();
@@ -798,7 +804,7 @@ export default function DashboardLayout({ roleKey }) {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.97 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-popover rounded-md border border-slate-200 dark:border-border shadow-soft overflow-hidden z-50"
+                    className="absolute right-0 top-full mt-2 w-[min(18rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-popover rounded-md border border-slate-200 dark:border-border shadow-soft overflow-hidden z-50"
                   >
                     <div className="px-4 py-4 border-b border-slate-200 dark:border-border bg-slate-50 dark:bg-card-nested">
                       <div className="flex items-center gap-3">

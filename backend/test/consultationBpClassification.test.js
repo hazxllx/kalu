@@ -7,7 +7,7 @@ import { classifyBloodPressure as authoritativeClassify } from '../src/config/bp
 // The legacy label helper and complete snapshots share the same classifier.
 
 test('below-range readings use Normal while retaining the shared classification', () => {
-  assert.equal(legacyClassify('85/55'), 'Normal');
+  assert.equal(legacyClassify('85/55'), 'Normal Blood Pressure');
 });
 
 test('stage-2 reading matches the authoritative classifier (no divergence)', () => {
@@ -16,7 +16,7 @@ test('stage-2 reading matches the authoritative classifier (no divergence)', () 
 });
 
 test('a normal reading stays Normal', () => {
-  assert.equal(legacyClassify('118/76'), 'Normal');
+  assert.equal(legacyClassify('118/76'), 'Normal Blood Pressure');
 });
 
 test('invalid / missing readings return null (never Normal)', () => {
@@ -39,5 +39,5 @@ test('the complete merged clinical field and reconstructed database vitals retai
   const restored = await fromVisit({ ...visit, vitals: { bp: '185/125' } }, null);
   assert.equal(restored.vitals.systolic, 185);
   assert.equal(restored.vitals.diastolic, 125);
-  assert.equal(restored.vitals.bloodPressureCategory, 'Hypertensive Crisis');
+  assert.equal(restored.vitals.bloodPressureCategory, 'Hypertensive Urgency or Emergency');
 });

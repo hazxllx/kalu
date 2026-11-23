@@ -6,11 +6,12 @@ import {
 } from "../../src/features/consultations/utils/bpClassification.js";
 
 test("classifies the requested routine category examples", () => {
-  assert.equal(classifyBloodPressure("118/76").category, "Normal");
-  assert.equal(classifyBloodPressure("125/78").category, "Elevated");
+  assert.equal(classifyBloodPressure("110/70").category, "Normal Blood Pressure");
+  assert.equal(classifyBloodPressure("120/75").category, "Elevated Blood Pressure");
   assert.equal(classifyBloodPressure("135/85").category, "Stage 1 Hypertension");
   assert.equal(classifyBloodPressure("150/95").category, "Stage 2 Hypertension");
-  assert.equal(classifyBloodPressure("185/125").category, "Hypertensive Crisis");
+  assert.equal(classifyBloodPressure("180/100").category, "Hypertensive Urgency or Emergency");
+  assert.equal(classifyBloodPressure("150/120").category, "Hypertensive Urgency or Emergency");
 });
 
 test("applies systolic boundary values", () => {
@@ -33,7 +34,7 @@ test("applies diastolic boundaries and uses the more severe mixed category", () 
   assert.equal(classifyBloodPressure("145/75").code, "stage2");
 });
 
-test("classifies crisis at 180 systolic or 120 diastolic", () => {
+test("classifies urgency or emergency at 180 systolic or 120 diastolic", () => {
   assert.equal(classifyBloodPressure("180/100").code, "crisis");
   assert.equal(classifyBloodPressure("181/100").code, "crisis");
   assert.equal(classifyBloodPressure("130/120").code, "crisis");
@@ -42,21 +43,22 @@ test("classifies crisis at 180 systolic or 120 diastolic", () => {
   assert.equal(classifyBloodPressure("185/125").code, "crisis");
 });
 
-test("crisis guidance does not claim emergency based on numbers alone", () => {
+test("urgency guidance calls for immediate assessment without diagnosing an emergency from numbers alone", () => {
   const result = classifyBloodPressure("185/125");
-  assert.equal(result.category, "Hypertensive Crisis");
+  assert.equal(result.category, "Hypertensive Urgency or Emergency");
   assert.equal(result.emergency, false);
-  assert.match(result.message, /prompt clinical evaluation/i);
-  assert.match(result.message, /not a diagnosis/i);
+  assert.equal(result.urgency, "immediate");
+  assert.match(result.message, /immediate clinical assessment/i);
+  assert.match(result.message, /does not diagnose a hypertensive emergency/i);
 });
 
 test("returns category styling for the five requested routine classifications", () => {
   const cases = [
-    ["118/76", "Normal", "bg-green-100"],
-    ["125/78", "Elevated", "bg-yellow-100"],
+    ["118/76", "Normal Blood Pressure", "bg-green-100"],
+    ["125/78", "Elevated Blood Pressure", "bg-yellow-100"],
     ["135/85", "Stage 1 Hypertension", "bg-orange-100"],
     ["150/95", "Stage 2 Hypertension", "bg-red-100"],
-    ["185/125", "Hypertensive Crisis", "bg-red-800"],
+    ["185/125", "Hypertensive Urgency or Emergency", "bg-red-900"],
   ];
   for (const [reading, category, badgeClass] of cases) {
     const result = classifyBloodPressure(reading);
@@ -68,10 +70,10 @@ test("returns category styling for the five requested routine classifications", 
 test('low pressure remains Normal while preserving a separate hypotension signal', () => {
   for (const reading of ['85/65', '115/55']) {
     const result = classifyBloodPressure(reading);
-    assert.equal(result.category, 'Normal');
+    assert.equal(result.category, 'Normal Blood Pressure');
     assert.equal(result.hypotensionPresent, true);
   }
-  assert.equal(classifyBloodPressure('125/55').category, 'Elevated');
+  assert.equal(classifyBloodPressure('125/55').category, 'Elevated Blood Pressure');
   assert.equal(classifyBloodPressure('125/55').hypotensionPresent, true);
   assert.equal(classifyBloodPressure('135/55').code, 'stage1');
   assert.equal(classifyBloodPressure('155/55').code, 'stage2');

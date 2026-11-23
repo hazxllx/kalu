@@ -16,11 +16,11 @@ export const DEFAULT_BP_THRESHOLDS = Object.freeze({
 export const BP_READING_BOUNDS = Object.freeze({ min: 40, max: 300, diastolicMin: 20, diastolicMax: 200 });
 
 export const BP_CATEGORIES = Object.freeze({
-  normal: { code: 'normal', label: 'Normal', severity: 0, alertLevel: 'normal', message: 'Blood pressure is within the reference range.' },
-  elevated: { code: 'elevated', label: 'Elevated', severity: 1, alertLevel: 'monitor', message: 'Elevated reading. Recheck and monitor according to the clinical protocol.' },
+  normal: { code: 'normal', label: 'Normal Blood Pressure', severity: 0, alertLevel: 'normal', message: 'Blood pressure is within the reference range.' },
+  elevated: { code: 'elevated', label: 'Elevated Blood Pressure', severity: 1, alertLevel: 'monitor', message: 'Elevated reading. Recheck and monitor according to the clinical protocol.' },
   stage1: { code: 'stage1', label: 'Stage 1 Hypertension', severity: 2, alertLevel: 'assessment', message: 'High blood pressure reading. Arrange appropriate clinical assessment.' },
   stage2: { code: 'stage2', label: 'Stage 2 Hypertension', severity: 3, alertLevel: 'urgent', message: 'Very high blood pressure reading. Prompt clinical assessment is needed.' },
-  crisis: { code: 'crisis', label: 'Hypertensive Crisis', severity: 4, alertLevel: 'crisis', message: 'A reading in the hypertensive crisis range requires prompt clinical evaluation. A single reading is not a diagnosis.' },
+  crisis: { code: 'crisis', label: 'Hypertensive Urgency or Emergency', severity: 4, alertLevel: 'crisis', message: 'Urgency-range blood pressure requires immediate clinical assessment. Follow the applicable emergency protocol; a single reading alone does not diagnose a hypertensive emergency.' },
 });
 
 export function parseBloodPressure(value) {
@@ -91,12 +91,12 @@ export function classifyBloodPressure(reading, context = {}) {
   const meta = BP_CATEGORIES[code];
   const emergency = severe && emergencySymptomsPresent;
   const message = emergency
-    ? 'Crisis-range blood pressure with emergency symptoms requires immediate emergency evaluation. Do not delay care to repeat measurements or complete this form.'
+    ? 'Urgency-range blood pressure with emergency symptoms requires immediate clinical assessment. Follow the applicable emergency protocol; a single reading alone does not diagnose a hypertensive emergency.'
     : hypotensionPresent && code === 'normal'
       ? 'Low reading. Recheck and assess symptoms, baseline and clinical context; this classification is not a diagnosis.'
       : meta.message;
   return { ...meta, ...parsed, category: meta.label, message, emergency, emergencySymptomsPresent,
     hypotensionPresent, referralEvaluationRequired: severe,
-    urgency: severe ? (emergency ? 'immediate' : 'prompt') : null,
+    urgency: severe ? 'immediate' : null,
     source: 'default' };
 }

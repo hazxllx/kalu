@@ -317,6 +317,12 @@ export const validateMaternalRecord = (payload = {}) => {
       throw ApiError.unprocessable(`Maternal record ${field.replaceAll('_', ' ')} must be true or false.`);
     }
   }
+  for (const field of ['syphilis_result', 'hepb_result', 'gdm_result', 'cbc_result']) {
+    if (Object.prototype.hasOwnProperty.call(row, field) && row[field] != null && row[field] !== ''
+      && !['+', '-'].includes(row[field])) {
+      throw ApiError.unprocessable(`Maternal record ${field.replaceAll('_', ' ')} must use an existing screening result option.`);
+    }
+  }
   for (const field of ['tt_td_doses', 'prenatal_micronutrients', 'pp_iron_folic']) {
     if (Object.prototype.hasOwnProperty.call(row, field)
       && (!row[field] || typeof row[field] !== 'object' || Array.isArray(row[field]))) {
@@ -581,6 +587,8 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   assertStaff(user);
   assertTclAssignment(user, normalizedKind);
   const table = TABLES[normalizedKind] || TABLES[kind];
+  const maternalRecordPatch = payload.maternal_record_patch || payload.maternalRecordPatch || null;
+  const atomicMaternalEncounter = normalizedKind === 'maternalvisits' && maternalRecordPatch !== null;
   if (!table || normalizedKind === 'notifications') throw ApiError.badRequest('Unknown operational record type.');
   const opKey = idempotencyKey == null ? null : text(idempotencyKey);
   if (idempotencyKey !== null && idempotencyKey !== undefined && (!opKey || opKey.length > 200)) {
@@ -606,6 +614,8 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   delete row.barangay_id;
   delete row.followUpId;
   delete row.follow_up_id;
+  delete row.maternal_record_patch;
+  delete row.maternalRecordPatch;
 
   if (followUpId) {
     const { data: followUp, error: followUpError } = await supabase.from('follow_ups')
@@ -662,7 +672,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
       expectedMaternalCaseId: row.maternal_case_id || null,
     });
     if (existing) { await linkImmunization(existing.id, existing.status); return existing; }
-    row.client_operation_key = opKey;
+    if (!atomicMaternalEncounter) row.client_operation_key = opKey;
   }
 
   // Follow-ups are confirmed by default. Residents can still explicitly
@@ -700,22 +710,65 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     assertFollowUpScheduleNotInPast(sched, row.scheduled_time);
     await assertNoDuplicateFollowUp({ supabase, residentId: resident.id, row });
   }
-  const { data, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
-  if (error?.code === '23505' && opKey) {
-    const existing = await findOperationalByOperationKey({
-      supabase,
-      table,
-      normalizedKind,
-      idempotencyKey: opKey,
-      user,
-      resident,
-      expectedMaternalCaseId: row.maternal_case_id || null,
+  let data;
+  if (atomicMaternalEncounter) {
+    const validatedPatch = validateMaternalRecord(maternalRecordPatch);
+    const { data: savedVisit, error } = await supabase.rpc('save_maternal_encounter', {
+      p_maternal_record_id: row.maternal_case_id,
+      p_resident_id: resident.id,
+      p_actor_id: user.id,
+      p_idempotency_key: opKey,
+      p_record_patch: validatedPatch,
+      p_encounter: {
+        visit_date: row.visit_date,
+        visit_type: row.visit_type,
+        blood_pressure: row.blood_pressure,
+        weight: row.weight,
+        height_cm: row.height_cm,
+        provider: row.provider,
+        notes: row.notes,
+        clinical_data: row.clinical_data,
+      },
     });
-    if (existing) { await linkImmunization(existing.id, existing.status); return existing; }
+    if (error) {
+      if (error.code === '23505' && opKey) {
+        const existing = await findOperationalByOperationKey({
+          supabase,
+          table,
+          normalizedKind,
+          idempotencyKey: opKey,
+          user,
+          resident,
+          expectedMaternalCaseId: row.maternal_case_id,
+        });
+        if (existing) return existing;
+      }
+      console.error('[operational] Atomic maternal encounter save failed.', { code: error.code || 'UNKNOWN' });
+      throw new ApiError(500, 'Could not save the maternal encounter. Please try again.');
+    }
+    data = Array.isArray(savedVisit) ? savedVisit[0] : savedVisit;
+    if (!data) throw new ApiError(500, 'Could not confirm the maternal encounter was saved.');
+  } else {
+    const { data: inserted, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
+    if (error?.code === '23505' && opKey) {
+      const existing = await findOperationalByOperationKey({
+        supabase,
+        table,
+        normalizedKind,
+        idempotencyKey: opKey,
+        user,
+        resident,
+        expectedMaternalCaseId: row.maternal_case_id || null,
+      });
+      if (existing) { await linkImmunization(existing.id, existing.status); return existing; }
+    }
+    throwOnError(error, `Could not create ${normalizedKind}`);
+    data = inserted;
   }
-  throwOnError(error, `Could not create ${normalizedKind}`);
   await linkImmunization(data.id, data.status);
-  await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
+  if (!atomicMaternalEncounter) {
+    await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
+  }
   await notifyResident(supabase, resident, normalizedKind, 'created', data);
   if (normalizedKind === 'followups') {
     await notifyHealthSupervisorsOnce({
@@ -967,13 +1020,10 @@ export const remove = async ({ user, kind, id, supabase = getServiceClient() }) 
 
 /** Recipient marks one of their own notifications read. */
 export const markNotificationRead = async ({ user, id, supabase = getServiceClient() }) => {
-  const { data, error } = await supabase
-    .from('notifications')
-    .update({ read_at: new Date().toISOString() })
-    .eq('id', id)
-    .eq('recipient_id', user.id)
-    .select('*')
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('mark_owned_notification_read', {
+    p_recipient_id: user.id,
+    p_notification_id: id,
+  });
   throwOnError(error, 'Could not update notification');
   if (!data) throw ApiError.notFound('Notification not found.');
   return data;
@@ -986,14 +1036,11 @@ export const markNotificationRead = async ({ user, id, supabase = getServiceClie
  * so already-read timestamps are preserved. Returns how many rows changed.
  */
 export const markAllNotificationsRead = async ({ user, supabase = getServiceClient() }) => {
-  const { data, error } = await supabase
-    .from('notifications')
-    .update({ read_at: new Date().toISOString() })
-    .eq('recipient_id', user.id)
-    .is('read_at', null)
-    .select('id');
+  const { data, error } = await supabase.rpc('mark_all_owned_notifications_read', {
+    p_recipient_id: user.id,
+  });
   throwOnError(error, 'Could not update notifications');
-  return { updated: (data || []).length };
+  return { updated: Number(data || 0) };
 };
 
 export default { list, create, update, remove, markNotificationRead, markAllNotificationsRead, verifyRecordScope, withScheduleState };

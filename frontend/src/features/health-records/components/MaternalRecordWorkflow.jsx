@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2, Baby, Calendar } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
@@ -8,6 +8,12 @@ const inputCls = (error) =>
   `w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-brand-blue focus:ring-1 focus:ring-brand-blue/20 ${
     error ? "border-brand-danger" : "border-gray-300"
   }`;
+
+const isValidDateOnly = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
 
 const YES_NO = [
   { value: false, label: "No" },
@@ -306,7 +312,7 @@ function RegisterPregnancyForm({
                     Expected Delivery Date (EDD)
                   </label>
                   <div className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600">
-                    {edd || "—"}
+                    {edd || ""}
                   </div>
                   <p className="mt-1 text-xs text-gray-500">Calculated: LMP + 280 days</p>
                 </div>
@@ -450,6 +456,7 @@ function RecordEncounterForm({
   onSelectResident,
   initialRecord = null,
 }) {
+  const submissionKey = useRef(null);
   const [form, setForm] = useState({
     encounterDate: new Date().toISOString().split("T")[0],
     encounterType: "prenatal",
@@ -485,6 +492,7 @@ function RecordEncounterForm({
   const [errors, setErrors] = useState({});
 
   const set = (key) => (value) => {
+    submissionKey.current = null;
     setForm((p) => ({ ...p, [key]: value }));
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
   };
@@ -503,6 +511,14 @@ function RecordEncounterForm({
     const next = {};
     if (!resident) next.resident = "Please select a resident.";
     if (!form.encounterDate) next.encounterDate = "Encounter date is required.";
+    else if (!isValidDateOnly(form.encounterDate)) next.encounterDate = "Enter a valid encounter date.";
+    for (const field of [
+      "nextVisitDate", "td1Date", "td2Date", "td3Date", "td4Date", "td5Date",
+      "iodineGivenDate", "dewormingDate", "syphilisScreenDate", "hepbScreenDate",
+      "hivScreenDate", "gdmScreenDate", "cbcScreenDate",
+    ]) {
+      if (form[field] && !isValidDateOnly(form[field])) next[field] = "Enter a valid date.";
+    }
     for (const [field, label] of [["weight", "Weight"], ["height", "Height"]]) {
       if (form[field] !== "" && (!Number.isFinite(Number(form[field])) || Number(form[field]) <= 0)) {
         next[field] = `${label} must be a positive number.`;
@@ -512,6 +528,16 @@ function RecordEncounterForm({
       if (form[field] !== "" && (!Number.isInteger(Number(form[field])) || Number(form[field]) < 0)) {
         next[field] = "Enter a non-negative whole number.";
       }
+    }
+    if (Boolean(form.systolicBp) !== Boolean(form.diastolicBp)) {
+      next.systolicBp = "Enter both blood pressure values.";
+      next.diastolicBp = "Enter both blood pressure values.";
+    }
+    if (form.systolicBp && (!Number.isInteger(Number(form.systolicBp)) || Number(form.systolicBp) < 1 || Number(form.systolicBp) > 300)) {
+      next.systolicBp = "Enter a whole number between 1 and 300.";
+    }
+    if (form.diastolicBp && (!Number.isInteger(Number(form.diastolicBp)) || Number(form.diastolicBp) < 1 || Number(form.diastolicBp) > 200)) {
+      next.diastolicBp = "Enter a whole number between 1 and 200.";
     }
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -596,7 +622,7 @@ function RecordEncounterForm({
                     type="date"
                     value={form.encounterDate}
                     onChange={(e) => set("encounterDate")(e.target.value)}
-                    className={inputCls()}
+                    className={inputCls(errors.encounterDate)}
                   />
                   {errors.encounterDate && <p className="mt-1 text-xs text-brand-danger">{errors.encounterDate}</p>}
                 </div>
@@ -624,29 +650,31 @@ function RecordEncounterForm({
                   <input
                     type="number"
                     step="0.1"
-                    min={0}
+                    min={1}
                     value={form.weight}
                     onChange={(e) => set("weight")(e.target.value)}
                     placeholder="e.g. 65"
-                    className={inputCls()}
+                    className={inputCls(errors.systolicBp)}
                   />
+                  {errors.systolicBp && <p className="mt-1 text-xs text-brand-danger">{errors.systolicBp}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">Height (cm)</label>
                   <input
                     type="number"
                     step="0.1"
-                    min={0}
+                    min={1}
                     value={form.height}
                     onChange={(e) => set("height")(e.target.value)}
                     placeholder="e.g. 165"
-                    className={inputCls()}
+                    className={inputCls(errors.diastolicBp)}
                   />
+                  {errors.diastolicBp && <p className="mt-1 text-xs text-brand-danger">{errors.diastolicBp}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">BMI</label>
                   <div className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600">
-                    {bmi || "—"}
+                    {bmi || ""}
                   </div>
                 </div>
               </div>
@@ -724,8 +752,9 @@ function RecordEncounterForm({
                     type="date"
                     value={form.nextVisitDate}
                     onChange={(e) => set("nextVisitDate")(e.target.value)}
-                    className={inputCls()}
+                  className={inputCls(errors.nextVisitDate)}
                   />
+                  {errors.nextVisitDate && <p className="mt-1 text-xs text-brand-danger">{errors.nextVisitDate}</p>}
                 </div>
               </div>
 
@@ -739,13 +768,14 @@ function RecordEncounterForm({
                     {["td1Date", "td2Date", "td3Date", "td4Date", "td5Date"].map((key, index) => (
                       <div key={key}>
                         <label className="block text-sm font-medium text-gray-900 mb-2">Td/TT Dose {index + 1}</label>
-                        <input type="date" value={form[key]} onChange={(e) => set(key)(e.target.value)} className={inputCls()} />
+                        <input type="date" value={form[key]} onChange={(e) => set(key)(e.target.value)} className={inputCls(errors[key])} />
+                        {errors[key] && <p className="mt-1 text-xs text-brand-danger">{errors[key]}</p>}
                       </div>
                     ))}
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-2">FIM Status</label>
                       <select value={form.fimStatus} onChange={(e) => set("fimStatus")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                        <option value="">Not recorded</option>
+                        <option value="">Select...</option>
                         <option value="true">Yes</option>
                         <option value="false">No</option>
                       </select>
@@ -760,11 +790,13 @@ function RecordEncounterForm({
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-2">Iodine Given</label>
-                      <input type="date" value={form.iodineGivenDate} onChange={(e) => set("iodineGivenDate")(e.target.value)} className={inputCls()} />
+                      <input type="date" value={form.iodineGivenDate} onChange={(e) => set("iodineGivenDate")(e.target.value)} className={inputCls(errors.iodineGivenDate)} />
+                      {errors.iodineGivenDate && <p className="mt-1 text-xs text-brand-danger">{errors.iodineGivenDate}</p>}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-2">Deworming Date</label>
-                      <input type="date" value={form.dewormingDate} onChange={(e) => set("dewormingDate")(e.target.value)} className={inputCls()} />
+                      <input type="date" value={form.dewormingDate} onChange={(e) => set("dewormingDate")(e.target.value)} className={inputCls(errors.dewormingDate)} />
+                      {errors.dewormingDate && <p className="mt-1 text-xs text-brand-danger">{errors.dewormingDate}</p>}
                     </div>
                   </div>
 
@@ -777,9 +809,10 @@ function RecordEncounterForm({
                     ].map(([label, dateKey, resultKey]) => (
                       <div key={dateKey} className="rounded-lg border border-gray-200 p-3">
                         <p className="mb-2 text-sm font-medium text-gray-900">{label} Screen</p>
-                        <input aria-label={`${label} screen date`} type="date" value={form[dateKey]} onChange={(e) => set(dateKey)(e.target.value)} className={inputCls()} />
+                        <input aria-label={`${label} screen date`} type="date" value={form[dateKey]} onChange={(e) => set(dateKey)(e.target.value)} className={inputCls(errors[dateKey])} />
+                        {errors[dateKey] && <p className="mt-1 text-xs text-brand-danger">{errors[dateKey]}</p>}
                         <select aria-label={`${label} result`} value={form[resultKey]} onChange={(e) => set(resultKey)(e.target.value)} className={`${inputCls()} mt-2 cursor-pointer`}>
-                          <option value="">Result not recorded</option>
+                          <option value="">Select result</option>
                           <option value="+">Positive / Reactive</option>
                           <option value="-">Negative / Non-reactive</option>
                         </select>
@@ -787,12 +820,13 @@ function RecordEncounterForm({
                     ))}
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-2">HIV Screen Date</label>
-                      <input type="date" value={form.hivScreenDate} onChange={(e) => set("hivScreenDate")(e.target.value)} className={inputCls()} />
+                      <input type="date" value={form.hivScreenDate} onChange={(e) => set("hivScreenDate")(e.target.value)} className={inputCls(errors.hivScreenDate)} />
+                      {errors.hivScreenDate && <p className="mt-1 text-xs text-brand-danger">{errors.hivScreenDate}</p>}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-2">Iron Given (if anemic)</label>
                       <select value={form.cbcIronGiven} onChange={(e) => set("cbcIronGiven")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                        <option value="">Not recorded</option>
+                        <option value="">Select...</option>
                         <option value="true">Yes</option>
                         <option value="false">No</option>
                       </select>
@@ -818,7 +852,8 @@ function RecordEncounterForm({
             disabled={saving}
             onClick={() => {
               if (!validate()) return;
-              onSave(form);
+              submissionKey.current ||= crypto.randomUUID();
+              onSave(form, submissionKey.current);
             }}
             className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors"
           >
@@ -852,6 +887,7 @@ function ResidentSummary({ resident, initialRecord, residents, onSelectResident,
 }
 
 function DeliveryRecordForm({ resident, residents, initialRecord = null, saving, onClose, onSave, onSelectResident }) {
+  const submissionKey = useRef(null);
   const [form, setForm] = useState({
     deliveryDate: initialRecord?.deliveryDate || "",
     deliveryTime: initialRecord?.deliveryTime || "",
@@ -866,7 +902,10 @@ function DeliveryRecordForm({ resident, residents, initialRecord = null, saving,
     newbornSex: initialRecord?.newbornSex || "",
   });
   const [errors, setErrors] = useState({});
-  const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+  const set = (key) => (value) => {
+    submissionKey.current = null;
+    setForm((current) => ({ ...current, [key]: value }));
+  };
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -883,13 +922,18 @@ function DeliveryRecordForm({ resident, residents, initialRecord = null, saving,
     const next = {};
     if (!resident) next.resident = "Please select a resident.";
     if (!form.deliveryDate) next.deliveryDate = "Delivery date is required.";
+    else if (!isValidDateOnly(form.deliveryDate)) next.deliveryDate = "Enter a valid delivery date.";
+    if (form.pregnancyOutcomeDate && !isValidDateOnly(form.pregnancyOutcomeDate)) {
+      next.pregnancyOutcomeDate = "Enter a valid date.";
+    }
     if (!form.deliveryOutcome) next.deliveryOutcome = "Delivery outcome is required.";
     if (form.birthWeight && (!Number.isFinite(Number(form.birthWeight)) || Number(form.birthWeight) <= 0)) {
       next.birthWeight = "Enter a positive birth weight in kilograms.";
     }
     setErrors(next);
     if (Object.keys(next).length) return;
-    onSave(form);
+    submissionKey.current ||= crypto.randomUUID();
+    onSave(form, submissionKey.current);
   };
 
   const field = (label, key, type = "text", options = null) => (
@@ -947,6 +991,7 @@ function DeliveryRecordForm({ resident, residents, initialRecord = null, saving,
 }
 
 function PostpartumFollowUpForm({ resident, residents, initialRecord = null, saving, onClose, onSave, onSelectResident }) {
+  const submissionKey = useRef(null);
   const [form, setForm] = useState({
     encounterDate: new Date().toISOString().slice(0, 10),
     milestone: "",
@@ -955,7 +1000,10 @@ function PostpartumFollowUpForm({ resident, residents, initialRecord = null, sav
     notes: "",
   });
   const [errors, setErrors] = useState({});
-  const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+  const set = (key) => (value) => {
+    submissionKey.current = null;
+    setForm((current) => ({ ...current, [key]: value }));
+  };
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -972,10 +1020,12 @@ function PostpartumFollowUpForm({ resident, residents, initialRecord = null, sav
     const next = {};
     if (!resident) next.resident = "Please select a resident.";
     if (!form.encounterDate) next.encounterDate = "Visit date is required.";
+    else if (!isValidDateOnly(form.encounterDate)) next.encounterDate = "Enter a valid visit date.";
     if (!form.milestone) next.milestone = "Select the postpartum milestone.";
     setErrors(next);
     if (Object.keys(next).length) return;
-    onSave(form);
+    submissionKey.current ||= crypto.randomUUID();
+    onSave(form, submissionKey.current);
   };
 
   return (
@@ -1006,13 +1056,13 @@ function PostpartumFollowUpForm({ resident, residents, initialRecord = null, sav
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-900">Iron/Folic Completed</label>
               <select value={form.ironFolicCompleted} onChange={(event) => set("ironFolicCompleted")(event.target.value)} className={`${inputCls()} cursor-pointer`}>
-                <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
               </select>
             </div>
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-900">Vitamin A Given</label>
               <select value={form.vitaminAGiven} onChange={(event) => set("vitaminAGiven")(event.target.value)} className={`${inputCls()} cursor-pointer`}>
-                <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
               </select>
             </div>
           </div>

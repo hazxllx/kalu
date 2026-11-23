@@ -852,6 +852,53 @@ export const fileRepository = {
     return clone(data.bpThresholdSettings);
   }),
 
+  // ----- public advisories --------------------------------------------------
+  listActiveAdvisories: async () => clone(store.advisories
+    .filter((advisory) => advisory.isActive)
+    .sort((a, b) => a.displayOrder - b.displayOrder || a.createdAt.localeCompare(b.createdAt))
+    .map(({ createdBy, ...advisory }) => advisory)),
+
+  listAdvisories: async () => clone([...store.advisories]
+    .sort((a, b) => a.displayOrder - b.displayOrder || b.createdAt.localeCompare(a.createdAt))),
+
+  createAdvisory: async (payload) => store.mutate((data) => {
+    const now = new Date().toISOString();
+    const advisory = {
+      id: randomUUID(),
+      title: payload.title,
+      message: payload.message,
+      isActive: payload.isActive,
+      displayOrder: payload.displayOrder,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: payload.createdBy,
+    };
+    data.advisories.push(advisory);
+    return clone(advisory);
+  }),
+
+  updateAdvisory: async (id, payload) => store.mutate((data) => {
+    const advisory = data.advisories.find((item) => item.id === id);
+    if (!advisory) return null;
+    Object.assign(advisory, payload, { updatedAt: new Date().toISOString() });
+    return clone(advisory);
+  }),
+
+  setAdvisoryStatus: async (id, isActive) => store.mutate((data) => {
+    const advisory = data.advisories.find((item) => item.id === id);
+    if (!advisory) return null;
+    advisory.isActive = isActive;
+    advisory.updatedAt = new Date().toISOString();
+    return clone(advisory);
+  }),
+
+  deleteAdvisory: async (id) => store.mutate((data) => {
+    const index = data.advisories.findIndex((item) => item.id === id);
+    if (index < 0) return false;
+    data.advisories.splice(index, 1);
+    return true;
+  }),
+
   // ----- medicine catalog (dev driver) --------------------------------------
   /**
    * Lists catalog medicines filtered by search query `q`, `source`, and active state,

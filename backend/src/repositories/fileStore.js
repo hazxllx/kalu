@@ -45,6 +45,7 @@ const emptyData = () => ({
   medicines: [],
   medicineAvailability: [],
   bpThresholdSettings: null,
+  advisories: [],
 });
 
 /**
@@ -87,6 +88,7 @@ export class FileStore {
     if (!Array.isArray(this.data.medicines)) this.data.medicines = [];
     if (!Array.isArray(this.data.medicineAvailability)) this.data.medicineAvailability = [];
     if (this.data.bpThresholdSettings === undefined) this.data.bpThresholdSettings = null;
+    if (!Array.isArray(this.data.advisories)) this.data.advisories = [];
   }
 
   /**
@@ -188,6 +190,11 @@ export class FileStore {
   get bpThresholdSettings() {
     this.ensureLoaded();
     return this.data.bpThresholdSettings;
+  }
+
+  get advisories() {
+    this.ensureLoaded();
+    return this.data.advisories;
   }
 }
 

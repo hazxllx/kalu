@@ -49,6 +49,23 @@ test('more severe category wins when systolic and diastolic differ', () => {
   assert.equal(classifyBloodPressure('118/92').code, 'stage2');
 });
 
+test('all requested consultation examples use the exact five classification labels', () => {
+  const examples = [
+    ['110/70', 'Normal Blood Pressure'],
+    ['120/75', 'Elevated Blood Pressure'],
+    ['120/80', 'Stage 1 Hypertension'],
+    ['125/85', 'Stage 1 Hypertension'],
+    ['130/80', 'Stage 1 Hypertension'],
+    ['140/85', 'Stage 2 Hypertension'],
+    ['135/90', 'Stage 2 Hypertension'],
+    ['180/100', 'Hypertensive Urgency or Emergency'],
+    ['150/120', 'Hypertensive Urgency or Emergency'],
+  ];
+  for (const [reading, expected] of examples) {
+    assert.equal(classifyBloodPressure(reading).category, expected, reading);
+  }
+});
+
 test('empty / incomplete / malformed / implausible readings are never Normal', () => {
   for (const bad of ['', '   ', '120', '120/', '/80', 'abc', '12/8', '400/90', '120/400', '80/120', '-120/80']) {
     assert.equal(classifyBloodPressure(bad), null, `expected null for "${bad}"`);

@@ -58,10 +58,7 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
     const [quarter, setQuarter] = useState(() => quarterFromQuery(searchParams.get("quarter"), quarterOfMonth0(currentMonth)));
     const [indicatorData, setIndicatorData] = useState(null);
     const [indicatorSummary, setIndicatorSummary] = useState(null);
-    const [reportingWarnings, setReportingWarnings] = useState([]);
     const [records, setRecords] = useState([]);
-    const [sourceVisits, setSourceVisits] = useState(null);
-    const [unattributedVisits, setUnattributedVisits] = useState([]);
     const [loadedRequestKey, setLoadedRequestKey] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -104,10 +101,7 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
       setError(null);
       setIndicatorData(null);
       setIndicatorSummary(null);
-      setReportingWarnings([]);
       setRecords([]);
-      setSourceVisits(null);
-      setUnattributedVisits([]);
       setCacheInfo({ source: null, cachedAt: null, stale: false });
       setSelectedIndicator(null);
       setDrilldown(null);
@@ -159,10 +153,7 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
           if (!active) return;
           setIndicatorData(result.indicators);
           setIndicatorSummary(result.summary || null);
-          setReportingWarnings(Array.isArray(result.warnings) ? result.warnings.filter((warning) => typeof warning === "string") : []);
           setRecords(result.records);
-          setSourceVisits(result.visits ?? null);
-          setUnattributedVisits(result.unattributedVisits || []);
           setLoadedRequestKey(requestKey);
           setCacheInfo({
             source: result.source || "server",
@@ -232,28 +223,6 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
     const enrollmentPageCount = Math.max(1, Math.ceil(filteredEnrollmentRows.length / recordPageSize));
     const safeEnrollmentPage = Math.min(recordPage, enrollmentPageCount);
     const pagedEnrollmentRows = filteredEnrollmentRows.slice((safeEnrollmentPage - 1) * recordPageSize, safeEnrollmentPage * recordPageSize);
-    const maternalResidents = new Map(records.map((record) => [record.resident_id, Array.isArray(record.resident) ? record.resident[0] : record.resident]));
-    const episodeStatuses = new Map(records.map((record) => [record.episode_key, record.episode_identity_status]));
-    const visitRows = [...(sourceVisits || []), ...unattributedVisits].map((visit, index) => {
-      const resident = visit.resident || maternalResidents.get(visit.resident_id);
-      const recordId = visit.record?.id || visit.id || "Source ID not recorded";
-      const episodeStatus = episodeStatuses.get(visit.episode_key);
-      return {
-        id: `${visit.source}:${recordId}:${visit.visit_date}:${index}`,
-        residentName: resident?.name || [resident?.first_name, resident?.middle_name, resident?.last_name].filter(Boolean).join(" ") || `Resident ID: ${visit.resident_id}`,
-        visitDate: visit.visit_date || "Date not recorded",
-        careType: ({ prenatal: "Prenatal", postpartum: "Postpartum", maternal: "Maternal / phase not recorded" })[visit.visit_type] || "Care type not recorded",
-        serviceName: visit.health_service_name || "No registered service association",
-        source: String(visit.source || "maternal source").replaceAll("_", " "),
-        recordId,
-        reportingStatus: visit.attributionStatus ? "Attribution review required" : visit.eligible === false ? "Not eligible for counts"
-          : ["unknown", "ambiguous", "conflict"].includes(episodeStatus) ? "Episode review required" : "Recorded source contact",
-      };
-    });
-    const filteredVisitRows = visitRows.filter((visit) => !recordSearch.trim() || [visit.residentName, visit.careType, visit.serviceName, visit.source, visit.recordId]
-      .some((value) => value.toLowerCase().includes(recordSearch.trim().toLowerCase())));
-    const visitPage = Math.min(recordPage, Math.max(1, Math.ceil(filteredVisitRows.length / recordPageSize)));
-    const pagedVisitRows = filteredVisitRows.slice((visitPage - 1) * recordPageSize, visitPage * recordPageSize);
     const showIndicator = (row) => {
       setDrilldown(null);
       setDrilldownError(null);
@@ -288,19 +257,6 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
           empty={programId === "enrollment" ? records.length === 0 : rows.length === 0}
           onRetry={() => setRetry((value) => value + 1)}
         />
-
-        {programId === "prenatal" && currentReport && !showingLoading && !error && (
-          <aside aria-label="Indicator definitions" className="mb-3 border-l-2 border-brand-border px-3 py-2 text-xs leading-relaxed text-brand-gray">
-            <p className="font-semibold text-brand-ink">Indicator definitions: legacy M1 catalog. Workbook mapping is unverified.</p>
-            {(reportingWarnings.length ? reportingWarnings : [
-              "Legacy B1_1 counts four prenatal check-ups and B3_28 counts two postpartum check-ups. These are not approved mappings to workbook 8ANC/4PNC.",
-              "Saved prenatal contacts feed relevant indicators, but do not by themselves prove supplementation or care completion.",
-            ]).map((warning) => <p key={warning} className="mt-1">{warning}</p>)}
-            {Number.isFinite(indicatorSummary?.visitCount) && <p className="mt-1">
-              Completed prenatal source records: {indicatorSummary.visitCount}. Unique residents seen are separate from B1_1 attainment on the fourth distinct contact day, not every later visit.
-            </p>}
-          </aside>
-        )}
 
         {showingLoading ? (
           <SkeletonTable rows={7} cols={4} className="ui-tcl-data-table" />
@@ -379,24 +335,6 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
             </section>
           </>
         )}
-
-        {programId === "prenatal" && currentReport && !showingLoading && !error && <details className="mt-3 border-t border-brand-border pt-3">
-          <summary className="cursor-pointer text-sm font-semibold text-brand-blue">Source Visit Evidence {sourceVisits === null ? "(unavailable in this report)" : `(${visitRows.length} source contacts)`}</summary>
-          <p className="mt-2 text-xs text-brand-gray">Each dated source record is retained, including repeat consultations and maternal/TCL evidence. This list is not a count of completed official indicators. Duplicate source documentation and separate same-day visits qualify only according to each indicator's defined unit.</p>
-          {unattributedVisits.length > 0 && <p role="status" className="mt-1 text-xs text-brand-gray">{unattributedVisits.length} records require service-date or reporting-scope verification and are excluded from period counts. No creation timestamp or current address is substituted.</p>}
-          {sourceVisits === null ? <p className="mt-2 text-xs text-brand-gray">Visit-level evidence was not returned. Refresh online to retrieve it; missing evidence is not a verified zero.</p> : <>
-            <TclToolbar onSearch={setRecordSearch} searchValue={recordSearch} />
-            {filteredVisitRows.length === 0 ? <TclEmptyState type={recordSearch ? "filter" : "empty"} title="No source visits" description={`No matching source-visit records are available for ${selectedPeriodLabel}.`} compact /> : <>
-              <DataTable rows={pagedVisitRows} dense compact striped mobileCards stickyHeader maxHeight="50vh" className="ui-tcl-data-table !rounded-card !shadow-none" tableClassName="min-w-[48rem]" columns={[
-                { key: "residentName", label: "Resident", wrap: true }, { key: "visitDate", label: "Saved Service Date" },
-                { key: "careType", label: "Care Type", wrap: true }, { key: "serviceName", label: "Health Service", wrap: true },
-                { key: "source", label: "Data Source", wrap: true }, { key: "recordId", label: "Source Record", wrap: true },
-                { key: "reportingStatus", label: "Evidence Status", wrap: true },
-              ]} />
-              {filteredVisitRows.length > recordPageSize && <TablePagination total={filteredVisitRows.length} page={visitPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(value) => { setRecordPageSize(value); setRecordPage(1); }} className="mt-3" />}
-            </>}
-          </>}
-        </details>}
 
         <M1DrilldownDialog
           indicator={currentReport ? selectedIndicator : null}

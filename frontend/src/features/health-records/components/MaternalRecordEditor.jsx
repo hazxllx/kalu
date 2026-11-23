@@ -3,12 +3,26 @@ import { X, CheckCircle2, Pencil, Trash2, Printer, Calendar, Baby } from "lucide
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup as SelectButtonGroup } from "@/components/system";
 import StatusBadge from "@/components/common/StatusBadge";
+import {
+  hasRecordedMaternalValue,
+  maternalScreeningValue,
+  recordedMaternalRows,
+} from "../lib/maternalDisplay";
 
 const inputCls = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-brand-blue focus:ring-1 focus:ring-brand-blue/20";
 const selectCls = `${inputCls} cursor-pointer`;
 const textareaCls = `${inputCls} resize-none`;
 
-const yesNoLabel = (value) => value == null ? "Not recorded" : value ? "Yes" : "No";
+const yesNoLabel = (value) => value == null ? "" : value ? "Yes" : "No";
+
+function DetailRows({ rows }) {
+  return recordedMaternalRows(rows).map(([label, value]) => (
+    <div key={label}>
+      <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
+      <p className="mt-1 text-sm text-gray-900">{value}</p>
+    </div>
+  ));
+}
 
 const DELIVERY_TYPES = [
   { value: "Vaginal", label: "Vaginal" },
@@ -98,6 +112,7 @@ function MaternalRecordEditor({
   onRecordDelivery,
   onRecordPostpartum,
   visitLoadError,
+  visitLoading,
   saving,
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -181,7 +196,7 @@ function MaternalRecordEditor({
   };
 
   const calculateEDD = () => {
-    if (!form?.lmp) return detail?.edd || "—";
+    if (!form?.lmp) return detail?.edd || "";
     const lmp = new Date(form.lmp);
     const edd = new Date(lmp.getTime() + 280 * 24 * 60 * 60 * 1000);
     return edd.toISOString().split("T")[0];
@@ -231,7 +246,85 @@ function MaternalRecordEditor({
 
   if (!detail || !form) return null;
 
-  const edd = isEditing ? calculateEDD() : (detail.edd || "—");
+  const edd = isEditing ? calculateEDD() : (detail.edd || "");
+  const pregnancyRows = recordedMaternalRows([
+    ["Date of Registration", detail.dateOfRegistration],
+    ["LMP", detail.lmp],
+    ["EDD", detail.edd],
+    ["Pregnancy Status", detail.status],
+    ["Provider", detail.provider],
+  ]);
+  const maternalRows = recordedMaternalRows([
+    ["Gravidity (G)", detail.gravida],
+    ["Parity (P)", detail.para],
+    ["Risk Classification", detail.risk],
+    ["Socio-Economic Status", detail.socioEconomicStatus],
+    ["Family Serial Number", detail.familySerialNo],
+  ]);
+  const screeningRows = recordedMaternalRows([
+    ...[1, 2, 3, 4, 5].map((dose) => [`Td/TT Dose ${dose}`, detail[`td${dose}Date`]]),
+    ["FIM Status", yesNoLabel(detail.fimStatus)],
+    ["Iron + Folic Acid", hasRecordedMaternalValue(detail.prenatalIronFolicTablets) ? `${detail.prenatalIronFolicTablets} tablets` : ""],
+    ["Calcium Tablets", hasRecordedMaternalValue(detail.calciumTablets) ? `${detail.calciumTablets} tablets` : ""],
+    ["Iodine Given", detail.iodineGivenDate],
+    ["Deworming Date", detail.dewormingDate],
+    ["Syphilis Screen", maternalScreeningValue(detail.syphilisScreenDate, detail.syphilisResult)],
+    ["Hepatitis B Screen", maternalScreeningValue(detail.hepbScreenDate, detail.hepbResult)],
+    ["HIV Screen", detail.hivScreenDate],
+    ["GDM Screen", maternalScreeningValue(detail.gdmScreenDate, detail.gdmResult)],
+    ["CBC Screen", maternalScreeningValue(detail.cbcScreenDate, detail.cbcResult)],
+    ["Iron Given (if anemic)", yesNoLabel(detail.cbcIronGiven)],
+  ]);
+  const deliveryRows = recordedMaternalRows([
+    ["Date of Delivery", detail.deliveryDate],
+    ["Time of Delivery", detail.deliveryTime],
+    ["Delivery Outcome", detail.deliveryOutcome],
+    ["Type of Delivery", detail.typeOfDelivery],
+    ["Place of Delivery", detail.placeOfDelivery],
+    ["Birth Attendant", detail.birthAttendant],
+    ["Birth Weight", hasRecordedMaternalValue(detail.birthWeight) ? `${detail.birthWeight} kg` : ""],
+    ["Birth Weight Classification", detail.birthWeightClass],
+    ["Pregnancy Outcome", detail.pregnancyOutcome],
+    ["Date Terminated", detail.pregnancyOutcomeDate],
+    ["Newborn Sex", detail.newbornSex],
+  ]);
+  const postpartumRows = recordedMaternalRows([
+    ["Within 24 hours", detail.ppCheckup24h],
+    ["Day 3", detail.ppCheckupDay3],
+    ["7–14 days", detail.ppCheckup7to14d],
+    ["6 weeks after birth", detail.ppCheckup6wk],
+    ["Iron/Folic Completed", detail.ironFolicCompletedDate],
+    ["Vitamin A Given", detail.vitaminAGivenDate],
+  ]);
+  const lifestyleRows = recordedMaternalRows([
+    ["Smoking History", yesNoLabel(detail.smokingHistory)],
+    ["Binge Alcohol", yesNoLabel(detail.bingeAlcohol)],
+    ["Insufficient Physical Activity", yesNoLabel(detail.insufficientPhysicalActivity)],
+    ["Unhealthy Diet", yesNoLabel(detail.unhealthyDiet)],
+    ["BMI (Asia Pacific)", hasRecordedMaternalValue(detail.bmi) ? String(detail.bmi) : ""],
+  ]);
+  const summaryRows = recordedMaternalRows([
+    ["LMP", detail.lmp],
+    ["EDD", detail.edd],
+    ["Status", detail.status],
+    ["Provider", detail.provider],
+  ]);
+  const visits = detail.visits || [];
+  const prenatalVisits = visits.filter((visit) => visit.visit_type === "prenatal");
+  const deliveryVisits = visits.filter((visit) => visit.visit_type === "intrapartum");
+  const postpartumVisits = visits.filter((visit) => visit.visit_type === "postpartum");
+  const encounterRows = recordedMaternalRows([
+    ["Prenatal Encounters", prenatalVisits.length],
+    ["Delivery Encounters", deliveryVisits.length],
+    ["Postpartum Encounters", postpartumVisits.length],
+  ].filter(([, count]) => count > 0));
+  const sections = [
+    ["overview", "Overview", true],
+    ["prenatal", "Prenatal Services & Screening", isEditing || screeningRows.length > 0 || prenatalVisits.length > 0 || visitLoading || visitLoadError],
+    ["delivery", "Delivery Information", isEditing || deliveryRows.length > 0 || deliveryVisits.length > 0 || visitLoading || visitLoadError],
+    ["postpartum", "Postpartum Care", isEditing || postpartumRows.length > 0 || postpartumVisits.length > 0 || visitLoading || visitLoadError],
+    ["lifestyle", "Maternal Health & Lifestyle Profile", isEditing || lifestyleRows.length > 0],
+  ].filter(([, , visible]) => visible);
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
@@ -247,7 +340,7 @@ function MaternalRecordEditor({
               </p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              <StatusBadge value={detail.risk} />
+              {hasRecordedMaternalValue(detail.risk) && <StatusBadge value={detail.risk} />}
               <button
                 onClick={onClose}
                 className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
@@ -263,13 +356,7 @@ function MaternalRecordEditor({
         <div className="flex-1 overflow-y-auto">
           <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-6 py-3">
             <nav aria-label="Maternal record sections" className="flex gap-2 overflow-x-auto">
-              {[
-                ["overview", "Overview"],
-                ["prenatal", "Prenatal Services & Screening"],
-                ["delivery", "Delivery Information"],
-                ["postpartum", "Postpartum Care"],
-                ["lifestyle", "Maternal Health & Lifestyle Profile"],
-              ].map(([key, label]) => (
+              {sections.map(([key, label]) => (
                 <button
                   key={key}
                   type="button"
@@ -286,28 +373,19 @@ function MaternalRecordEditor({
           </div>
           <div className="px-6 py-5 space-y-6">
             {/* Quick Summary */}
-            {!isEditing && activeSection === "overview" && (
-              <>
+            {!isEditing && activeSection === "overview" && summaryRows.length > 0 && (
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-5 text-center">
-                  {[
-                    ["LMP", detail.lmp || "—"],
-                    ["EDD", detail.edd || "—"],
-                    ["Visits", detail.prenatalVisits || "0"],
-                    ["Status", detail.status || "—"],
-                    ["Provider", detail.provider || "—"],
-                  ].map(([label, value]) => (
+                  {summaryRows.map(([label, value]) => (
                     <div key={label}>
                       <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
                       <p className="mt-1 text-sm font-semibold text-gray-900">{value}</p>
                     </div>
                   ))}
                 </div>
-                <hr className="border-gray-200" />
-              </>
             )}
 
             {/* Section A: Pregnancy Information */}
-            <section className={activeSection === "overview" ? "" : "hidden"}>
+            <section className={activeSection === "overview" && (isEditing || pregnancyRows.length > 0) ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Pregnancy Information</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -368,31 +446,35 @@ function MaternalRecordEditor({
                     </div>
                   </>
                 ) : (
-                  <>
-                    {[
-                      ["Date of Registration", detail.dateOfRegistration || "Not recorded"],
-                      ["LMP", detail.lmp || "Not recorded"],
-                      ["EDD", detail.edd || "Not recorded"],
-                      ["Gravida (G)", detail.gravida !== null && detail.gravida !== "" ? detail.gravida : "Not recorded"],
-                      ["Para (P)", detail.para !== null && detail.para !== "" ? detail.para : "Not recorded"],
-                      ["Risk Classification", detail.risk || "Not recorded"],
-                      ["Socio-Economic Status", detail.socioEconomicStatus || "Not specified"],
-                      ["Family Serial Number", detail.familySerialNo || "Not recorded"],
-                    ].map(([label, value]) => (
-                      <div key={label}>
-                        <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
-                        <p className="mt-1 text-sm text-gray-900">{value}</p>
-                      </div>
-                    ))}
-                  </>
+                  <DetailRows rows={pregnancyRows} />
                 )}
               </div>
             </section>
 
+            {!isEditing && activeSection === "overview" && maternalRows.length > 0 && (
+              <section>
+                <h3 className="text-sm font-semibold text-gray-900 mb-4">Maternal Information</h3>
+                <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
+                  <DetailRows rows={maternalRows} />
+                </div>
+              </section>
+            )}
+
+            {!isEditing && activeSection === "overview" && (visitLoading || visitLoadError || encounterRows.length > 0) && (
+              <section aria-label="Encounter history summary">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4">Encounter History</h3>
+                {visitLoading ? <p className="text-sm text-gray-500">Loading encounter history...</p>
+                  : visitLoadError ? <p role="alert" className="text-sm text-brand-danger">{visitLoadError}</p>
+                    : <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
+                      <DetailRows rows={encounterRows} />
+                    </div>}
+              </section>
+            )}
+
             {activeSection === "overview" && <hr className="border-gray-200" />}
 
             {/* Section B: Prenatal Services & Screening (Abbreviated for space) */}
-            <section className={activeSection === "prenatal" ? "" : "hidden"}>
+            <section className={activeSection === "prenatal" && (isEditing || screeningRows.length > 0) ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Prenatal Services & Screening</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -406,7 +488,7 @@ function MaternalRecordEditor({
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">FIM Status</label>
                       <select aria-label="FIM Status" value={form.fimStatus} onChange={(e) => set("fimStatus")(e.target.value)} className={selectCls}>
-                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                        <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </div>
                     <div>
@@ -484,44 +566,18 @@ function MaternalRecordEditor({
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Iron Given (if anemic)</label>
                       <select aria-label="Iron Given" value={form.cbcIronGiven} onChange={(e) => set("cbcIronGiven")(e.target.value)} className={selectCls}>
-                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                        <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </div>
                   </>
                 ) : (
-                  <>
-                    {[
-                      ["Td/TT Dose 1", detail.td1Date || "Not recorded"],
-                      ["Td/TT Dose 2", detail.td2Date || "Not recorded"],
-                      ["Td/TT Dose 3", detail.td3Date || "Not recorded"],
-                      ["Td/TT Dose 4", detail.td4Date || "Not recorded"],
-                      ["Td/TT Dose 5", detail.td5Date || "Not recorded"],
-                      ["FIM Status", yesNoLabel(detail.fimStatus)],
-                      ["Iron + Folic Acid", detail.prenatalIronFolicTablets != null && detail.prenatalIronFolicTablets !== "" ? `${detail.prenatalIronFolicTablets} tablets` : "Not recorded"],
-                      ["Calcium Tablets", detail.calciumTablets != null && detail.calciumTablets !== "" ? `${detail.calciumTablets} tablets` : "Not recorded"],
-                      ["Iodine Given", detail.iodineGivenDate || "Not recorded"],
-                      ["Deworming Date", detail.dewormingDate || "Not recorded"],
-                      ["Syphilis Screen", detail.syphilisScreenDate ? `${detail.syphilisScreenDate} (${detail.syphilisResult || "—"})` : "Not recorded"],
-                      ["Hepatitis B Screen", detail.hepbScreenDate ? `${detail.hepbScreenDate} (${detail.hepbResult || "—"})` : "Not recorded"],
-                      ["HIV Screen", detail.hivScreenDate || "Not recorded"],
-                      ["GDM Screen", detail.gdmScreenDate ? `${detail.gdmScreenDate} (${detail.gdmResult || "—"})` : "Not recorded"],
-                      ["CBC Screen", detail.cbcScreenDate ? `${detail.cbcScreenDate} (${detail.cbcResult || "—"})` : "Not recorded"],
-                      ["Iron Given (if anemic)", yesNoLabel(detail.cbcIronGiven)],
-                    ].map(([label, value]) => (
-                      <div key={label}>
-                        <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
-                        <p className="mt-1 text-sm text-gray-900">{value}</p>
-                      </div>
-                    ))}
-                  </>
+                  <DetailRows rows={screeningRows} />
                 )}
               </div>
             </section>
 
-            {activeSection === "prenatal" && <hr className="border-gray-200" />}
-
             {/* Section C: Delivery Information */}
-            <section className={activeSection === "delivery" ? "" : "hidden"}>
+            <section className={activeSection === "delivery" && (isEditing || deliveryRows.length > 0) ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Delivery Information</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -594,34 +650,13 @@ function MaternalRecordEditor({
                     </div>
                   </>
                 ) : (
-                  <>
-                    {[
-                      ["Date of Delivery", detail.deliveryDate || "Not recorded"],
-                      ["Time of Delivery", detail.deliveryTime || "Not recorded"],
-                      ["Delivery Outcome", detail.deliveryOutcome || "Not recorded"],
-                      ["Type of Delivery", detail.typeOfDelivery || "Not recorded"],
-                      ["Place of Delivery", detail.placeOfDelivery || "Not recorded"],
-                      ["Birth Attendant", detail.birthAttendant || "Not recorded"],
-                      ["Birth Weight", detail.birthWeight ? `${detail.birthWeight} kg` : "Not recorded"],
-                      ["Birth Weight Classification", detail.birthWeightClass || "Not recorded"],
-                      ["Pregnancy Outcome", detail.pregnancyOutcome || "Not recorded"],
-                      ["Date Terminated", detail.pregnancyOutcomeDate || "Not recorded"],
-                      ["Newborn Sex", detail.newbornSex || "Not recorded"],
-                    ].map(([label, value]) => (
-                      <div key={label}>
-                        <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
-                        <p className="mt-1 text-sm text-gray-900">{value}</p>
-                      </div>
-                    ))}
-                  </>
+                  <DetailRows rows={deliveryRows} />
                 )}
               </div>
             </section>
 
-            {activeSection === "delivery" && <hr className="border-gray-200" />}
-
             {/* Section D: Postpartum Care */}
-            <section className={activeSection === "postpartum" ? "" : "hidden"}>
+            <section className={activeSection === "postpartum" && (isEditing || postpartumRows.length > 0) ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Postpartum Care Milestones</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -652,29 +687,13 @@ function MaternalRecordEditor({
                     </div>
                   </>
                 ) : (
-                  <>
-                    {[
-                      ["Within 24 hours", detail.ppCheckup24h || "Not recorded"],
-                      ["Day 3", detail.ppCheckupDay3 || "Not recorded"],
-                      ["7–14 days", detail.ppCheckup7to14d || "Not recorded"],
-                      ["6 weeks after birth", detail.ppCheckup6wk || "Not recorded"],
-                      ["Iron/Folic Completed", detail.ironFolicCompletedDate || "Not recorded"],
-                      ["Vitamin A Given", detail.vitaminAGivenDate || "Not recorded"],
-                    ].map(([label, value]) => (
-                      <div key={label}>
-                        <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
-                        <p className="mt-1 text-sm text-gray-900">{value}</p>
-                      </div>
-                    ))}
-                  </>
+                  <DetailRows rows={postpartumRows} />
                 )}
               </div>
             </section>
 
-            {activeSection === "postpartum" && <hr className="border-gray-200" />}
-
             {/* Section E: Maternal Health & Lifestyle */}
-            <section className={activeSection === "lifestyle" ? "" : "hidden"}>
+            <section className={activeSection === "lifestyle" && (isEditing || lifestyleRows.length > 0) ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Maternal Health & Lifestyle Profile</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -682,25 +701,25 @@ function MaternalRecordEditor({
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Smoking History</label>
                       <select aria-label="Smoking History" value={form.smokingHistory} onChange={(e) => set("smokingHistory")(e.target.value)} className={selectCls}>
-                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                        <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Binge Alcohol</label>
                       <select aria-label="Binge Alcohol" value={form.bingeAlcohol} onChange={(e) => set("bingeAlcohol")(e.target.value)} className={selectCls}>
-                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                        <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Insufficient Physical Activity</label>
                       <select aria-label="Insufficient Physical Activity" value={form.insufficientPhysicalActivity} onChange={(e) => set("insufficientPhysicalActivity")(e.target.value)} className={selectCls}>
-                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                        <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Unhealthy Diet</label>
                       <select aria-label="Unhealthy Diet" value={form.unhealthyDiet} onChange={(e) => set("unhealthyDiet")(e.target.value)} className={selectCls}>
-                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                        <option value="">Select...</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </div>
                     <div>
@@ -712,20 +731,7 @@ function MaternalRecordEditor({
                     </div>
                   </>
                 ) : (
-                  <>
-                    {[
-                      ["Smoking History", yesNoLabel(detail.smokingHistory)],
-                      ["Binge Alcohol", yesNoLabel(detail.bingeAlcohol)],
-                      ["Insufficient Physical Activity", yesNoLabel(detail.insufficientPhysicalActivity)],
-                      ["Unhealthy Diet", yesNoLabel(detail.unhealthyDiet)],
-                      ["BMI (Asia Pacific)", detail.bmi ? String(detail.bmi) : "Not recorded"],
-                    ].map(([label, value]) => (
-                      <div key={label}>
-                        <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
-                        <p className="mt-1 text-sm text-gray-900">{value}</p>
-                      </div>
-                    ))}
-                  </>
+                  <DetailRows rows={lifestyleRows} />
                 )}
               </div>
             </section>
@@ -745,14 +751,12 @@ function MaternalRecordEditor({
               </>
             ) : null}
 
-            {activeSection === "prenatal" && (
+            {activeSection === "prenatal" && (prenatalVisits.length > 0 || visitLoadError) && (
               <section aria-label="Prenatal encounter history">
-                <h3 className="mb-3 text-sm font-semibold text-gray-900">Prenatal Encounter History</h3>
+                <h3 className="mb-3 text-sm font-semibold text-gray-900">Prenatal Encounter History ({prenatalVisits.length})</h3>
                 {visitLoadError ? <p role="alert" className="text-sm text-brand-danger">{visitLoadError}</p>
-                  : (detail.visits || []).filter((visit) => visit.visit_type === "prenatal").length === 0
-                    ? <p className="text-sm text-gray-500">No prenatal encounters recorded.</p>
-                    : <ol className="space-y-3">
-                      {(detail.visits || []).filter((visit) => visit.visit_type === "prenatal").map((visit) => {
+                  : <ol className="space-y-3">
+                      {prenatalVisits.map((visit) => {
                         const prenatal = visit.clinical_data?.prenatal || {};
                         const recordedServices = [
                           ...[1, 2, 3, 4, 5].filter((dose) => prenatal[`td${dose}Date`]).map((dose) => [`Td/TT dose ${dose}`, prenatal[`td${dose}Date`]]),
@@ -761,22 +765,24 @@ function MaternalRecordEditor({
                           ["Calcium Tablets", prenatal.calciumTablets || ""],
                           ["Iodine Given", prenatal.iodineGivenDate],
                           ["Deworming", prenatal.dewormingDate],
-                          ["Syphilis Screen", [prenatal.syphilisScreenDate, prenatal.syphilisResult].filter(Boolean).join(" ")],
-                          ["Hepatitis B Screen", [prenatal.hepbScreenDate, prenatal.hepbResult].filter(Boolean).join(" ")],
+                          ["Syphilis Screen", maternalScreeningValue(prenatal.syphilisScreenDate, prenatal.syphilisResult)],
+                          ["Hepatitis B Screen", maternalScreeningValue(prenatal.hepbScreenDate, prenatal.hepbResult)],
                           ["HIV Screen", prenatal.hivScreenDate],
-                          ["GDM Screen", [prenatal.gdmScreenDate, prenatal.gdmResult].filter(Boolean).join(" ")],
-                          ["CBC Screen", [prenatal.cbcScreenDate, prenatal.cbcResult].filter(Boolean).join(" ")],
+                          ["GDM Screen", maternalScreeningValue(prenatal.gdmScreenDate, prenatal.gdmResult)],
+                          ["CBC Screen", maternalScreeningValue(prenatal.cbcScreenDate, prenatal.cbcResult)],
                           ["Iron Given", prenatal.cbcIronGiven === "" || prenatal.cbcIronGiven == null ? "" : prenatal.cbcIronGiven === "true" ? "Yes" : "No"],
-                        ].filter(([, value]) => value !== "");
+                        ].filter(([, value]) => hasRecordedMaternalValue(value));
                         return (
                           <li key={visit.id} className="rounded-lg border border-gray-200 p-3">
                             <div className="flex flex-wrap justify-between gap-2 text-sm">
                               <span className="font-medium text-gray-900">{visit.visit_date}</span>
-                              <span className="text-gray-600">{visit.provider || visit.provider_name || "Health personnel"}</span>
+                              {(visit.provider || visit.provider_name) && <span className="text-gray-600">{visit.provider || visit.provider_name}</span>}
                             </div>
-                            <p className="mt-1 text-xs text-gray-600">
-                              {[visit.blood_pressure ? `BP ${visit.blood_pressure}` : "", visit.weight != null ? `${visit.weight} kg` : "", visit.height_cm != null ? `${visit.height_cm} cm` : ""].filter(Boolean).join(" · ") || "No measurements recorded"}
-                            </p>
+                            {[visit.blood_pressure ? `BP ${visit.blood_pressure}` : "", visit.weight != null ? `${visit.weight} kg` : "", visit.height_cm != null ? `${visit.height_cm} cm` : ""].filter(Boolean).length > 0 && (
+                              <p className="mt-1 text-xs text-gray-600">
+                                {[visit.blood_pressure ? `BP ${visit.blood_pressure}` : "", visit.weight != null ? `${visit.weight} kg` : "", visit.height_cm != null ? `${visit.height_cm} cm` : ""].filter(Boolean).join(" · ")}
+                              </p>
+                            )}
                             {recordedServices.length > 0 && (
                               <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 {recordedServices.map(([label, value]) => (
@@ -794,10 +800,10 @@ function MaternalRecordEditor({
                     </ol>}
               </section>
             )}
-            {activeSection === "delivery" && (
+            {activeSection === "delivery" && (deliveryVisits.length > 0 || visitLoadError) && (
               <section aria-label="Delivery encounter history">
-                <h3 className="mb-3 text-sm font-semibold text-gray-900">Delivery History</h3>
-                {(detail.visits || []).filter((visit) => visit.visit_type === "intrapartum").map((visit) => {
+                <h3 className="mb-3 text-sm font-semibold text-gray-900">Delivery History ({deliveryVisits.length})</h3>
+                {visitLoadError ? <p role="alert" className="text-sm text-brand-danger">{visitLoadError}</p> : deliveryVisits.map((visit) => {
                   const delivery = visit.clinical_data?.delivery || {};
                   return (
                     <div key={visit.id} className="mb-3 rounded-lg border border-gray-200 p-3">
@@ -827,23 +833,27 @@ function MaternalRecordEditor({
                     </div>
                   );
                 })}
-                {!(detail.visits || []).some((visit) => visit.visit_type === "intrapartum") && <p className="text-sm text-gray-500">No delivery visit history recorded.</p>}
               </section>
             )}
-            {activeSection === "postpartum" && (
+            {activeSection === "postpartum" && (postpartumVisits.length > 0 || visitLoadError) && (
               <section aria-label="Postpartum encounter history">
-                <h3 className="mb-3 text-sm font-semibold text-gray-900">Postpartum Visit History</h3>
+                <h3 className="mb-3 text-sm font-semibold text-gray-900">Postpartum Visit History ({postpartumVisits.length})</h3>
                 {visitLoadError ? <p role="alert" className="text-sm text-brand-danger">{visitLoadError}</p>
-                  : (detail.visits || []).filter((visit) => visit.visit_type === "postpartum").length === 0
-                    ? <p className="text-sm text-gray-500">No postpartum visits recorded.</p>
-                    : <ol className="space-y-3">
-                      {(detail.visits || []).filter((visit) => visit.visit_type === "postpartum").map((visit) => (
+                  : <ol className="space-y-3">
+                      {postpartumVisits.map((visit) => (
                         <li key={visit.id} className="rounded-lg border border-gray-200 p-3">
                           <p className="text-sm font-medium text-gray-900">{visit.visit_date} · {visit.clinical_data?.postpartum?.milestone || "Postpartum visit"}</p>
-                          <p className="mt-1 text-xs text-gray-600">
-                            Iron/Folic: {yesNoLabel(visit.clinical_data?.postpartum?.ironFolicCompleted)}
-                            {" · "}Vitamin A: {yesNoLabel(visit.clinical_data?.postpartum?.vitaminAGiven)}
-                          </p>
+                          {recordedMaternalRows([
+                            ["Iron/Folic", yesNoLabel(visit.clinical_data?.postpartum?.ironFolicCompleted)],
+                            ["Vitamin A", yesNoLabel(visit.clinical_data?.postpartum?.vitaminAGiven)],
+                          ]).length > 0 && (
+                            <p className="mt-1 text-xs text-gray-600">
+                              {recordedMaternalRows([
+                                ["Iron/Folic", yesNoLabel(visit.clinical_data?.postpartum?.ironFolicCompleted)],
+                                ["Vitamin A", yesNoLabel(visit.clinical_data?.postpartum?.vitaminAGiven)],
+                              ]).map(([label, value]) => `${label}: ${value}`).join(" · ")}
+                            </p>
+                          )}
                           {visit.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{visit.notes}</p>}
                         </li>
                       ))}

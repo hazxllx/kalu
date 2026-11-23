@@ -20,7 +20,7 @@ import { api, consultationsApi, residentsApi, healthServicesApi } from "@/servic
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import DateRangePicker from "@/features/consultations/components/DateRangePicker";
 import { formatLongDate } from "@/lib/dateUtils";
-import { bloodPressureBadgeClassName, classifyBloodPressure as classifyBp, formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
+import { classifyBloodPressure as classifyBp, formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
 import {
   saveConsultationOffline,
   submitConsultationDraft,
@@ -38,7 +38,7 @@ import LabResultsPanel from "@/features/health-records/components/LabResultsPane
 import ResidentHealthHistory from "@/features/consultations/components/ResidentHealthHistory";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { loadServerRows } from "@/lib/serverRows";
-import { consultationRiskLevel, consultationAssessment, consultationServiceName, consultationHealthServiceLabel, consultationTemperatureWarningVisible, consultationRiskReasons, consultationFollowUp, savedConsultationBloodPressureClassification, consultationBloodPressureClassification } from "@/features/consultations/lib/consultationRisk";
+import { consultationRiskLevel, consultationAssessment, consultationServiceName, consultationHealthServiceLabel, consultationTemperatureWarningVisible, consultationRiskReasons, consultationFollowUp, consultationBloodPressureClassification } from "@/features/consultations/lib/consultationRisk";
 import ButtonSelectGroup from "@/components/system/ButtonSelectGroup";
 import {
   getManilaDateTime, calculateConsultationBmi, validateConsultationVitals,
@@ -135,7 +135,11 @@ const inputCls = (error) =>
  */
 const submitErrorMessage = (err) => {
   const status = err?.status;
+  const code = String(err?.code || "").toLowerCase();
   const backendMsg = err?.message && !/^Request failed with status/i.test(err.message) ? err.message : "";
+  if (status === 0 || code === "network" || err?.name === "AbortError") {
+    return "The server is temporarily unavailable. Your consultation remains queued and will retry automatically.";
+  }
   switch (status) {
     case 400:
     case 422:
@@ -202,6 +206,7 @@ const hasMaternalDetails = (maternal) => Boolean(maternal && (
 const toResidentOption = (r) => ({
   id: r.id,
   name: r.name || [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
+  healthRecordNo: r.healthRecordNo || r.health_record_no || "",
   age: r.age || (r.birthDate ? Math.max(0, new Date().getFullYear() - new Date(r.birthDate).getFullYear()) : "—"),
   sex: r.gender || r.sex || "—",
   barangay: r.barangay || "",
@@ -289,7 +294,7 @@ export default function TreatmentConsultation() {
   const ownerId = user?.id || null;
   const historyScopeKey = JSON.stringify([user?.role, user?.municipalityId || user?.municipality_id,
     user?.barangayId || user?.barangay_id]);
-  const [, setSavedHistory] = useState(null);
+  const [savedHistory, setSavedHistory] = useState(null);
   const [offlineDrafts, setOfflineDrafts] = useState([]);
   const [draftBusyId, setDraftBusyId] = useState(null);
   const [reviewLocalId, setReviewLocalId] = useState(null);
@@ -334,7 +339,7 @@ export default function TreatmentConsultation() {
   const [selectedResident, setSelectedResident] = useState(null);
   const renderHistory = (resident, revision, consultationId = "") => canViewHistory && ownerId && resident?.id && (
     <ResidentHealthHistory residentId={resident.id} residentName={resident.name} bloodType={resident.bloodType} ownerId={ownerId}
-      scopeKey={historyScopeKey} revision={revision} consultationId={consultationId} />
+      scopeKey={historyScopeKey} revision={revision} consultationId={consultationId} onViewConsultation={openRecord} />
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [recordSearch, setRecordSearch] = useState("");
@@ -346,7 +351,6 @@ export default function TreatmentConsultation() {
   const [recordPage, setRecordPage] = useState(1);
   const [recordPageSize, setRecordPageSize] = useState(8);
   const [formData, setFormData] = useState(emptyForm);
-  const [savedBpSnapshot, setSavedBpSnapshot] = useState(null);
   const [maternalInfoCompleted, setMaternalInfoCompleted] = useState(false);
   const [maternalInfoTouched, setMaternalInfoTouched] = useState(false);
   const [maternalInfoProtected, setMaternalInfoProtected] = useState(false);
@@ -369,7 +373,6 @@ export default function TreatmentConsultation() {
     if (!resident) return;
     setSelectedResident(resident);
     setFormData({ ...emptyForm(), chiefComplaint: start.purpose || "Follow-up consultation", followUpId: start.id });
-    setSavedBpSnapshot(null);
     setMaternalInfoCompleted(false);
     setMaternalInfoTouched(false);
     setMaternalInfoProtected(false);
@@ -382,20 +385,12 @@ export default function TreatmentConsultation() {
   const bmi = calculateConsultationBmi(formData.height, formData.weight);
   const bmiDisplay = bmi === null ? "" : bmi.toFixed(1);
   const bloodPressureCategory = useMemo(() => {
-    const savedContextMatches = savedBpSnapshot
-      && savedBpSnapshot.bloodPressure === formData.bloodPressure
-      && savedBpSnapshot.chiefComplaint === formData.chiefComplaint
-      && savedBpSnapshot.findings === formData.findings
-      && JSON.stringify(savedBpSnapshot.clinicalIndicators) === JSON.stringify(formData.clinicalIndicators);
-    if (savedContextMatches) {
-      return { ...savedBpSnapshot.classification, badgeClassName: bloodPressureBadgeClassName(savedBpSnapshot.classification) };
-    }
     return classifyBp(formData.bloodPressure, {
       chiefComplaint: formData.chiefComplaint,
       findings: formData.findings,
       indicators: formData.clinicalIndicators,
     });
-  }, [formData.bloodPressure, formData.chiefComplaint, formData.findings, formData.clinicalIndicators, savedBpSnapshot]);
+  }, [formData.bloodPressure, formData.chiefComplaint, formData.findings, formData.clinicalIndicators]);
 
   const selectedService = healthServices.find((service) => service.id === formData.serviceId);
   const maternalService = /\b(maternal|prenatal)\b/i.test(selectedService?.category || formData.serviceCategory || "");
@@ -486,7 +481,6 @@ export default function TreatmentConsultation() {
     setEditingMedications([]);
     setSavedHistory(null);
     setFormData(emptyForm());
-    setSavedBpSnapshot(null);
     setMaternalInfoCompleted(false);
     setMaternalInfoTouched(false);
     setMaternalInfoProtected(false);
@@ -551,9 +545,19 @@ export default function TreatmentConsultation() {
   }, [ownerId]);
 
   const filteredResidents = residentOptions.filter(
-    (r) =>
-      r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.barangay.toLowerCase().includes(searchQuery.toLowerCase())
+    (r) => {
+      const query = searchQuery.trim().toLowerCase();
+      if (!query) return true;
+      return [
+        r.id,
+        r.name,
+        r.barangay,
+        r.contact,
+        r.program,
+        r.healthRecordNo,
+        r.health_record_no,
+      ].filter(Boolean).join(" ").toLowerCase().includes(query);
+    }
   );
 
   const showToast = (message, kind = "success") => {
@@ -571,7 +575,6 @@ export default function TreatmentConsultation() {
     setReviewLocalId(null);
     setSelectedResident(null);
     setFormData(emptyForm());
-    setSavedBpSnapshot(null);
     setMaternalInfoCompleted(false);
     setMaternalInfoTouched(false);
     setMaternalInfoProtected(false);
@@ -615,14 +618,6 @@ export default function TreatmentConsultation() {
     // edited consultation shows its saved vitals instead of blanks.
     const v = record.vitals || {};
     const savedClinicalIndicators = record.clinicalIndicators || record.consultationDetails?.clinicalIndicators || { dangerSignsReviewed: false };
-    const savedBpClassification = savedConsultationBloodPressureClassification(record);
-    setSavedBpSnapshot(savedBpClassification ? {
-      classification: savedBpClassification,
-      bloodPressure: v.bp ?? record.bloodPressure ?? "",
-      chiefComplaint: record.chiefComplaint || "",
-      findings: record.findings || "",
-      clinicalIndicators: savedClinicalIndicators,
-    } : null);
     const savedMaternal = record.maternal || record.consultationDetails?.maternal || null;
     setMaternalInfoCompleted(hasMaternalInformation(savedMaternal));
     setMaternalInfoTouched(false);
@@ -672,7 +667,6 @@ export default function TreatmentConsultation() {
     setReviewLocalId(null);
     setSelectedResident(null);
     setFormData(emptyForm());
-    setSavedBpSnapshot(null);
     setMaternalInfoCompleted(false);
     setMaternalInfoTouched(false);
     setMaternalInfoProtected(false);
@@ -920,7 +914,6 @@ export default function TreatmentConsultation() {
         (data.residentId ? { id: data.residentId, name: data.residentId, barangay: "" } : null);
       const clinical = normalizeConsultationClinicalText(data);
       setEditingId(null);
-      setSavedBpSnapshot(null);
       setMaternalInfoCompleted(false);
       setMaternalInfoTouched(false);
       setMaternalInfoProtected(hasMaternalInformation(data.maternal));
@@ -1027,48 +1020,57 @@ export default function TreatmentConsultation() {
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search resident..."
+            placeholder="Name, barangay, ID or contact"
+            aria-label="Search residents"
             className="bg-transparent text-sm outline-none w-full"
           />
         </div>
         <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
           {filteredResidents.map((resident) => {
             const active = selectedResident?.id === resident.id;
+            const initials = resident.name.split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpper();
+            const selectResident = () => {
+              if (busy || reviewLocalId || editingId) return;
+              if (selectedResident?.id !== resident.id) {
+                clinicalInputResident.current = null;
+                setClinicalContext(null);
+                setFormData((current) => ({ ...current, clinicalContext: emptyForm().clinicalContext, maternal: emptyForm().maternal, clinicalIndicators: {} }));
+                setMaternalInfoCompleted(false);
+                setMaternalInfoTouched(false);
+                setMaternalInfoProtected(false);
+              }
+              setSelectedResident(resident);
+              if (errors.resident) setErrors((prev) => ({ ...prev, resident: "" }));
+            };
             return (
               <div
                 key={resident.id}
-                onClick={() => {
-                   if (busy || reviewLocalId || editingId) return;
-                  if (selectedResident?.id !== resident.id) {
-                    clinicalInputResident.current = null;
-                    setClinicalContext(null);
-                    setFormData((current) => ({ ...current, clinicalContext: emptyForm().clinicalContext, maternal: emptyForm().maternal, clinicalIndicators: {} }));
-                    setSavedBpSnapshot(null);
-                    setMaternalInfoCompleted(false);
-                    setMaternalInfoTouched(false);
-                    setMaternalInfoProtected(false);
-                  }
-                  setSelectedResident(resident);
-                  if (errors.resident) setErrors((prev) => ({ ...prev, resident: "" }));
-                }}
-                className={`rounded-2xl p-4 cursor-pointer transition-colors ${
-                  active ? "bg-brand-light border-2 border-brand-blue" : "bg-brand-light border-2 border-transparent"
+                className={`rounded-xl border p-3 transition-colors ${
+                  active ? "border-brand-blue bg-brand-light" : "border-brand-border bg-white dark:border-border dark:bg-card"
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-brand-blue text-white flex items-center justify-center font-semibold">
-                    {resident.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-blue text-sm font-semibold text-white">
+                    {initials}
                   </div>
-                  <div>
-                    <p className="font-semibold text-brand-ink">{resident.name}</p>
-                    <p className="text-xs text-brand-gray">{resident.age} yrs · {resident.program}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-brand-ink" title={resident.name}>{resident.name}</p>
+                    <p className="mt-0.5 text-xs text-brand-gray">{resident.age} yrs · {resident.sex} · {resident.barangay}</p>
+                    {resident.healthRecordNo && <p className="mt-0.5 truncate text-xs text-brand-gray">Record: {resident.healthRecordNo}</p>}
                   </div>
                 </div>
-                <div className="mt-4 space-y-1.5 text-sm text-brand-gray">
-                  <p>Barangay: <span className="text-brand-ink">{resident.barangay}</span></p>
-                  <p>Sex: <span className="text-brand-ink">{resident.sex}</span></p>
-                  <p>Contact: <span className="text-brand-ink">{resident.contact}</span></p>
-                </div>
+                <button
+                  type="button"
+                  disabled={busy || Boolean(reviewLocalId) || Boolean(editingId)}
+                  onClick={selectResident}
+                  className={`mt-3 min-h-9 w-full rounded-btn border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    active
+                      ? "border-brand-blue bg-brand-blue text-white"
+                      : "border-brand-border bg-white text-brand-blue hover:border-brand-blue hover:bg-brand-light dark:border-border dark:bg-card"
+                  }`}
+                >
+                  {active ? "Selected" : "Select Resident"}
+                </button>
               </div>
             );
           })}
@@ -1100,44 +1102,41 @@ export default function TreatmentConsultation() {
 
         <fieldset disabled={Boolean(reviewLocalId)}>
 
-        {/* Resident Information */}
+        {/* Resident summary */}
         <div className="mb-5">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Resident Information</h4>
+          <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-brand-gray">Selected Resident</h4>
           {selectedResident ? (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
-              <div>
-                <p className="text-xs text-brand-gray mb-1">Full Name</p>
-                <p className="text-sm font-medium text-brand-ink">{selectedResident.name}</p>
+            <div className="grid min-w-0 gap-x-4 gap-y-2 rounded-btn border border-brand-border bg-brand-bg/40 p-3 sm:grid-cols-2 lg:grid-cols-3 dark:border-border dark:bg-card/40">
+              <div className="min-w-0">
+                <p className="mb-0.5 text-xs text-brand-gray">Full Name</p>
+                <p className="truncate text-sm font-semibold text-brand-ink" title={selectedResident.name}>{selectedResident.name}</p>
               </div>
               <div>
-                <p className="text-xs text-brand-gray mb-1">Age</p>
-                <p className="text-sm font-medium text-brand-ink">{selectedResident.age}</p>
+                <p className="mb-0.5 text-xs text-brand-gray">Age / Sex</p>
+                <p className="text-sm font-medium text-brand-ink">{selectedResident.age} / {selectedResident.sex}</p>
               </div>
-              <div>
-                <p className="text-xs text-brand-gray mb-1">Sex</p>
-                <p className="text-sm font-medium text-brand-ink">{selectedResident.sex}</p>
+              <div className="min-w-0">
+                <p className="mb-0.5 text-xs text-brand-gray">Barangay</p>
+                <p className="break-words text-sm font-medium text-brand-ink">{selectedResident.barangay}</p>
               </div>
-              <div>
-                <p className="text-xs text-brand-gray mb-1">Barangay</p>
-                <p className="text-sm font-medium text-brand-ink">{selectedResident.barangay}</p>
-              </div>
-              <div>
-                <p className="text-xs text-brand-gray mb-1">Program</p>
-                <p className="text-sm font-medium text-brand-ink">{selectedResident.program}</p>
-              </div>
-              <div>
-                <p className="text-xs text-brand-gray mb-1">Contact Number</p>
-                <p className="text-sm font-medium text-brand-ink">{selectedResident.contact}</p>
-              </div>
+              {selectedResident.contact && selectedResident.contact !== "—" && (
+                <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                  <p className="mb-0.5 text-xs text-brand-gray">Contact Number</p>
+                  <p className="break-words text-sm font-medium text-brand-ink">{selectedResident.contact}</p>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="rounded-btn border border-dashed border-brand-border bg-brand-bg/50 px-4 py-6 text-center text-sm text-brand-gray">
-              Choose a resident from the search panel on the left.
+            <div className="rounded-btn border border-dashed border-brand-border bg-brand-bg/50 px-4 py-4 text-center text-sm text-brand-gray">
+              Choose a resident from the search panel.
             </div>
           )}
         </div>
 
-        {renderHistory(selectedResident, syncStatus.ownerId === ownerId ? syncStatus.lastSyncedAt : null, editingId)}
+        {renderHistory(selectedResident,
+          selectedResident?.id && savedHistory?.resident?.id === selectedResident.id ? savedHistory.revision
+            : syncStatus.ownerId === ownerId ? syncStatus.lastSyncedAt : null,
+          editingId)}
 
         {/* Consultation Information */}
         <div className="mb-5">
@@ -1331,7 +1330,7 @@ export default function TreatmentConsultation() {
                   >
                     {bloodPressureCategory.category}
                   </span>
-                    <p className={`mt-1 max-w-full min-w-0 break-words text-[11px] leading-4 ${bloodPressureCategory.referralEvaluationRequired ? "text-brand-danger" : "text-brand-gray"}`} role={bloodPressureCategory.referralEvaluationRequired ? "alert" : "status"} aria-live={bloodPressureCategory.referralEvaluationRequired ? "assertive" : "polite"}>
+                    <p className={`mt-1 max-w-full min-w-0 break-words leading-4 ${bloodPressureCategory.referralEvaluationRequired ? "text-xs font-semibold text-brand-danger" : "text-[11px] text-brand-gray"}`} role={bloodPressureCategory.referralEvaluationRequired ? "alert" : "status"} aria-live={bloodPressureCategory.referralEvaluationRequired ? "assertive" : "polite"}>
                       {bloodPressureCategory.message}
                     </p>
                   {confirmedPregnancy?.isPregnant && <p className="mt-1 text-[11px] leading-4 text-brand-blue">Adult BP screening does not replace maternal assessment. Pregnancy with high BP requires prompt professional assessment.</p>}
@@ -1860,6 +1859,7 @@ export default function TreatmentConsultation() {
         crumbs={["Consultations"]}
         title="Treatment Consultation"
         subtitle="Record consultation findings, treatment, and recommendations for residents."
+        dense
         action={
           mode === "list" ? (
             canConductConsultation ? (

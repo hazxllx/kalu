@@ -56,3 +56,19 @@ test('unmapped and unavailable values stay blank while recorded compatible zero 
     for (const item of [missing, unmapped]) assert.deepEqual(form.row(item.label).findAllByType('td').slice(1, 5).map((cell) => cell.children.join('')), ['', '', '', '']);
   } finally { form.close(); }
 });
+
+test('family planning measure totals normalize numeric zero values', () => {
+  const rows = allRows(M1_FORM_TEMPLATE);
+  const method = rows.find((row) => row.code === 'A2_condom');
+  const measureKeys = ['current_begin', 'new_prev', 'other_present', 'dropout_present', 'current_end', 'new_present'];
+  const measures = Object.fromEntries(measureKeys.map((key) => [
+    key,
+    { '10-14': 0, '15-19': 0, '20-49': 0, Total: 0 },
+  ]));
+  const form = mounted({ A2_condom: { total: 0, measures } });
+  try {
+    const cells = form.row(method.label).findAllByType('td');
+    assert.equal(cells.length, 25);
+    assert.deepEqual(cells.slice(1).map((cell) => cell.children.join('')), Array(24).fill('0'));
+  } finally { form.close(); }
+});

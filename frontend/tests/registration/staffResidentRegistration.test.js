@@ -104,6 +104,22 @@ test('staff registration rejects invalid date, name symbols, and unrecognized op
   assert.match(validateStaffResidentForm({ ...base, civilStatus: 'Unknown' }).civilStatus, /valid civil status/i);
 });
 
+test('zone, house number, and hidden email follow existing optional-field rules', () => {
+  const base = {
+    firstName: 'Maria',
+    lastName: 'Reyes',
+    dob: '1995-05-10',
+    gender: 'Female',
+    civilStatus: 'Single',
+    barangay: 'San Jose',
+  };
+  assert.equal(validateStaffResidentForm({ ...base, purok: 'Zone 8', houseNo: '42-B' }).purok, undefined);
+  assert.match(validateStaffResidentForm({ ...base, purok: 'Zone 9' }).purok, /1 to 8/i);
+  assert.match(validateStaffResidentForm({ ...base, houseNo: 'House @ 4' }).houseNo, /letters/i);
+  assert.deepEqual(validateStaffResidentForm({ ...base, createAccount: false, email: 'malformed' }), {});
+  assert.match(validateStaffResidentForm({ ...base, createAccount: true, email: '' }).email, /required/i);
+});
+
 test('P0-1: buildStaffResidentPayload builds canonical resident create payload with houseNo and zone', () => {
   const payload = buildStaffResidentPayload({
     firstName: ' Maria ',

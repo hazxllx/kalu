@@ -104,25 +104,25 @@ test('maternal catalog rows render once in their own subsection with original na
     assert.doesNotMatch(page.text(), /Indicator B[123]_/);
     assert.doesNotMatch(page.text(), /Clinical definition and workbook compatibility notice/);
     assert.doesNotMatch(page.text(), /Reporting notes/);
-    assert.match(page.text(), /Indicator definitions: legacy M1 catalog/);
-    assert.match(page.text(), /Workbook mapping is unverified/);
-    assert.match(page.text(), /Legacy catalog measures retain/);
-    assert.match(page.text(), /Records include maternal cases contributing/);
+    assert.doesNotMatch(page.text(), /Indicator definitions: legacy M1 catalog/);
+    assert.doesNotMatch(page.text(), /Workbook mapping is unverified/);
+    assert.doesNotMatch(page.text(), /Legacy catalog measures retain/);
+    assert.doesNotMatch(page.text(), /Records include maternal cases contributing/);
   } finally { page.close(); }
 });
 
-test('prenatal activity explanations distinguish recorded contacts from unique residents and attainment', async () => {
+test('prenatal activity explanations are removed', async () => {
   const data = response();
   data.summary = { label: 'Unique prenatal residents seen', total: 1, visitCount: 5 };
   const page = await mount(async () => data);
   try {
-    assert.match(page.text(), /Completed prenatal source records:/);
-    assert.match(page.text(), /Unique residents seen are separate from B1_1 attainment on the fourth distinct contact day/);
-    assert.match(page.text(), /not every later visit/);
+    assert.doesNotMatch(page.text(), /Completed prenatal source records:/);
+    assert.doesNotMatch(page.text(), /Unique residents seen are separate from B1_1 attainment/);
+    assert.doesNotMatch(page.text(), /not every later visit/);
   } finally { page.close(); }
 });
 
-test('saved consultation and TCL evidence stays separate from the server unique-resident count', async () => {
+test('saved consultation and TCL source evidence is removed', async () => {
   const data = response();
   data.summary = { label: 'Unique prenatal residents seen', total: 1, visitCount: 2 };
   data.records = [{ resident_id: 'RES-actual', resident: { first_name: 'Ana', middle_name: 'Reyes', last_name: 'Cruz' }, episode_key: 'pregnancy-real', episode_identity_status: 'identified' }];
@@ -133,13 +133,15 @@ test('saved consultation and TCL evidence stays separate from the server unique-
   data.unattributedVisits = [{ id: 'VIS-unverified', source: 'visits', resident_id: 'RES-actual', visit_type: 'prenatal', attributionStatus: 'service_scope_unverified' }];
   const page = await mount(async () => data);
   try {
-    for (const value of ['Ana Reyes Cruz', 'Registered Maternal Care', 'VIS-actual', 'TCL-actual', 'VIS-unverified', 'Attribution review required']) assert.ok(page.text().includes(value), value);
-    assert.equal(page.renderer.root.findAllByType('table').length, 2);
+    for (const value of ['Source Visit Evidence', 'Ana Reyes Cruz', 'Registered Maternal Care', 'VIS-actual', 'TCL-actual', 'VIS-unverified', 'Attribution review required', 'Saved Service Date', 'Evidence Status']) {
+      assert.doesNotMatch(page.text(), new RegExp(value));
+    }
+    assert.equal(page.renderer.root.findAllByType('table').length, 1);
     assert.equal(data.summary.total, 1, 'presentation never recalculates the official unique count from visits');
   } finally { page.close(); }
 });
 
-test('same-account scope changes hide previous resident evidence while the next report is pending', async () => {
+test('same-account scope changes never show resident source evidence while the next report is pending', async () => {
   let resolveNext;
   let requests = 0;
   const first = response();
@@ -147,7 +149,7 @@ test('same-account scope changes hide previous resident evidence while the next 
   first.visits = [{ id: 'VIS-private', source: 'visits', resident_id: 'RES-private', visit_date: '2026-11-01', visit_type: 'prenatal', eligible: true }];
   const page = await mount(() => ++requests === 1 ? first : new Promise((resolve) => { resolveNext = resolve; }));
   try {
-    assert.match(page.text(), /Private Resident/);
+    assert.doesNotMatch(page.text(), /Private Resident|VIS-private|Source Visit Evidence/);
     await page.setUser({ id: 'supervisor-a', role: 'health_supervisor', barangayId: 'barangay-b' });
     assert.doesNotMatch(page.text(), /Private Resident|VIS-private/);
     await act(async () => { resolveNext({ ...response(), visits: [], unattributedVisits: [] }); });

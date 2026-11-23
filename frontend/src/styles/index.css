@@ -3042,3 +3042,204 @@ a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 
 .dark .kalusagap-shell .clinical-table td .text-brand-gray {
   color: hsl(var(--muted-foreground)) !important;
 }
+
+/* ===========================================================================
+   SYSTEM-WIDE RESPONSIVE SAFEGUARDS
+   Shared defaults for every role and module. Page-specific layouts keep their
+   existing visual identity, while this block prevents viewport overflow and
+   makes overlays, charts, maps, tables, and forms usable at mobile widths.
+   =========================================================================== */
+#root,
+.kalusagap-shell,
+.app-main {
+  min-width: 0;
+  max-width: 100%;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+}
+
+.app-header {
+  min-width: 0;
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+}
+
+.app-main {
+  overflow-x: clip;
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+}
+
+.app-main :is(section, article, aside, div, form),
+.app-main :is(h1, h2, h3, p, label, dd, dt) {
+  min-width: 0;
+}
+
+.app-main :is(h1, h2, h3, p, dd, dt),
+.ui-page-header :is(h1, p),
+.ui-page-header-eyebrow,
+.ui-page-header-meta {
+  overflow-wrap: anywhere;
+}
+
+.app-main :is(.grid, [class*="grid-cols"]) {
+  max-width: 100%;
+}
+
+.app-main :is(input, textarea, select) {
+  max-width: 100%;
+}
+
+.app-main :is(table) {
+  max-width: 100%;
+}
+
+.app-main .table-scroll,
+.app-main [class*="overflow-x-auto"] {
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-main :is(.leaflet-container, .recharts-responsive-container, canvas, svg) {
+  max-width: 100%;
+}
+
+.app-main :is(.leaflet-container, .recharts-responsive-container) {
+  min-width: 0;
+  width: 100%;
+}
+
+.nav-scroll {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.ui-page-header {
+  width: 100%;
+  max-width: 100%;
+}
+
+.ui-page-header-main,
+.ui-page-header-eyebrow,
+.ui-page-header-actions {
+  min-width: 0;
+  max-width: 100%;
+}
+
+[role="dialog"] {
+  max-width: calc(100vw - 1.5rem);
+  max-height: calc(100dvh - 1.5rem);
+  overscroll-behavior: contain;
+}
+
+[role="dialog"] :is(input, textarea, select, button) {
+  max-width: 100%;
+}
+
+[role="dialog"] [data-radix-dialog-content],
+[role="dialog"] [role="document"] {
+  min-height: 0;
+  max-height: inherit;
+}
+
+@media (max-width: 1023px) {
+  .app-sidebar {
+    max-height: 100dvh;
+  }
+
+  .app-header {
+    height: 4rem;
+  }
+
+  .app-main {
+    width: 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-header {
+    gap: 0.375rem;
+  }
+
+  .app-header > div.ml-auto {
+    min-width: 0;
+    gap: 0.25rem;
+  }
+
+  .app-header [aria-label="Account menu"] {
+    padding-inline: 0.25rem;
+  }
+
+  .app-header [aria-label="Account menu"] > div {
+    height: 2.25rem;
+    width: 2.25rem;
+  }
+
+  .app-main {
+    padding-top: 1rem;
+  }
+
+  .ui-page-header-body {
+    gap: 0.75rem;
+  }
+
+  .ui-page-header-main {
+    align-items: stretch;
+  }
+
+  .ui-page-header-actions {
+    width: 100%;
+  }
+
+  .ui-page-header-actions :is(button, a) {
+    max-width: 100%;
+  }
+
+  .ui-page-header h1 {
+    font-size: clamp(1.25rem, 6vw, 1.5rem);
+  }
+
+  .app-main :is(.flex.flex-wrap) {
+    max-width: 100%;
+  }
+
+  [role="dialog"] {
+    width: calc(100vw - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  [role="dialog"] footer,
+  [role="dialog"] [class*="footer"],
+  [role="dialog"] [class*="Footer"] {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+  }
+
+  .app-main :is(.table-scroll, [class*="overflow-x-auto"]) table {
+    max-width: none;
+  }
+}
+
+@media (max-width: 374px) {
+  .app-header {
+    padding-inline: 0.5rem;
+  }
+
+  .app-header [aria-label="Notifications"] {
+    height: 2.25rem;
+    width: 2.25rem;
+  }
+
+  .app-main {
+    padding-inline: 0.75rem;
+  }
+
+  .ui-page-header-body {
+    padding-inline: 1rem;
+  }
+}

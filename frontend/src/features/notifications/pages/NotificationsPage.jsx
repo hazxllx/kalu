@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Bell, CheckCheck, ChevronRight } from "lucide-react";
-import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
 import { CATEGORIES } from "@/services/local/notificationData";
@@ -119,10 +118,9 @@ const actionLabelFor = (notification, role) => {
  * (`/operational/notifications`). "Mark as read" updates that same row so the
  * state survives refresh and re-login without removing notification history.
  */
-export default function NotificationsPage({ crumbs = ["Notifications"] }) {
+export default function NotificationsPage() {
   const navigate = useNavigate();
   const { role } = useAuth();
-  const isAdmin = role === "admin";
   const { toast } = useToast();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -235,7 +233,6 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   const openNotification = async (n) => {
     const current = notificationsRef.current.find((item) => item.id === n.id);
     if (!current) return;
-    if (pendingReadIds.current.has(current.id)) return;
     if (!current.read && !(await markAsRead(current.id))) return;
     const destination = destinationFor(current, role);
     if (destination) navigate(destination);
@@ -313,27 +310,38 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   );
 
   return (
-    <div className="mx-auto w-full max-w-[900px]">
-      <PageHeader
-        management={isAdmin}
-        crumbs={crumbs}
-        title="Notifications"
-        action={unreadCount > 0 ? (
-          <button
-            type="button"
-            onClick={markAllAsRead}
-            disabled={markAllPending.current || pendingReadIds.current.size > 0}
-            className="inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2 text-[12px] font-medium text-white transition-colors hover:bg-white/10 disabled:opacity-60"
-          >
-            <CheckCheck className="h-3.5 w-3.5" strokeWidth={1.9} /> Mark all as read
-          </button>
-        ) : null}
-        subtitle={
-          loading
-            ? "Loading notifications..."
-            : `${notifications.length} total notification${notifications.length === 1 ? "" : "s"} · ${unreadCount} unread`
-        }
-      />
+    <div className="mx-auto w-full max-w-[1125px]">
+      <header
+        aria-label="Notifications header"
+        className="mb-4 overflow-hidden rounded-lg border border-brand-deep bg-brand-dark text-white shadow-card"
+      >
+        <div aria-hidden="true" className="h-0.5 w-full bg-brand-gold/70" />
+        <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between md:px-7">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-goldlight">
+              Notifications
+            </p>
+            <h1 className="mt-1 break-words font-heading text-2xl font-semibold leading-tight tracking-tight text-white md:text-3xl">
+              Notifications
+            </h1>
+            <p className="mt-2 break-words font-body text-sm leading-relaxed text-white/70">
+              {loading
+                ? "Loading notifications..."
+                : `${notifications.length} total notification${notifications.length === 1 ? "" : "s"} · ${unreadCount} unread`}
+            </p>
+          </div>
+          {unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={markAllAsRead}
+              disabled={markAllPending.current || pendingReadIds.current.size > 0}
+              className="inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2 text-[12px] font-medium text-white transition-colors hover:bg-white/10 disabled:opacity-60"
+            >
+              <CheckCheck className="h-3.5 w-3.5" strokeWidth={1.9} /> Mark all as read
+            </button>
+          )}
+        </div>
+      </header>
 
       {loading ? (
         <Card>

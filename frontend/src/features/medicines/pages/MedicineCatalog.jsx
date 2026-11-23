@@ -46,8 +46,8 @@ const THRESHOLD_ROWS = [
     tone: "bg-red-600 text-white border-red-600",
     dot: "bg-white",
     rows: [
-      { key: "crisisSystolicMin", label: "Systolic at or above", hint: "Systolic ≥ 180 is Hypertensive Crisis" },
-      { key: "crisisDiastolicMin", label: "Diastolic at or above", hint: "Diastolic ≥ 120 is Hypertensive Crisis" },
+      { key: "crisisSystolicMin", label: "Systolic at or above", hint: "Systolic ≥ 180 is Hypertensive Urgency or Emergency" },
+      { key: "crisisDiastolicMin", label: "Diastolic at or above", hint: "Diastolic ≥ 120 is Hypertensive Urgency or Emergency" },
     ],
   },
 ];
@@ -292,11 +292,11 @@ export default function MedicineCatalog() {
             <p className="text-xs font-medium text-slate-500">How readings are classified</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-5">
               {[
-                { label: "Normal", sub: "< 120 / < 80", tone: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-                { label: "Elevated", sub: "120–129 / < 80", tone: "bg-amber-50 text-amber-700 border-amber-200" },
+                { label: "Normal Blood Pressure", sub: "< 120 / < 80", tone: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+                { label: "Elevated Blood Pressure", sub: "120–129 / < 80", tone: "bg-amber-50 text-amber-700 border-amber-200" },
                 { label: "Stage 1 Hypertension", sub: "130–139 OR 80–89", tone: "bg-orange-50 text-orange-700 border-orange-200" },
                 { label: "Stage 2 Hypertension", sub: "≥ 140 OR ≥ 90", tone: "bg-rose-50 text-rose-700 border-rose-200" },
-                { label: "Hypertensive Crisis", sub: "≥ 180 OR ≥ 120", tone: "bg-red-600 text-white border-red-600" },
+                { label: "Hypertensive Urgency or Emergency", sub: "≥ 180 OR ≥ 120", tone: "bg-red-600 text-white border-red-600" },
               ].map((c) => (
                 <div key={c.label} className={`rounded-lg border px-3 py-2.5 text-center ${c.tone}`}>
                   <p className="text-xs font-semibold">{c.label}</p>
@@ -336,10 +336,10 @@ export default function MedicineCatalog() {
                   </td>
                 </tr>
                 {[
-                  { label: "Elevated", key: "elevated", sys: `${thresholds.elevatedSystolicMin}–129`, dia: "< 80", tone: "bg-amber-50 text-amber-700", dot: "bg-amber-500", note: "Recheck and monitor." },
+                  { label: "Elevated Blood Pressure", key: "elevated", sys: `${thresholds.elevatedSystolicMin}–129`, dia: "< 80", tone: "bg-amber-50 text-amber-700", dot: "bg-amber-500", note: "Recheck and monitor." },
                   { label: "Stage 1 Hypertension", key: "stage1", sys: `${thresholds.stage1SystolicMin}–139`, dia: `OR ${thresholds.stage1DiastolicMin}–89`, tone: "bg-orange-50 text-orange-700", dot: "bg-orange-500", note: "Either value qualifies; professional assessment is recommended." },
                   { label: "Stage 2 Hypertension", key: "stage2", sys: `≥ ${thresholds.stage2SystolicMin}`, dia: `OR ≥ ${thresholds.stage2DiastolicMin}`, tone: "bg-rose-50 text-rose-700", dot: "bg-rose-500", note: "Either value qualifies; prompt assessment is needed." },
-                  { label: "Hypertensive Crisis", key: "crisis", sys: `≥ ${thresholds.crisisSystolicMin}`, dia: `OR ≥ ${thresholds.crisisDiastolicMin}`, tone: "bg-red-600 text-white", dot: "bg-white", note: "Urgent clinical evaluation. Emergency symptoms require immediate escalation." },
+                  { label: "Hypertensive Urgency or Emergency", key: "crisis", sys: `≥ ${thresholds.crisisSystolicMin}`, dia: `OR ≥ ${thresholds.crisisDiastolicMin}`, tone: "bg-red-600 text-white", dot: "bg-white", note: "Immediate clinical assessment; follow the applicable emergency protocol." },
                 ].map((r) => (
                   <tr key={r.key} className="hover:bg-slate-50/50">
                     <td className="px-4 py-2.5">

@@ -38,6 +38,7 @@ import documentBrandingRoutes from './documentBranding.routes.js';
 import medicinesRoutes from './medicines.routes.js';
 import bpConfigRoutes from './bpConfig.routes.js';
 import clinicalAssessmentProtocolRoutes from './clinicalAssessmentProtocol.routes.js';
+import advisoriesRoutes from './advisories.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -46,7 +47,7 @@ import createResourceRouter from '../utils/resourceRouter.js';
  * Standard request flow across feature routers:
  *   route -> [rateLimit] -> [authenticate] -> [resolveBarangayScope] -> [authorize / authorizeStation] -> [upload / validate / idempotency] -> controller -> service -> repository / Supabase
  *
- * `/api/health` and `/api/barangays/public` are public; `/api/auth` and
+ * `/api/health`, `/api/barangays/public`, and GET `/api/advisories` are public; `/api/auth` and
  * `/api/registration` expose public sign-in/onboarding entry points alongside
  * token-protected routes. All other endpoints verify the Supabase bearer token
  * and enforce active profile status, RBAC role/permission gates, and
@@ -151,6 +152,7 @@ router.use('/clinical-assessment-protocol', clinicalAssessmentProtocolRoutes);
 // admin-only, audited, and reuse the existing permissions.
 router.use('/medicines', medicinesRoutes);
 router.use('/bp-config', bpConfigRoutes);
+router.use('/advisories', advisoriesRoutes);
 
 // Official logo administration and centralized document-template branding.
 router.use('/document-branding', documentBrandingRoutes);

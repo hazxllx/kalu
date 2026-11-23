@@ -14,8 +14,8 @@ const badgeClasses = {
   elevated: 'bg-yellow-100 text-yellow-800',
   stage1: 'bg-orange-100 text-orange-800',
   stage2: 'bg-red-100 text-red-800',
-  crisis: 'bg-red-800 text-white',
-  emergency: 'bg-red-800 text-white',
+  crisis: 'bg-red-900 text-white',
+  emergency: 'bg-red-900 text-white',
 };
 export const BP_CATEGORY_META = Object.freeze(Object.fromEntries(
   Object.entries(BP_CATEGORIES).map(([code, meta]) => [code, { ...meta, badgeClassName: badgeClasses[code] }]),

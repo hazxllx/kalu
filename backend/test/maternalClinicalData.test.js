@@ -6,7 +6,12 @@ import test from 'node:test';
 import env from '../src/config/env.js';
 env.isSupabaseConfigured = false;
 
-import { list as listOperational, validateMaternalRecord, validateMaternalVisit } from '../src/services/operational.service.js';
+import {
+  create as createOperational,
+  list as listOperational,
+  validateMaternalRecord,
+  validateMaternalVisit,
+} from '../src/services/operational.service.js';
 
 const migrationPath = fileURLToPath(new URL(
   '../../supabase/migrations/20261116110000_maternal_visit_detail_snapshots.sql',
@@ -49,6 +54,7 @@ test('maternal case validation accepts unrecorded lifestyle values and rejects i
   assert.throws(() => validateMaternalRecord({ lmp: '2026-02-31' }), /valid date/);
   assert.throws(() => validateMaternalRecord({ gravida: -1 }), /non-negative whole number/);
   assert.throws(() => validateMaternalRecord({ fim_status: 'no' }), /true or false/);
+  assert.throws(() => validateMaternalRecord({ hepb_result: 'Reactive' }), /existing screening result option/);
   assert.throws(() => validateMaternalRecord({ prenatal_micronutrients: { calcium_tablets: -1 } }), /non-negative whole number/);
 });
 
@@ -75,6 +81,58 @@ test('maternal visit listing paginates history beyond one API page', async () =>
 
   assert.equal(visits.length, 205);
   assert.deepEqual(ranges, [[0, 199], [200, 399]]);
+});
+
+test('maternal encounter creation uses one atomic database operation for its case update and visit', async () => {
+  let rpcCall;
+  const supabase = {
+    from(table) {
+      const query = {
+        select() { return this; },
+        eq() { return this; },
+        async maybeSingle() {
+          if (table === 'residents') {
+            return { data: { id: 'RES-1', barangay: 'Central', municipality_id: 'MUN-1', auth_user_id: null }, error: null };
+          }
+          if (table === 'maternal_records') {
+            return { data: { id: 'case-1', resident_id: 'RES-1' }, error: null };
+          }
+          if (table === 'maternal_visits') return { data: null, error: null };
+          throw new Error(`Unexpected table lookup: ${table}`);
+        },
+      };
+      return query;
+    },
+    async rpc(name, args) {
+      rpcCall = { name, args };
+      return { data: { id: 'visit-1', resident_id: args.p_resident_id, maternal_case_id: args.p_maternal_record_id }, error: null };
+    },
+  };
+  const result = await createOperational({
+    user: { id: 'worker-1', role: 'mho', municipalityId: 'MUN-1' },
+    kind: 'maternalvisits',
+    payload: {
+      residentId: 'RES-1',
+      maternalCaseId: 'case-1',
+      maternal_record_patch: { syphilis_screen_date: '2026-10-01', syphilis_result: '-' },
+      visit_date: '2026-10-01',
+      visit_type: 'prenatal',
+      clinical_data: { prenatal: { syphilisScreenDate: '2026-10-01', syphilisResult: '-' } },
+    },
+    idempotencyKey: 'maternal-encounter-test',
+    supabase,
+  });
+
+  assert.equal(result.id, 'visit-1');
+  assert.equal(rpcCall.name, 'save_maternal_encounter');
+  assert.equal(rpcCall.args.p_maternal_record_id, 'case-1');
+  assert.equal(rpcCall.args.p_resident_id, 'RES-1');
+  assert.deepEqual(rpcCall.args.p_record_patch, {
+    syphilis_screen_date: '2026-10-01',
+    syphilis_result: '-',
+  });
+  assert.equal(rpcCall.args.p_encounter.visit_type, 'prenatal');
+  assert.equal(rpcCall.args.p_encounter.visit_date, '2026-10-01');
 });
 
 test('maternal encounter migration adds history fields and makes unrecorded yes/no values nullable', () => {

@@ -188,7 +188,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
                 </p>
               )}
 
-              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
+              <div className="mt-2 grid min-w-0 grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                 {m.custom ? (
                   <>
                     <input

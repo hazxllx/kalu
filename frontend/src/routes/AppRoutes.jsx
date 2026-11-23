@@ -628,6 +628,12 @@ const MedicineCatalog = appPage(
       '@/features/medicines/pages/MedicineCatalog'
     )
 );
+const AdvisoryManagement = appPage(
+  () =>
+    import(
+      '@/features/advisories/pages/AdvisoryManagement'
+    )
+);
 
 const MedicalCertificates = appPage(
   () =>
@@ -1473,6 +1479,10 @@ const AppRoutes = () => (
           <Route
             path="medicines"
             element={<MedicineCatalog />}
+          />
+          <Route
+            path="advisories"
+            element={<AdvisoryManagement />}
           />
           <Route
             path="settings"

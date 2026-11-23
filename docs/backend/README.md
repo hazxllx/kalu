@@ -17,8 +17,9 @@ route -> authenticate -> authorize(roles) -> controller -> service -> repository
   repositories talk to the database (a Supabase driver, with a JSON file driver
   for local development when Supabase is not configured).
 
-Routes are mounted under `/api` in `src/routes/index.js`. `/api/health` is
-public; everything else requires authentication.
+Routes are mounted under `/api` in `src/routes/index.js`. `/api/health`,
+`/api/barangays/public`, and the active-advisory read are public; advisory
+management and all other protected routes require authentication.
 
 ## Implemented API groups
 
@@ -48,6 +49,12 @@ public; everything else requires authentication.
   The `20261008090000_admin_account_lifecycle.sql` migration installs
   service-role-only transactional profile RPCs with actor-attributed audit
   entries and last-active-administrator/self-lockout safeguards.
+- `/api/advisories` — public active announcements plus administrator-only
+  create, edit, activate/deactivate, list-all, and delete operations. The
+  `20261123120000_dynamic_advisories.sql` migration adds the PostgreSQL table,
+  active-only public RLS, administrator write policies, and a Realtime
+  change-signal broadcast; the public client refetches advisory text from the
+  API after each signal.
 - Document upload/review and residency-transfer requests.
 
 ## Audit trail

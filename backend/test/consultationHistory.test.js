@@ -216,7 +216,7 @@ test('server saves symptom-aware BP, recomputes edits and preserves assessment h
   const deps = { user: staff, repo: repository, supabase: null, persistRisk: async () => {} };
   const created = await create({ ...deps, payload });
   assert.equal(created.bloodPressureClassification.code, 'crisis');
-  assert.equal(created.vitals.bloodPressureCategory, 'Hypertensive Crisis');
+  assert.equal(created.vitals.bloodPressureCategory, 'Hypertensive Urgency or Emergency');
   assert.equal(created.vitals.systolic, 190);
   assert.equal(created.vitals.diastolic, 125);
   assert.equal(created.clinicalAssessment.urgency, 'immediate');

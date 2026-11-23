@@ -51,9 +51,26 @@ const modules = {
         return { pregnancy: null, existingConditions: [], previousAssessment: null, age: 35, sourceStatus: 'available', canReviewRisk: false };
       },
       async get(id) {
-        const consultation = window.testRecords.find(record => record.id === id);
+        const consultation = window.testRecords.find(record => record.id === id)
+          || Object.entries(window.testHistory || {}).flatMap(([residentId, rows]) => rows.map(row => ({
+            ...row,
+            residentId,
+            resident: { id: residentId, name: residentId + ' Resident', barangay: window.testUser?.barangay },
+            consultationDate: row.consultationDate || row.date,
+          }))).find(record => record.id === id);
         if (window.delayedId === id) await new Promise(resolve => { window.releaseDetail = resolve; });
         return { consultation };
+      },
+      async list({ residentId, status, limit = 100, offset = 0 }) {
+        const rows = (window.testHistory?.[residentId] || []).map(row => ({
+          ...row,
+          residentId,
+          resident: { id: residentId, name: residentId + ' Resident', barangay: window.testUser?.barangay },
+          consultationDate: row.consultationDate || row.date,
+          serviceName: row.serviceName || 'General Consultation',
+          status: row.status || 'completed',
+        })).filter(row => row.status === status);
+        return { rows: rows.slice(offset, offset + limit), total: rows.length };
       },
       async update(id, payload) {
         window.savedConsultation = { id, ...payload };
@@ -362,11 +379,11 @@ const inputClass = 'min-w-0 flex-1 bg-transparent text-sm font-medium text-slate
 const inputWrapperClass = 'flex w-full min-w-0 items-center rounded-btn border bg-white px-3 py-2 focus-within:border-brand-blue border-brand-border';
 const badgeClass = 'inline-flex max-w-full shrink-0 whitespace-normal rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight';
 
-const normal = ['Normal', 'bg-green-100 text-green-800'];
-const elevated = ['Elevated', 'bg-yellow-100 text-yellow-800'];
+const normal = ['Normal Blood Pressure', 'bg-green-100 text-green-800'];
+const elevated = ['Elevated Blood Pressure', 'bg-yellow-100 text-yellow-800'];
 const stage1 = ['Stage 1 Hypertension', 'bg-orange-100 text-orange-800'];
 const stage2 = ['Stage 2 Hypertension', 'bg-red-100 text-red-800'];
-const severe = ['Hypertensive Crisis', 'bg-red-800 text-white'];
+const severe = ['Hypertensive Urgency or Emergency', 'bg-red-900 text-white'];
 
 async function fillRequiredClinical(page, { bloodPressure = '118/76', findings = 'Normal clinical examination' } = {}) {
   for (const [id, value] of [['vital-blood-pressure', bloodPressure], ['vital-temperature', '36.7'], ['vital-pulse', '70'], ['vital-respiratory', '18'], ['vital-height', '160'], ['vital-weight', '60'], ['vital-oxygen', '98'], ['clinical-findings', findings]]) {
@@ -552,9 +569,9 @@ test('keeps BP guidance below the badge and within the responsive field', async 
   const readings = [
     ['120/80', 'Stage 1 Hypertension', false],
     ['140/90', 'Stage 2 Hypertension', false],
-    ['180/100', 'Hypertensive Crisis', true],
-    ['181/90', 'Hypertensive Crisis', true],
-    ['220/90', 'Hypertensive Crisis', true],
+    ['180/100', 'Hypertensive Urgency or Emergency', true],
+    ['181/90', 'Hypertensive Urgency or Emergency', true],
+    ['220/90', 'Hypertensive Urgency or Emergency', true],
   ];
 
   for (const viewport of [

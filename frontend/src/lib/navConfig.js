@@ -626,6 +626,11 @@ children: [
           permission: "system.settings.manage",
         },
         {
+          label: "Advisories",
+          icon: "Megaphone",
+          path: "/app/admin/advisories",
+        },
+        {
           label: "System Settings",
           icon: "Settings",
           path: "/app/admin/settings",

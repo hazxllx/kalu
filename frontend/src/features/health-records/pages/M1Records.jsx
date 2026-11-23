@@ -90,14 +90,15 @@ const SES_OPTS = [
   { value: "Non-NHTS", label: "2 - Non-NHTS" },
 ];
 
-const saveMaternalEncounter = async (recordId, recordPatch, visit) => {
-  await maternalApi.update(recordId, recordPatch);
-  try {
-    await maternalVisitsApi.create(visit);
-  } catch (error) {
-    const reason = error?.message ? ` ${error.message}` : "";
-    throw new Error(`The maternal record was updated, but encounter history was not saved.${reason}`);
-  }
+const saveMaternalEncounter = async (recordId, recordPatch, visit, idempotencyKey) => {
+  const result = await maternalVisitsApi.create({
+    ...visit,
+    maternalCaseId: recordId,
+    maternal_record_patch: recordPatch,
+  }, {
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+  return result?.record || result;
 };
 
 // ---------------------------------------------------------------------------
@@ -300,6 +301,7 @@ export default function M1Records() {
   const [selectedResident, setSelectedResident] = useState(null);
   const [detail, setDetail] = useState(null);
   const [visitLoadError, setVisitLoadError] = useState(null);
+  const [visitLoading, setVisitLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(null); // record pending delete confirmation
@@ -381,8 +383,12 @@ export default function M1Records() {
 
   const openDetail = async (record) => {
     setVisitLoadError(null);
+    setVisitLoading(true);
     setDetail({ ...record, visits: [] });
-    if (!user?.id) return;
+    if (!user?.id) {
+      setVisitLoading(false);
+      return;
+    }
     try {
       const result = await listMaternalVisitsOffline({
         ownerId: user.id,
@@ -403,7 +409,35 @@ export default function M1Records() {
       } : current);
     } catch (error) {
       setVisitLoadError(error?.message || "Could not load maternal encounter history.");
+    } finally {
+      setVisitLoading(false);
     }
+  };
+
+  const refreshSavedMaternalEncounter = async (recordId, residentId, savedVisit) => {
+    if (!savedVisit?.id) throw new Error("The encounter save could not be confirmed. Retry using the same form.");
+    const [maternalResult, visitResult] = await Promise.all([
+      maternalApi.list({ params: { residentId } }),
+      maternalVisitsApi.list({ params: { residentId } }),
+    ]);
+    const record = (maternalResult?.rows || []).find((row) => row.id === recordId);
+    if (!record) throw new Error("The saved maternal record could not be reloaded. Retry to verify the encounter.");
+    const visits = (visitResult?.rows || [])
+      .filter((visit) => visit.maternal_case_id === recordId)
+      .sort((a, b) => String(b.visit_date || "").localeCompare(String(a.visit_date || "")));
+    if (!visits.some((visit) => visit.id === savedVisit.id)) {
+      throw new Error("The encounter save could not be confirmed from the latest history. Retry using the same form.");
+    }
+    const updatedRecord = mapRecord(record);
+    const latestWeightVisit = visits.find((visit) => visit.weight != null);
+    const latestHeightVisit = visits.find((visit) => visit.height_cm != null);
+    setRecords((current) => current.map((item) => item.id === recordId ? updatedRecord : item));
+    setDetail({
+      ...updatedRecord,
+      visits,
+      latestWeightKg: latestWeightVisit?.weight ?? null,
+      latestHeightCm: latestHeightVisit?.height_cm ?? null,
+    });
   };
 
   useEffect(() => {
@@ -618,7 +652,7 @@ export default function M1Records() {
     }
   };
 
-  const handleRecordEncounter = async (form) => {
+  const handleRecordEncounter = async (form, idempotencyKey) => {
     if (!selectedResident) return;
     const maternalCase = records.find((record) => record.id === editingRecord?.id)
       || records.find((record) => record.residentId === selectedResident.id && record.status === "Active")
@@ -649,7 +683,6 @@ export default function M1Records() {
       ...(form.calciumTablets !== "" ? { calcium_tablets: Number(form.calciumTablets) } : {}),
     };
     const maternalPatch = {
-      prenatal_visits: Number(maternalCase.prenatalVisits || 0) + 1,
       ...(Object.keys(doseUpdates).length ? { tt_td_doses: { ...maternalCase.ttTdDoses, ...doseUpdates } } : {}),
       ...(Object.keys(micronutrientUpdates).length ? {
         prenatal_micronutrients: { ...maternalCase.prenatalMicronutrients, ...micronutrientUpdates },
@@ -672,15 +705,18 @@ export default function M1Records() {
     const height = form.height === "" ? null : Number(form.height);
     const weightForBmi = weight ?? Number(editingRecord?.latestWeightKg);
     const heightForBmi = height ?? Number(editingRecord?.latestHeightCm);
-    if (weightForBmi > 0 && heightForBmi > 0) {
-      maternalPatch.bmi = Math.round((weightForBmi / ((heightForBmi / 100) ** 2)) * 100) / 100;
-    }
+    const bmi = weightForBmi > 0 && heightForBmi > 0
+      ? Math.round((weightForBmi / ((heightForBmi / 100) ** 2)) * 100) / 100
+      : null;
+    const encounterPatch = {
+      ...maternalPatch,
+      ...(bmi !== null ? { bmi } : {}),
+    };
 
     setSaving(true);
     try {
-      await saveMaternalEncounter(maternalCase.id, maternalPatch, {
+      const savedVisit = await saveMaternalEncounter(maternalCase.id, encounterPatch, {
         residentId: selectedResident.id,
-        maternalCaseId: maternalCase.id,
         visit_date: form.encounterDate,
         visit_type: "prenatal",
         blood_pressure: hasSystolic && hasDiastolic ? `${hasSystolic}/${hasDiastolic}` : "",
@@ -691,11 +727,11 @@ export default function M1Records() {
         clinical_data: {
           prenatal: {
             ...form,
-            bmi: maternalPatch.bmi ?? null,
+            bmi,
           },
         },
-      });
-      await load();
+      }, idempotencyKey);
+      await refreshSavedMaternalEncounter(maternalCase.id, selectedResident.id, savedVisit);
       showToast("Maternal encounter recorded.");
       setWorkflowOpen(false);
       setWorkflowMode(null);
@@ -707,7 +743,7 @@ export default function M1Records() {
     }
   };
 
-  const handleRecordDelivery = async (form) => {
+  const handleRecordDelivery = async (form, idempotencyKey) => {
     if (!selectedResident) return;
     const maternalCase = records.find((record) => record.id === editingRecord?.id)
       || records.find((record) => record.residentId === selectedResident.id && record.status === "Active")
@@ -732,16 +768,15 @@ export default function M1Records() {
     };
     setSaving(true);
     try {
-      await saveMaternalEncounter(maternalCase.id, payload, {
+      const savedVisit = await saveMaternalEncounter(maternalCase.id, payload, {
         residentId: selectedResident.id,
-        maternalCaseId: maternalCase.id,
         visit_date: form.deliveryDate,
         visit_type: "intrapartum",
         provider: user?.name || "",
         notes: `Delivery outcome: ${form.deliveryOutcome}`,
         clinical_data: { delivery: form },
-      });
-      await load();
+      }, idempotencyKey);
+      await refreshSavedMaternalEncounter(maternalCase.id, selectedResident.id, savedVisit);
       showToast("Delivery recorded.");
       setWorkflowOpen(false);
       setWorkflowMode(null);
@@ -754,7 +789,7 @@ export default function M1Records() {
     }
   };
 
-  const handleRecordPostpartum = async (form) => {
+  const handleRecordPostpartum = async (form, idempotencyKey) => {
     if (!selectedResident) return;
     const maternalCase = records.find((record) => record.id === editingRecord?.id)
       || records.find((record) => record.residentId === selectedResident.id && record.status === "Delivered")
@@ -776,9 +811,8 @@ export default function M1Records() {
     };
     setSaving(true);
     try {
-      await saveMaternalEncounter(maternalCase.id, payload, {
+      const savedVisit = await saveMaternalEncounter(maternalCase.id, payload, {
         residentId: selectedResident.id,
-        maternalCaseId: maternalCase.id,
         visit_date: form.encounterDate,
         visit_type: "postpartum",
         provider: user?.name || "",
@@ -790,8 +824,8 @@ export default function M1Records() {
             vitaminAGiven: form.vitaminAGiven === "" ? null : form.vitaminAGiven === "true",
           },
         },
-      });
-      await load();
+      }, idempotencyKey);
+      await refreshSavedMaternalEncounter(maternalCase.id, selectedResident.id, savedVisit);
       showToast("Postpartum visit recorded.");
       setWorkflowOpen(false);
       setWorkflowMode(null);
@@ -1036,7 +1070,7 @@ export default function M1Records() {
        {detail && (
          <MaternalRecordEditor
            detail={detail}
-           onClose={() => { setDetail(null); setVisitLoadError(null); }}
+           onClose={() => { setDetail(null); setVisitLoadError(null); setVisitLoading(false); }}
            onDelete={(record) => setDeleting(record)}
            onPrint={(record) => startMaternalPrint(record)}
            onEditMode={handleFullRecordEdit}
@@ -1044,6 +1078,7 @@ export default function M1Records() {
            onRecordDelivery={(record) => openMaternalWorkflow("delivery", record)}
            onRecordPostpartum={(record) => openMaternalWorkflow("postpartum", record)}
            visitLoadError={visitLoadError}
+           visitLoading={visitLoading}
            saving={saving}
          />
        )}
