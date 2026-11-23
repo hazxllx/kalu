@@ -651,7 +651,7 @@ const LIFECYCLE_ACTIONS = {
   reject: { title: "Reject staff account", label: "Reject", icon: UserX, danger: true },
   suspend: { title: "Suspend staff access", label: "Suspend", icon: Ban, danger: true },
   reactivate: { title: "Reactivate staff account", label: "Save activation choice", icon: UserCheck },
-  invite: { title: "Request a new invitation", label: "Request new invitation", icon: Mail },
+  invite: { title: "Resend password setup link", label: "Resend setup link", icon: Mail },
   retry_email: { title: "Retry failed email", label: "Retry failed email", icon: RotateCcw },
 };
 
@@ -669,14 +669,14 @@ function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onC
     reject: "Record the rejection reason and keep this account and its history. Sign-in remains disabled.",
     suspend: "Deny protected access without deleting the account, its assignments, or historical records. A reason is required.",
     reactivate: "Clear any suspension and record the activation choice. Access still requires approval and completed password setup.",
-    invite: "Request a NEW password-setup invitation, not a retry. A previous email may already have been accepted by the mail server.",
+    invite: "Send a fresh password-setup email to this account. This does not create another account or change its approval. Use the separate retry action only when the latest email definitively failed.",
     retry_email: "Retry only a definitive email failure. This does not create another account or change its approval. An uncertain send must be reviewed manually instead.",
   };
   const submit = (event) => {
     event.preventDefault();
     if (busy) return;
     try {
-      if (action === "invite" && !newInviteConfirmed) throw new Error("Confirm that you intend to request a new invitation.");
+      if (action === "invite" && !newInviteConfirmed) throw new Error("Confirm that you want to send a fresh password-setup email.");
       const payload = lifecyclePayload(action, { reason, activate: canActivate && activate });
       operation.current = personnelOperation(operation.current, payload);
       setValidationError("");
@@ -703,7 +703,7 @@ function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onC
         </div>}
         {action === "invite" && <label className="flex items-start gap-2 text-sm text-brand-ink">
           <input type="checkbox" checked={newInviteConfirmed} onChange={(event) => setNewInviteConfirmed(event.target.checked)} required disabled={busy} className="mt-1 accent-brand-blue" />
-          <span>I intend to issue a new invitation, not retry a previously sent email.</span>
+          <span>I confirm sending a fresh password-setup email to this account.</span>
         </label>}
         {(error || validationError) && <p role="alert" className="rounded-btn bg-brand-danger/10 p-3 text-sm text-brand-danger">{validationError || error}</p>}
         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
@@ -1128,7 +1128,7 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
   const canManageRoles = isAdmin && can("accounts.roles.manage");
   const canApprove = isAdmin && can("accounts.personnel.approve");
   const canDeactivate = isDelegate || (isAdmin && can("accounts.deactivate"));
-  const canResetAccess = isAdmin && can("accounts.access.reset");
+  const canResetAccess = isDelegate || (isAdmin && can("accounts.access.reset"));
   const canDelete = !personnelOnly && isAdmin && can("accounts.delete");
 
   const [users, setUsers] = useState([]);
@@ -1383,7 +1383,7 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
         : { key: "disable", label: "Deactivate account", icon: Ban, onClick: () => setConfirm({ kind: "disable", target: row }) }),
     ].filter(Boolean);
     const personnel = Boolean(personnelState(row));
-    const lifecycle = personnelActions(row, { isAdmin, isSelf, canApprove, canDeactivate, canResetAccess }).map((action) => ({
+    const lifecycle = personnelActions(row, { isAdmin, isDelegate, isSelf, canApprove, canDeactivate, canResetAccess }).map((action) => ({
       key: action,
       label: action === "approve" && row.approvalStatus === "rejected" ? "Reconsider approval" : action === "reactivate" ? "Reactivate / set activation" : LIFECYCLE_ACTIONS[action].label,
       icon: LIFECYCLE_ACTIONS[action].icon,

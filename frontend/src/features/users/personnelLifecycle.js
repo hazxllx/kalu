@@ -44,11 +44,17 @@ export function notificationMeta(notification) {
 
 export const canRetryPersonnelEmail = (account) => account?.notification?.status === "failed";
 
-export function personnelActions(account, { isAdmin = false, isSelf = false, canApprove = false, canDeactivate = false, canResetAccess = false } = {}) {
-  if (!isAdmin) return [];
+export function personnelActions(account, { isAdmin = false, isDelegate = false, isSelf = false, canApprove = false, canDeactivate = false, canResetAccess = false } = {}) {
+  if (!isAdmin && !isDelegate) return [];
   const state = personnelState(account);
   if (!state || state === "unknown") return [];
   const actions = [];
+  if (isDelegate) {
+    const emailStatus = account.notification?.status;
+    if (canResetAccess && account.approvalStatus === "approved" && account.setupRequired === true && !account.suspendedAt
+      && (!account.notification || ["sent", "failed", "cancelled"].includes(emailStatus))) actions.push("invite");
+    return actions;
+  }
   if (canApprove && !isSelf) {
     if (state === "pending") actions.push("approve", "reject");
     else if (state === "rejected") actions.push("approve");
@@ -70,7 +76,7 @@ export function personnelActionMessage(action, account) {
   const prefix = {
     create: isPersonnelRole(account?.roleId || account?.role) ? "Personnel account created." : "Staff account created.", approve: "Approval recorded.", reject: "Rejection recorded.",
     suspend: "Suspension recorded.", reactivate: "Activation choice recorded.",
-    invite: "New invitation requested.", retry_email: "Email retry requested.",
+    invite: "Fresh password-setup email requested.", retry_email: "Email retry requested.",
   }[action] || "Personnel account updated.";
   if (!account) return `${prefix} Refresh the account to check its current state.`;
   const state = personnelState(account);

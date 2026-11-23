@@ -608,9 +608,18 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
 };
 
 export const transitionUserLifecycle = async ({ id, actor = null, actorId = actor?.id, input = {} } = {}) => {
-  if (delegatedRole(actor)) throw ApiError.forbidden('Use the personnel account status action for accounts in your scope.');
   if (typeof id !== 'string' || !isUuid(id)) throw ApiError.badRequest('Use a valid account UUID.');
   const action = validated(personnelLifecycleValidator, input);
+  if (delegatedRole(actor)) {
+    if (action.action !== 'invite') throw ApiError.forbidden('Only password setup invitations are available to delegated account managers.');
+    const target = await repository.getProfileById(id);
+    if (!target) throw ApiError.notFound('Personnel account not found in your authorized scope.');
+    assertCanManageTarget(actor, target);
+    const invited = await repository.resendScopedPersonnelInvitation({ id, actorId, operationId: action.operationId });
+    if (!invited) throw ApiError.notFound('Personnel account not found in your authorized scope.');
+    await processPersonnelNotifications({ targetId: id });
+    return (await repository.getProfileById(id)) || invited;
+  }
   if (actorId === id && ['approve', 'reject', 'suspend', 'reactivate'].includes(action.action)) {
     throw ApiError.conflict('You cannot approve or change your own administrator access.');
   }

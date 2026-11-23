@@ -2230,6 +2230,17 @@ export const supabaseRepository = {
     return row?.id ? profileToAdminUser(row) : null;
   },
 
+  async resendScopedPersonnelInvitation({ id, actorId, operationId }) {
+    const { data, error } = await getServiceClient().rpc('manager_resend_personnel_invitation', {
+      p_target_id: id,
+      p_actor_id: actorId,
+      p_operation_id: operationId,
+    });
+    throwAccountError(error, 'The password setup invitation could not be confirmed. Refresh the account and try again.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.id ? profileToAdminUser(row) : null;
+  },
+
   async reviewPersonnelAccountRequest({ requestId, actorId, decision, reason }) {
     const { data, error } = await getServiceClient().rpc('review_personnel_account_request', {
       p_request_id: requestId,

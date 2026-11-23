@@ -4,6 +4,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import ApiError from '../utils/apiError.js';
 import validate from '../middleware/validate.js';
 import {
   accessResetValidator,
@@ -105,16 +106,22 @@ router.post(
   '/:id/lifecycle',
   idParam,
   validate(personnelLifecycleValidator),
-  administratorOnly({
-    allPermissions: (req) => {
-      if (req.body.action === 'approve') return req.body.activate
-        ? ['accounts.personnel.approve', 'accounts.deactivate']
-        : ['accounts.personnel.approve'];
-      if (req.body.action === 'reject') return ['accounts.personnel.approve'];
-      if (['suspend', 'reactivate'].includes(req.body.action)) return ['accounts.deactivate'];
-      return ['accounts.access.reset'];
-    },
-  }),
+  (req, res, next) => {
+    if (req.user?.role !== 'admin') {
+      if (['phn', 'health_supervisor'].includes(req.user?.role) && req.body.action === 'invite') return next();
+      return next(ApiError.forbidden('This personnel action is not available for your account.'));
+    }
+    return authorize(FEATURE_ROLES.users, {
+      allPermissions: () => {
+        if (req.body.action === 'approve') return req.body.activate
+          ? ['accounts.personnel.approve', 'accounts.deactivate']
+          : ['accounts.personnel.approve'];
+        if (req.body.action === 'reject') return ['accounts.personnel.approve'];
+        if (['suspend', 'reactivate'].includes(req.body.action)) return ['accounts.deactivate'];
+        return ['accounts.access.reset'];
+      },
+    })(req, res, next);
+  },
   asyncHandler(controller.transitionUserLifecycle),
 );
 
