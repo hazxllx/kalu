@@ -27,14 +27,19 @@ begin
   end if;
 
   select * into v_actor from public.profiles
-    where id = p_actor_id and status = 'active' and role in ('phn', 'health_supervisor') for update;
+    where id = p_actor_id and status = 'active' and role in ('admin', 'phn', 'health_supervisor') for update;
   if not found then
-    raise exception using errcode = '42501', message = 'An active PHN or Health Supervisor is required.';
+    raise exception using errcode = '42501', message = 'An active account manager is required.';
   end if;
 
   select * into v_target from public.profiles where id = p_target_id for update;
   if not found then raise exception using errcode = 'P0002', message = 'Personnel account not found.'; end if;
-  if (v_actor.role = 'phn' and not (
+  if v_actor.role = 'admin' then
+    if not (public.personnel_actor_has_permission(p_actor_id, 'accounts.create')
+      or public.personnel_actor_has_permission(p_actor_id, 'accounts.access.reset')) then
+      raise exception using errcode = '42501', message = 'The administrator does not have permission to resend personnel setup invitations.';
+    end if;
+  elsif (v_actor.role = 'phn' and not (
         v_target.role in ('health_supervisor', 'rhu_personnel')
         and v_actor.municipality_id is not null
         and v_target.municipality_id = v_actor.municipality_id

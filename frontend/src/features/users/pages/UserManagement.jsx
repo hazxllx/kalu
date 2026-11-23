@@ -1128,7 +1128,7 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
   const canManageRoles = isAdmin && can("accounts.roles.manage");
   const canApprove = isAdmin && can("accounts.personnel.approve");
   const canDeactivate = isDelegate || (isAdmin && can("accounts.deactivate"));
-  const canResetAccess = isDelegate || (isAdmin && can("accounts.access.reset"));
+  const canResetAccess = isDelegate || (isAdmin && (can("accounts.access.reset") || can("accounts.create")));
   const canDelete = !personnelOnly && isAdmin && can("accounts.delete");
 
   const [users, setUsers] = useState([]);
@@ -1375,18 +1375,39 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
 
   const buildActions = (row) => {
     const isSelf = row.id === currentUser?.id;
-    if (isDelegate) return [
-      { key: "view", label: "View details", icon: Eye, onClick: () => setDetailsTarget(row) },
-      canEdit && { key: "edit", label: "Edit account", icon: Pencil, onClick: () => { setActionError(""); setModalTarget(row); } },
-      canDeactivate && !isSelf && (row.statusId === "disabled"
-        ? { key: "enable", label: "Reactivate account", icon: UserCheck, onClick: () => setConfirm({ kind: "enable", target: row }) }
-        : { key: "disable", label: "Deactivate account", icon: Ban, onClick: () => setConfirm({ kind: "disable", target: row }) }),
-    ].filter(Boolean);
+    if (isDelegate) {
+      const invitationActions = personnelActions(row, { isDelegate: true, canResetAccess }).map((action) => ({
+        key: action,
+        label: LIFECYCLE_ACTIONS[action].label,
+        icon: LIFECYCLE_ACTIONS[action].icon,
+        disabled: action === "invite" && ["pending", "processing", "sending", "delivery_unknown"].includes(row.notification?.status),
+        title: action === "invite" && ["pending", "processing", "sending"].includes(row.notification?.status)
+          ? "The previous email is still being processed. Refresh the account before resending."
+          : action === "invite" && row.notification?.status === "delivery_unknown"
+            ? "The previous email outcome is uncertain. Review its delivery status before sending another link."
+            : undefined,
+        onClick: () => { setActionError(""); setLifecycleTarget({ action, target: row }); },
+      }));
+      return [
+        { key: "view", label: "View details", icon: Eye, onClick: () => setDetailsTarget(row) },
+        canEdit && { key: "edit", label: "Edit account", icon: Pencil, onClick: () => { setActionError(""); setModalTarget(row); } },
+        ...invitationActions,
+        canDeactivate && !isSelf && (row.statusId === "disabled"
+          ? { key: "enable", label: "Reactivate account", icon: UserCheck, onClick: () => setConfirm({ kind: "enable", target: row }) }
+          : { key: "disable", label: "Deactivate account", icon: Ban, onClick: () => setConfirm({ kind: "disable", target: row }) }),
+      ].filter(Boolean);
+    }
     const personnel = Boolean(personnelState(row));
     const lifecycle = personnelActions(row, { isAdmin, isDelegate, isSelf, canApprove, canDeactivate, canResetAccess }).map((action) => ({
       key: action,
       label: action === "approve" && row.approvalStatus === "rejected" ? "Reconsider approval" : action === "reactivate" ? "Reactivate / set activation" : LIFECYCLE_ACTIONS[action].label,
       icon: LIFECYCLE_ACTIONS[action].icon,
+      disabled: action === "invite" && ["pending", "processing", "sending", "delivery_unknown"].includes(row.notification?.status),
+      title: action === "invite" && ["pending", "processing", "sending"].includes(row.notification?.status)
+        ? "The previous email is still being processed. Refresh the account before resending."
+        : action === "invite" && row.notification?.status === "delivery_unknown"
+          ? "The previous email outcome is uncertain. Review its delivery status before sending another link."
+          : undefined,
       danger: LIFECYCLE_ACTIONS[action].danger,
       onClick: () => { setActionError(""); setLifecycleTarget({ action, target: row }); },
     }));

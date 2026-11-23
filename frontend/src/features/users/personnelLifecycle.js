@@ -50,9 +50,7 @@ export function personnelActions(account, { isAdmin = false, isDelegate = false,
   if (!state || state === "unknown") return [];
   const actions = [];
   if (isDelegate) {
-    const emailStatus = account.notification?.status;
-    if (canResetAccess && account.approvalStatus === "approved" && account.setupRequired === true && !account.suspendedAt
-      && (!account.notification || ["sent", "failed", "cancelled"].includes(emailStatus))) actions.push("invite");
+    if (canResetAccess && account.approvalStatus === "approved" && account.setupRequired === true && !account.suspendedAt) actions.push("invite");
     return actions;
   }
   if (canApprove && !isSelf) {
@@ -64,9 +62,7 @@ export function personnelActions(account, { isAdmin = false, isDelegate = false,
     if (state !== "active") actions.push("reactivate");
   }
   if (canResetAccess) {
-    const emailStatus = account.notification?.status;
-    const newInviteAllowed = !account.notification || ["sent", "failed", "cancelled"].includes(emailStatus);
-    if (account.approvalStatus === "approved" && account.setupRequired === true && !account.suspendedAt && newInviteAllowed) actions.push("invite");
+    if (account.approvalStatus === "approved" && account.setupRequired === true && !account.suspendedAt) actions.push("invite");
     if (canRetryPersonnelEmail(account)) actions.push("retry_email");
   }
   return actions;

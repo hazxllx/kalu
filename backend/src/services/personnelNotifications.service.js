@@ -211,9 +211,14 @@ const smtpFailure = (error) => {
   const knownBeforeData = ['EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ENOTFOUND', 'EAI_AGAIN'].includes(error.code)
     || ['handshake', 'envelope'].includes(error.smtpPhase)
     || (error.beforeData && error.code !== 'SMTP_ERROR' && !['data', 'after_send'].includes(error.smtpPhase));
+  const socketDetail = error.code === 'ESOCKET'
+    ? (error.originalCode || error.smtpPhase?.toUpperCase() || 'UNKNOWN')
+    : error.code;
   return {
     status: rejected || knownBeforeData ? 'failed' : 'delivery_unknown',
-    code: error.code === 'SMTP_ERROR' ? 'SMTP_OUTCOME_UNKNOWN' : `SMTP_${error.code}`,
+    code: error.code === 'SMTP_ERROR' ? 'SMTP_OUTCOME_UNKNOWN'
+      : error.code === 'ESOCKET' ? `SMTP_ESOCKET_${socketDetail}`
+        : `SMTP_${error.code}`,
     providerId: null,
   };
 };

@@ -610,7 +610,7 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
 export const transitionUserLifecycle = async ({ id, actor = null, actorId = actor?.id, input = {} } = {}) => {
   if (typeof id !== 'string' || !isUuid(id)) throw ApiError.badRequest('Use a valid account UUID.');
   const action = validated(personnelLifecycleValidator, input);
-  if (delegatedRole(actor)) {
+  if (delegatedRole(actor) || (actor?.role === ROLES.ADMIN && action.action === 'invite')) {
     if (action.action !== 'invite') throw ApiError.forbidden('Only password setup invitations are available to delegated account managers.');
     const target = await repository.getProfileById(id);
     if (!target) throw ApiError.notFound('Personnel account not found in your authorized scope.');

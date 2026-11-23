@@ -112,6 +112,9 @@ router.post(
       return next(ApiError.forbidden('This personnel action is not available for your account.'));
     }
     return authorize(FEATURE_ROLES.users, {
+      permission: (request) => request.body.action === 'invite'
+        ? ['accounts.access.reset', 'accounts.create']
+        : [],
       allPermissions: () => {
         if (req.body.action === 'approve') return req.body.activate
           ? ['accounts.personnel.approve', 'accounts.deactivate']

@@ -106,12 +106,18 @@ export const sendSmtpMail = async (message, { transport = getEmailTransporter() 
       : /^(AUTH|EHLO|HELO|LHLO|STARTTLS)\b/.test(command) ? 'handshake'
         : command === 'DATA' ? 'data'
           : /^(QUIT|RSET)\b/.test(command) ? 'after_send'
-            : 'unknown';
+            : /^(CONN|CONNECT|CONNECTION)$/.test(command) ? 'connect'
+              : 'unknown';
     const responseCode = Number(error?.responseCode);
+    const safeOriginalCode = [error?.originalCode, error?.cause?.code, error?.errno]
+      .find((candidate) => SMTP_ERROR_CODES.has(candidate)) || null;
     // Never propagate SMTP error messages/responses: they can contain recipient
     // addresses, credentials or the generated invitation link.
     throw Object.assign(new Error('SMTP send failed.'), {
       code: SMTP_ERROR_CODES.has(error?.code) ? error.code : 'SMTP_ERROR',
+      // Keep only allow-listed system error identifiers for operational logs.
+      // The raw SMTP message/response can contain credentials or message data.
+      originalCode: safeOriginalCode,
       smtpPhase,
       responseCode: Number.isInteger(responseCode) && responseCode >= 100 && responseCode <= 599 ? responseCode : null,
       beforeData: progress.monitored && !progress.bodyStarted,
