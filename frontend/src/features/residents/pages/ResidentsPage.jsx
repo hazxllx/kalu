@@ -30,6 +30,12 @@ const SUFFIX_OPTIONS = ["", "Jr.", "Sr.", "II", "III", "IV"];
 const ZONE_OPTIONS = Array.from({ length: 8 }, (_, index) => String(index + 1));
 const RELIGION_OPTIONS = ["Roman Catholic", "Protestant", "Iglesia ni Cristo", "Born Again", "Muslim", "Other"];
 const RISK_FILTERS = ["All", "High", "Moderate", "Low", "Unassessed"];
+const MANILA_DATE_FORMATTER = new Intl.DateTimeFormat("en", {
+  timeZone: "Asia/Manila",
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+});
 
 const EMPTY_FORM = {
   firstName: "",
@@ -115,7 +121,7 @@ const EMPTY_FORM = {
 
 /** @typedef {ResidentRecord & {name: string, age: string, gender: string, status: string, riskLevel: string|null}} ResidentRow */
 /** @typedef {Record<string, string>} ValidationErrors */
-/** @typedef {{message?: string, status?: number, payload?: {error?: {details?: string[]}}}} RequestError */
+/** @typedef {{message?: string, status?: number, payload?: {error?: {code?: string, details?: string[]}}}} RequestError */
 
 /** @param {boolean|string|undefined} invalid */
 const inputClass = (invalid) =>
@@ -132,9 +138,13 @@ const calcAge = (dob) => {
   const [year, month, day] = dob.split("-").map(Number);
   const birth = new Date(Date.UTC(year, month - 1, day));
   if (birth.getUTCFullYear() !== year || birth.getUTCMonth() !== month - 1 || birth.getUTCDate() !== day) return "";
-  const now = new Date();
-  let age = now.getUTCFullYear() - year;
-  if (now.getUTCMonth() < month - 1 || (now.getUTCMonth() === month - 1 && now.getUTCDate() < day)) age -= 1;
+  const today = Object.fromEntries(
+    MANILA_DATE_FORMATTER.formatToParts(new Date())
+      .filter(({ type }) => ["year", "month", "day"].includes(type))
+      .map(({ type, value }) => [type, Number(value)]),
+  );
+  let age = today.year - year;
+  if (today.month < month || (today.month === month && today.day < day)) age -= 1;
   return age >= 0 && age <= 120 ? String(age) : "";
 };
 
@@ -254,13 +264,15 @@ const LinkingStatePill = ({ resident }) => {
 };
 
 /**
- * @param {{label: string, value: string, onChange: (value: string) => void, options?: string[], placeholder?: string, error?: string, emptyLabel?: string, children?: import("react").ReactNode}} props
+ * @param {{label: string, value: string, onChange: (value: string) => void, options?: string[], placeholder?: string, error?: string, emptyLabel?: string, required?: boolean, children?: import("react").ReactNode}} props
  */
-function Select({ label, value, onChange, options = [], placeholder = "", error = "", emptyLabel = "", children = null }) {
+function Select({ label, value, onChange, options = [], placeholder = "", error = "", emptyLabel = "", required = false, children = null }) {
   const id = useId();
   return (
     <div>
-      <label htmlFor={id} className={labelClass}>{label}</label>
+      <label htmlFor={id} className={labelClass}>
+        {label}{required && <span className="ml-1 text-brand-danger" aria-hidden="true">*</span>}
+      </label>
       <div className="relative">
         <select
           id={id}
@@ -283,7 +295,7 @@ function Select({ label, value, onChange, options = [], placeholder = "", error 
 }
 
 /**
- * @param {{label: string, value: string, onChange: (value: string) => void, placeholder?: string, error?: string, type?: string, optional?: boolean, readOnly?: boolean, maxLength?: number, pattern?: string, autoComplete?: string}} props
+ * @param {{label: string, value: string, onChange: (value: string) => void, placeholder?: string, error?: string, helperText?: string, type?: string, optional?: boolean, required?: boolean, readOnly?: boolean, maxLength?: number, pattern?: string, autoComplete?: string}} props
  */
 function Field({
   label,
@@ -291,8 +303,10 @@ function Field({
   onChange,
   placeholder = "",
   error = "",
+  helperText = "",
   type = "text",
   optional = false,
+  required = false,
   readOnly = false,
   maxLength,
   pattern,
@@ -301,12 +315,15 @@ function Field({
   const id = useId();
   return (
     <div>
-      <label htmlFor={id} className={labelClass}>{label}</label>
+      <label htmlFor={id} className={labelClass}>
+        {label}{required && <span className="ml-1 text-brand-danger" aria-hidden="true">*</span>}
+      </label>
       <input
         id={id}
         type={type}
         value={value}
         placeholder={placeholder}
+        required={required}
         readOnly={readOnly}
         maxLength={maxLength}
         pattern={pattern}
@@ -316,6 +333,7 @@ function Field({
         className={`${inputClass(error)} ${readOnly ? "bg-brand-bg text-brand-gray cursor-not-allowed dark:bg-card-nested dark:text-muted-foreground" : ""}`}
       />
       {optional && !error && <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">(Optional)</p>}
+      {helperText && !error && <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">{helperText}</p>}
       {error && <p className={errorClass}>{error}</p>}
     </div>
   );
@@ -391,6 +409,7 @@ export default function ResidentsPage() {
   const [form, setForm] = useState(/** @type {ResidentForm} */ (initialFromUser(user)));
   const [errors, setErrors] = useState(/** @type {ValidationErrors} */ ({}));
   const [submitting, setSubmitting] = useState(false);
+  const submitInFlight = useRef(false);
   const accountCreateKey = useRef(null);
   const [formError, setFormError] = useState(/** @type {string|null} */ (null));
   const [editForm, setEditForm] = useState(/** @type {Record<string, string>} */ ({ contact: "", barangay: "", civilStatus: "", currentAddress: "", philhealthNo: "", religion: "", employmentStatus: "", fatherName: "", motherName: "", birthPlace: "" }));
@@ -408,6 +427,7 @@ export default function ResidentsPage() {
   const [linkEmail, setLinkEmail] = useState("");
   const [linkSubmitting, setLinkSubmitting] = useState(false);
   const [linkError, setLinkError] = useState(/** @type {string|null} */ (null));
+  const resendInvitationKey = useRef(/** @type {{residentId: string, key: string}|null} */ (null));
 
   /** @param {string} message */
   const showToast = (message) => {
@@ -425,6 +445,7 @@ export default function ResidentsPage() {
   }, [openActionMenu]);
 
   const role = String(user?.role || "").toLowerCase();
+  const barangayAssignmentLocked = role === "health_supervisor" || role === "bhw";
   const showBarangayFilter = role === "phn" || role === "mho";
   const showZoneFilter = supervisor && Boolean(assignedBarangay);
   // Reuse the municipality-scoped directory options for resident registration.
@@ -651,11 +672,43 @@ export default function ResidentsPage() {
       await load(q.trim());
     } catch (err) {
       const error = /** @type {RequestError} */ (err);
+      if (error?.payload?.error?.code === "ACCOUNT_CREATED_EMAIL_FAILED"
+        && error.message?.includes("are linked")) {
+        setSelected((prev) => prev ? { ...prev, authUserId: prev.authUserId || "linked", accountStatus: "pending" } : prev);
+        setLinkPanelOpen(false);
+        setLinkEmail("");
+      }
       if (error?.status === 422 && Array.isArray(error?.payload?.error?.details)) {
         setLinkError(error.payload.error.details.join(" "));
       } else {
         setLinkError(error?.message || "Could not create the login account. Please try again.");
       }
+    } finally {
+      setLinkSubmitting(false);
+    }
+  };
+
+  const handleResendInvitation = async () => {
+    if (!canCreateLoginAccount || !selected || selectedOwner !== user?.id) return;
+    setLinkSubmitting(true);
+    setLinkError(null);
+    if (resendInvitationKey.current?.residentId !== selected.id) {
+      resendInvitationKey.current = { residentId: selected.id, key: crypto.randomUUID() };
+    }
+    try {
+      const result = await residentsApi.resendInvitation(selected.id, {
+        headers: { "Idempotency-Key": resendInvitationKey.current.key },
+      });
+      const record = result?.resident;
+      if (record) {
+        setSelected((prev) => prev ? { ...prev, ...record, accountStatus: "pending" } : prev);
+      }
+      resendInvitationKey.current = null;
+      showToast("Invitation delivery was accepted. The resident can use the newest email to finish account setup.");
+      await load(q.trim());
+    } catch (err) {
+      const error = /** @type {RequestError} */ (err);
+      setLinkError(error?.message || "The invitation could not be confirmed. Check delivery status before retrying.");
     } finally {
       setLinkSubmitting(false);
     }
@@ -688,6 +741,7 @@ export default function ResidentsPage() {
   };
 
   const closeAdd = () => {
+    if (submitInFlight.current) return;
     setShowAddModal(false);
     setErrors({});
     setFormError(null);
@@ -724,6 +778,7 @@ export default function ResidentsPage() {
       }
     }
     if (!form.gender) errs.gender = "Sex is required";
+    if (!form.civilStatus) errs.civilStatus = "Civil status is required";
     if (!form.barangay) errs.barangay = "Barangay is required";
     // Contact is optional; when supplied, require the exact local format used
     // by resident registration and enforced by the backend.
@@ -740,7 +795,7 @@ export default function ResidentsPage() {
   };
 
   const handleSubmit = async () => {
-    if (!canCreate) return;
+    if (!canCreate || submitInFlight.current) return;
     // Guard: a Health Supervisor whose accounts.create is revoked must not
     // submit a login-account request even if the UI state was toggled before
     // the permission changed. Surface a clear field error instead of a 403.
@@ -753,10 +808,11 @@ export default function ResidentsPage() {
       setErrors(errs);
       return;
     }
-    // Age is always derived from the validated birth date (UTC). Recompute
+    // Age is always derived from the validated birth date and Manila date. Recompute
     // here so a stale form.age can never be persisted.
     const canonicalAge = calcAge(form.dob);
     setForm((p) => ({ ...p, age: canonicalAge || "" }));
+    submitInFlight.current = true;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -819,6 +875,15 @@ export default function ResidentsPage() {
       }
     } catch (err) {
       const error = /** @type {RequestError} */ (err);
+      if (error?.payload?.error?.code === "ACCOUNT_CREATED_EMAIL_FAILED"
+        && error.message?.includes("are linked")) {
+        accountCreateKey.current = null;
+        setShowAddModal(false);
+        setFormError(null);
+        await load(q.trim());
+        showToast(error.message);
+        return;
+      }
       // 422 details are the server's field-level validation list.
       if (error?.status === 422 && Array.isArray(error?.payload?.error?.details)) {
         setFormError(error.payload.error.details.join(" "));
@@ -826,6 +891,7 @@ export default function ResidentsPage() {
         setFormError(error?.message || "Could not register the resident. Please try again.");
       }
     } finally {
+      submitInFlight.current = false;
       setSubmitting(false);
     }
   };
@@ -1160,13 +1226,13 @@ export default function ResidentsPage() {
 
       {/* Add Resident Modal */}
       {showAddModal && canCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-2 sm:p-4">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="add-resident-title"
             aria-describedby="add-resident-description"
-            className="flex min-h-0 max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-card bg-white shadow-xl sm:max-h-[calc(100dvh-2rem)] dark:bg-card"
+            className="flex min-h-0 max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-card bg-white shadow-xl sm:max-h-[calc(100dvh-2rem)] dark:bg-card"
           >
             <header className="relative isolate flex-shrink-0 overflow-hidden border-b border-brand-border bg-[#EFF6FF] px-5 py-4 dark:border-border dark:bg-[#14263A] sm:px-6">
               <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-44 w-44 rounded-full border-[22px] border-brand-blue/10 dark:border-blue-300/10" />
@@ -1183,6 +1249,7 @@ export default function ResidentsPage() {
                 <button
                   type="button"
                   onClick={closeAdd}
+                  disabled={submitting}
                   className="relative z-10 -mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-white/70 hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-muted-foreground dark:hover:bg-card/70 dark:hover:text-foreground"
                   aria-label="Close resident registration"
                 >
@@ -1192,7 +1259,7 @@ export default function ResidentsPage() {
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-card">
-              <div className="grid grid-cols-1 gap-y-4 px-5 py-4 sm:px-6 sm:py-5">
+              <div className="grid grid-cols-1 gap-y-3 px-5 py-4 sm:px-6 sm:py-5">
                 {formError && (
                   <div role="alert" className="rounded-card border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300">
                     {formError}
@@ -1206,14 +1273,21 @@ export default function ResidentsPage() {
                     <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                   </div>
                   <div className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
-                    <Field label="First Name" value={form.firstName} onChange={set("firstName")} placeholder="e.g. Maria" error={errors.firstName} />
+                    <Field label="First Name" value={form.firstName} onChange={set("firstName")} placeholder="e.g. Maria" error={errors.firstName} required />
                     <Field label="Middle Name" value={form.middleName} onChange={set("middleName")} placeholder="e.g. Santos" optional />
-                    <Field label="Last Name" value={form.lastName} onChange={set("lastName")} placeholder="e.g. Dela Cruz" error={errors.lastName} />
+                    <Field label="Last Name" value={form.lastName} onChange={set("lastName")} placeholder="e.g. Dela Cruz" error={errors.lastName} required />
                     <Select label="Suffix" value={form.suffix} onChange={set("suffix")} options={SUFFIX_OPTIONS.filter(Boolean)} placeholder="None" />
-                    <Field label="Date of Birth" type="date" value={form.dob} onChange={onDobChange} error={errors.dob} />
-                    <Field label="Age" value={form.age} onChange={() => {}} placeholder="Auto-calculated" readOnly optional />
+                    <Field label="Date of Birth" type="date" value={form.dob} onChange={onDobChange} error={errors.dob} required />
+                    <Field
+                      label="Age"
+                      value={form.age}
+                      onChange={() => {}}
+                      placeholder="Auto-calculated"
+                      readOnly
+                      helperText="Automatically calculated from date of birth."
+                    />
                     <div>
-                      <label className={labelClass}>Sex</label>
+                      <label className={labelClass}>Sex<span className="ml-1 text-brand-danger" aria-hidden="true">*</span></label>
                       <ButtonSelectGroup
                         name="sex"
                         ariaLabel="Sex"
@@ -1225,7 +1299,7 @@ export default function ResidentsPage() {
                       />
                       {errors.gender && <p className={errorClass}>{errors.gender}</p>}
                     </div>
-                    <Select label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
+                    <Select label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" error={errors.civilStatus} required />
                   </div>
                 </div>
 
@@ -1237,17 +1311,38 @@ export default function ResidentsPage() {
                   </div>
                   <div className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
                     <Field label="Contact Number" value={form.contact} onChange={onContactChange} placeholder="e.g. 09171234567" error={errors.contact} optional maxLength={11} />
-                    <SearchableSelect
-                      label="Barangay"
-                      required
-                      value={form.barangay}
-                      onChange={set("barangay")}
-                      options={allowedBarangays}
-                      placeholder="Search barangay..."
-                      emptyText="No barangay found."
-                      error={errors.barangay}
-                      portalDropdown
-                    />
+                    <div className="min-w-0">
+                      {barangayAssignmentLocked ? (
+                        <Field
+                          label="Barangay"
+                          value={form.barangay}
+                          onChange={() => {}}
+                          placeholder="Assigned barangay"
+                          error={errors.barangay}
+                          required
+                          readOnly
+                        />
+                      ) : (
+                        <SearchableSelect
+                          label="Barangay"
+                          required
+                          value={form.barangay}
+                          onChange={set("barangay")}
+                          options={allowedBarangays}
+                          placeholder="Select or search barangay"
+                          emptyText="No barangay found."
+                          error={errors.barangay}
+                          disabled={geographicOptionsLoading || Boolean(geographicOptionsError)}
+                          portalDropdown
+                        />
+                      )}
+                      {!barangayAssignmentLocked && geographicOptionsLoading && (
+                        <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">Loading authorized barangays…</p>
+                      )}
+                      {!barangayAssignmentLocked && geographicOptionsError && (
+                        <p className={errorClass} role="status">{geographicOptionsError}</p>
+                      )}
+                    </div>
                     <div>
                       <Select label="Zone" value={form.zone} onChange={set("zone")} options={ZONE_OPTIONS} placeholder="Select zone" />
                       <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">(Optional)</p>
@@ -1258,61 +1353,67 @@ export default function ResidentsPage() {
                   </div>
                 </div>
 
-                {/* Optional resident login account. A resident profile never
-                    requires an account; the health worker chooses whether to
-                    create one. When Yes, the account is created in Pending
-                    Activation and the resident sets their own password later. */}
+                {/* A resident profile can be registered without portal access. */}
                 {showLoginAccountOption && (
                   <div>
                     <div className="mb-3 flex items-center gap-2">
                       <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Login Account</h3>
                       <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                     </div>
-                    <div className="rounded-card border border-brand-border bg-slate-50/70 p-3.5 dark:border-border dark:bg-card-nested">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-brand-ink dark:text-foreground">Create Resident Login Account?</p>
-                          <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
-                            Optional. The resident profile is created either way. Choose Yes only if this resident should be able to log in.
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => set("createAccount")(false)}
-                            aria-pressed={!form.createAccount}
-                            className={`min-w-14 rounded-btn px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]/20 ${
-                              !form.createAccount
-                                ? "bg-brand-blue text-white"
-                                : "border border-[#CBD5E1] bg-white text-brand-ink hover:bg-brand-bg dark:bg-input dark:text-foreground"
-                            }`}
-                          >
-                            No
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => set("createAccount")(true)}
-                            disabled={!canCreateLoginAccountForResident}
-                            aria-pressed={form.createAccount}
-                            className={`min-w-14 rounded-btn px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]/20 ${
-                              form.createAccount
-                                ? "bg-brand-blue text-white"
-                                : "border border-[#CBD5E1] bg-white text-brand-ink hover:bg-brand-bg dark:bg-input dark:text-foreground"
-                            } disabled:cursor-not-allowed disabled:opacity-50`}
-                          >
-                            Yes
-                          </button>
-                        </div>
+                    <div className="rounded-card bg-brand-bg/70 p-3.5 dark:bg-card-nested">
+                      <div className="mb-3">
+                        <p className="text-sm font-semibold text-brand-ink dark:text-foreground">Create Resident Login Account</p>
+                        <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
+                          Enable portal access for this resident. A resident profile will be registered regardless of your selection.
+                        </p>
+                      </div>
+                      <div role="group" aria-label="Create resident login account" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForm((p) => ({ ...p, createAccount: false, email: "" }));
+                            setErrors((p) => ({ ...p, email: "" }));
+                          }}
+                          aria-pressed={!form.createAccount}
+                          className={`min-w-0 rounded-btn border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 ${
+                            !form.createAccount
+                              ? "border-brand-blue bg-white ring-1 ring-brand-blue/20 dark:bg-input"
+                              : "border-brand-border bg-transparent hover:bg-white/70 dark:border-border dark:hover:bg-card"
+                          }`}
+                        >
+                          <span className={`block text-sm font-semibold ${!form.createAccount ? "text-brand-blue" : "text-brand-ink dark:text-foreground"}`}>NO</span>
+                          <span className="mt-0.5 block text-xs text-brand-gray dark:text-muted-foreground">
+                            Register the resident&apos;s health profile without creating login credentials.
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => set("createAccount")(true)}
+                          disabled={!canCreateLoginAccountForResident}
+                          aria-pressed={form.createAccount}
+                          className={`min-w-0 rounded-btn border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 ${
+                            form.createAccount
+                              ? "border-brand-blue bg-white ring-1 ring-brand-blue/20 dark:bg-input"
+                              : "border-brand-border bg-transparent hover:bg-white/70 dark:border-border dark:hover:bg-card"
+                          } disabled:cursor-not-allowed disabled:opacity-50`}
+                        >
+                          <span className={`block text-sm font-semibold ${form.createAccount ? "text-brand-blue" : "text-brand-ink dark:text-foreground"}`}>YES</span>
+                          <span className="mt-0.5 block text-xs text-brand-gray dark:text-muted-foreground">
+                            Create a resident login account and send an account invitation to the provided email address.
+                          </span>
+                        </button>
                       </div>
                       {form.createAccount && (
                         <div className="mt-3 max-w-xl">
                           <Field
-                            label="Email for login account"
+                            label="Email address"
                             type="email"
                             value={form.email}
                             onChange={set("email")}
-                            placeholder="e.g. resident@example.com"
+                            placeholder="name@example.com"
                             error={errors.email}
+                            required
+                            autoComplete="email"
                           />
                           <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
                             The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
@@ -1327,7 +1428,7 @@ export default function ResidentsPage() {
 
             <footer className="flex-shrink-0 border-t border-brand-border bg-white px-5 py-3.5 dark:border-border dark:bg-card sm:px-6">
               <div className="flex justify-end gap-3">
-                <button type="button" onClick={closeAdd} className="rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">
+                <button type="button" onClick={closeAdd} disabled={submitting} className="rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:cursor-not-allowed disabled:opacity-60 dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">
                   Cancel
                 </button>
                 <button
@@ -1480,6 +1581,22 @@ export default function ResidentsPage() {
                             {linkSubmitting ? "Sending invitation..." : "Send invitation"}
                           </button>
                         </div>
+                      </div>
+                    )}
+                    {canCreateLoginAccount && linkingStateOf(selected).key === "pending" && (
+                      <div className="mt-4 border-t border-brand-border pt-4">
+                        {linkError && <p className={errorClass}>{linkError}</p>}
+                        <button
+                          type="button"
+                          onClick={handleResendInvitation}
+                          disabled={linkSubmitting}
+                          className="rounded-btn border border-brand-blue px-4 py-2 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-light disabled:opacity-60"
+                        >
+                          {linkSubmitting ? "Sending invitation..." : "Resend invitation"}
+                        </button>
+                        <p className="mt-2 text-[11px] leading-snug text-brand-gray">
+                          Sends a fresh, one-time account setup link to the email address on the linked resident account.
+                        </p>
                       </div>
                     )}
                   </div>

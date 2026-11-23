@@ -330,7 +330,7 @@ test('temporary-password recovery invitation is not sent unless its proof was pe
 });
 
 test('cancelled invitation jobs do not rotate a newer Auth token after link reservation fails', async () => {
-  const f = fixture({ eventType: 'invitation', prepareResult: false });
+  const f = fixture({ eventType: 'invitation', account: { setup_required: true }, prepareResult: false });
   await f.run();
   assert.equal(f.state.links.length, 0);
   assert.equal(f.state.messages.length, 0);
@@ -347,6 +347,39 @@ test('general administrative accounts using the same lifecycle receive their sec
   assert.match(f.state.messages[0].subject, /Administrative Password Setup/);
   assert.match(f.state.messages[0].text, /administrative account/);
   assert.doesNotMatch(f.state.messages[0].text, /health personnel|account is active/i);
+});
+
+test('new administrator, Health Supervisor, and PHN mail targets the profile email with setup instructions', async () => {
+  for (const role of ['admin', 'health_supervisor', 'phn']) {
+    const admin = role === 'admin';
+    const password = 'N7!vQ3#rX';
+    const f = fixture({
+      eventType: 'approved',
+      profile: { role, status: 'disabled' },
+      account: {
+        setup_required: true,
+        must_change_password: !admin,
+        temporary_password_expires_at: '2027-01-02T03:04:05.000Z',
+      },
+      authUser: { email_confirmed_at: admin ? null : '2026-10-30T10:00:00Z' },
+      jobs: [{
+        event_type: 'approved',
+        ...(admin ? {} : { temporary_password_ciphertext: encryptTemporaryPassword(password, CONFIG.supabaseServiceRoleKey) }),
+      }],
+    });
+    const result = await f.run({ targetId: ACCOUNT_ID });
+    assert.equal(result.mailServerAccepted, 1, role);
+    assert.equal(f.state.messages[0].to.address, EMAIL, role);
+    if (admin) {
+      assert.equal(f.state.links[0].type, 'invite');
+      assert.match(f.state.messages[0].text, /administrative account/i);
+      assert.match(f.state.messages[0].text, /set your password/i);
+    } else {
+      assert.match(f.state.messages[0].text, new RegExp(password));
+      assert.match(f.state.messages[0].text, /sign in to KALUSAGAP/i);
+      assert.match(f.state.messages[0].text, /create a new permanent password/i);
+    }
+  }
 });
 
 test('resident identities never receive personnel lifecycle notifications', async () => {
@@ -542,7 +575,7 @@ test('a monitored pre-DATA connection failure is definitively unsent and retryab
   } });
   await f.run();
   assert.equal(f.state.jobs[0].status, 'failed');
-  assert.equal(f.state.jobs[0].last_error_code, 'SMTP_ESOCKET');
+  assert.equal(f.state.jobs[0].last_error_code, 'SMTP_ESOCKET_CONNECT');
 });
 
 for (const code of ['ETIMEDOUT', 'ECONNECTION', 'ESOCKET']) {

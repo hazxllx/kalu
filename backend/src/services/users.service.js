@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { processPersonnelNotifications } from './personnelNotifications.service.js';
 import { ROLES, isValidRole } from '../config/roles.js';
 import { RHU_STATION_VALUES, STATION_ASSIGNED_ROLES, normalizeStations, stationLabel } from '../config/rhuStations.js';
-import { isStrictMobile, isUuid } from '../validators/common.js';
+import { isEmail, isStrictMobile, isUuid } from '../validators/common.js';
 import { createUserValidator, updateUserValidator, userQueryValidator, personnelLifecycleValidator } from '../validators/users.validators.js';
 import { getAccountRequestHistory } from './staffAccounts.service.js';
 import { encryptTemporaryPassword, generateTemporaryPassword } from '../utils/temporaryPassword.js';
@@ -305,6 +305,20 @@ const accountStatus = (value, fallback, allowPending = false) => {
   return status;
 };
 
+const requireInvitationDelivery = (user) => {
+  if (user?.notification?.status === 'sent') return user;
+  const status = String(user?.notification?.status || '').toLowerCase();
+  const rawDeliveryCode = String(user?.notification?.lastErrorCode || status || '').toUpperCase();
+  const deliveryCode = /^[A-Z0-9_]{1,64}$/.test(rawDeliveryCode) ? rawDeliveryCode : 'DELIVERY_UNCONFIRMED';
+  const guidance = ['delivery_unknown', 'sending'].includes(status)
+    ? 'Check Brevo delivery logs before resending to avoid a duplicate email.'
+    : status === 'failed'
+      ? 'Use the account’s Resend invitation action after correcting the email configuration.'
+      : 'Retry this same account request with its saved operation reference.';
+  throw new ApiError(503, `The account was created, but its invitation email was not confirmed (${deliveryCode}). ${guidance} Do not create another account.`)
+    .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
+};
+
 export const createUser = async ({ actor, actorId = actor?.id, input = {}, notificationProcessor = processPersonnelNotifications } = {}) => {
   input = validated(createUserValidator, input);
   const email = String(input.email ?? '').trim().toLowerCase();
@@ -314,7 +328,7 @@ export const createUser = async ({ actor, actorId = actor?.id, input = {}, notif
     throw ApiError.forbidden('You are not authorized to create an account for that role.');
   }
   const errors = [];
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address.');
+  if (email.length > 254 || !isEmail(email)) errors.push('Enter a valid email address.');
   if (!fullName || fullName.length > 120) errors.push('Name must be between 1 and 120 characters.');
   if (!ASSIGNABLE_ROLES.includes(role) || role === ROLES.RESIDENT) {
     errors.push('Choose an assignable staff role. Resident accounts must use resident registration.');
@@ -408,14 +422,12 @@ export const createUser = async ({ actor, actorId = actor?.id, input = {}, notif
     throw new ApiError(503, 'Account provisioning could not be confirmed. Retry with the same operation reference.');
   }
   let createdUser = (await repository.getProfileById(user.id)) || user;
-  if (isHealthPersonnel) {
+  const shouldSendCreationNotification = isHealthPersonnel
+    || (role === ROLES.ADMIN && approvalStatus !== 'pending');
+  if (shouldSendCreationNotification) {
     await notificationProcessor({ targetId: user.id });
     createdUser = (await repository.getProfileById(user.id)) || createdUser;
-    if (createdUser.notification?.status !== 'sent') {
-      const rawDeliveryCode = String(createdUser.notification?.lastErrorCode || createdUser.notification?.status || '').toUpperCase();
-      const deliveryCode = /^[A-Z0-9_]{1,64}$/.test(rawDeliveryCode) ? rawDeliveryCode : 'DELIVERY_UNCONFIRMED';
-      throw new ApiError(503, `The account was created, but its invitation email was not confirmed (${deliveryCode}). Check the backend email configuration, then retry this same form request. Keep the form open and do not create another account.`);
-    }
+    requireInvitationDelivery(createdUser);
   }
   return createdUser;
 };
@@ -618,7 +630,7 @@ export const transitionUserLifecycle = async ({ id, actor = null, actorId = acto
     const invited = await repository.resendScopedPersonnelInvitation({ id, actorId, operationId: action.operationId });
     if (!invited) throw ApiError.notFound('Personnel account not found in your authorized scope.');
     await processPersonnelNotifications({ targetId: id });
-    return (await repository.getProfileById(id)) || invited;
+    return requireInvitationDelivery((await repository.getProfileById(id)) || invited);
   }
   if (actorId === id && ['approve', 'reject', 'suspend', 'reactivate'].includes(action.action)) {
     throw ApiError.conflict('You cannot approve or change your own administrator access.');

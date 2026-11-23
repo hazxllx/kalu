@@ -109,6 +109,14 @@ export const createResidentAccount = async (req, res) => {
   sendCreated(res, { resident });
 };
 
+export const resendResidentInvitation = async (req, res) => {
+  const resident = await residentsService.resendResidentInvitation({
+    id: req.params.id,
+    user: req.user,
+  });
+  sendData(res, { resident });
+};
+
 /**
  * Handles `PUT`/`PATCH /residents/:id` — updates resident record `req.params.id`
  * with `req.body.resident`. Enforces optimistic concurrency by requiring an `If-Match`
@@ -179,4 +187,4 @@ export const getStaffHealthHistory = async (req, res) => {
   sendData(res, data);
 };
 
-export default { listResidents, createResident, getResident, createResidentAccount, updateResident, updateMyProfile, getMyHealthRecords };
+export default { listResidents, createResident, getResident, createResidentAccount, resendResidentInvitation, updateResident, updateMyProfile, getMyHealthRecords };

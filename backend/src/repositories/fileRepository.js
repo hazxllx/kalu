@@ -260,6 +260,23 @@ export const fileRepository = {
     });
   },
 
+  linkResidentToAuthUser: async (id, authUserId) => {
+    return store.mutate((data) => {
+      const row = data.residents.find((resident) => resident.id === id);
+      if (!row) return null;
+      if (row.authUserId === authUserId) return clone(row);
+      if (row.authUserId || data.residents.some((resident) => resident.authUserId === authUserId)) return null;
+      const next = {
+        ...row,
+        authUserId,
+        revision: (row.revision ?? 1) + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      Object.assign(row, next);
+      return clone(row);
+    });
+  },
+
   // ----- manual resident verification --------------------------------------
   /** Verification queue (mirrors the Supabase driver). Returns { rows, total }. */
   listResidentsByVerificationStatus: async ({

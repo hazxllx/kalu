@@ -23,6 +23,7 @@ export const residentsApi = {
   // account Pending Activation. It never duplicates the resident or changes the
   // verification status.
   createAccount: (id, payload, options = {}) => api.post(`/residents/${id}/account`, payload, options),
+  resendInvitation: (id, options = {}) => api.post(`/residents/${id}/resend-invitation`, {}, options),
   // Resident self-service: update own profile (contact number). The resident is
   // derived from the authenticated session server-side; no id is sent.
   updateMine: (payload, options = {}) => api.patch('/residents/me', payload, options),

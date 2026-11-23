@@ -13,7 +13,7 @@ import {
 } from "@/features/registration/components/RegistrationDesign";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { authApi, registrationApi } from "@/services/api";
-import { validatePassword } from "@/utils/validation";
+import { isEmail, validatePassword } from "@/utils/validation";
 import { isManagedPersonnelSession, resolvePasswordSetup, saveResetPassword, passwordWasSaved, personnelSetupBlocked, personnelPasswordError } from "../personnelPasswordSetup";
 
 const PERSONNEL_RECOVERY_STORAGE_KEY = "personnelPasswordRecoveryRetry";
@@ -296,7 +296,11 @@ export default function ResetPassword() {
     const email = requestLinkEmail.trim();
     if (requestLinkState.loading) return;
     if (!email) {
-      setRequestLinkState({ loading: false, success: "", error: "Please enter your email address to request a new link." });
+      setRequestLinkState({ loading: false, success: "", error: "Please enter your registered email address to request a new link." });
+      return;
+    }
+    if (!isEmail(email)) {
+      setRequestLinkState({ loading: false, success: "", error: "Please enter a valid email address." });
       return;
     }
 
@@ -515,17 +519,17 @@ export default function ResetPassword() {
               <AlertTriangle className="h-8 w-8 text-brand-danger" strokeWidth={1.8} />
             </div>
             <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">
-              {isSetupLink ? "Invalid or expired password setup link." : "Invalid or expired password reset link."}
+              {isSetupLink ? "Invalid or expired password setup link." : "Password Reset Link Expired"}
             </h1>
             <div className="mx-auto mt-2 h-[3px] w-14 rounded-full bg-brand-gold" aria-hidden="true" />
             <p className="mx-auto mt-4 max-w-md text-[13px] leading-relaxed text-slate-500">
               {error || (isSetupLink
                 ? "This password setup invitation is missing, invalid, already used, or has expired. Request a fresh link and use the newest email."
-                : "This password reset link is missing, invalid, already used, or has expired. Please request a new reset link and try again.")}
+                : "This password reset link is invalid or has expired. Please request a new link using your registered email address.")}
             </p>
 
             <form onSubmit={requestFreshLink} className="mx-auto mt-7 w-full max-w-md space-y-3 text-left">
-              <Field label="Email Address" required>
+              <Field label="Registered Email Address" required>
                 <input
                   type="email"
                   autoComplete="email"
@@ -546,7 +550,7 @@ export default function ResetPassword() {
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" /> Sending...
                   </>
-                ) : actionLabel}
+                ) : (isSetupLink ? actionLabel : "Send New Reset Link")}
               </button>
 
               {requestLinkState.success && (
@@ -554,6 +558,11 @@ export default function ResetPassword() {
               )}
               {requestLinkState.error && (
                 <p role="alert" className="text-[12px] font-medium text-brand-danger">{requestLinkState.error}</p>
+              )}
+              {!isSetupLink && (
+                <p className="text-[12px] leading-relaxed text-slate-500">
+                  Check your inbox for the latest password reset email. For security, only the most recent valid link should be used.
+                </p>
               )}
             </form>
 

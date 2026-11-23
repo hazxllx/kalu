@@ -260,9 +260,9 @@ subject = "KALUSAGAP - Verify your email address"
 # Keep the real Auth token visible for the registration code-entry flow.
 content_path = "./supabase/confirmation.html"
 
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+[auth.email.template.invite]
+subject = "Welcome to KALUSAGAP"
+content_path = "./supabase/templates/invite.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]

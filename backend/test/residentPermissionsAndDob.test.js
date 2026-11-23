@@ -59,6 +59,39 @@ test('Health Supervisor may create a resident within their assigned barangay', a
   });
   assert.ok(result.id);
   assert.equal(inserted.barangay, 'San Isidro');
+  assert.equal(inserted.authUserId, undefined);
+});
+
+test('resident login accounts bind the Auth metadata to the target Resident ID', () => {
+  const account = residentsService.buildResidentAccountCreation({
+    email: '  Resident@Example.org  ',
+    fullName: 'Maria Dela Cruz',
+    residentId: 'RES-000123',
+  });
+  assert.equal(account.email, 'resident@example.org');
+  assert.equal(account.user_metadata.resident_id, 'RES-000123');
+  assert.equal(account.profile_status, 'pending_verification');
+});
+
+test('an invalid email cannot create a resident login account or resident row', async () => {
+  installRepositoryDoubles();
+  await assert.rejects(
+    () => residentsService.createResident({
+      user: userHS,
+      payload: {
+        ...validRegistrationFields,
+        firstName: 'Maria',
+        lastName: 'Dela Cruz',
+        birthDate: '2000-09-02',
+        sex: 'Female',
+        barangay: 'San Isidro',
+        createLoginAccount: true,
+        email: 'not-an-email',
+      },
+    }),
+    (error) => error.statusCode === 422,
+  );
+  assert.equal(inserted, null);
 });
 
 test('staff resident creation enforces names, selections, address, and contact format server-side', async () => {

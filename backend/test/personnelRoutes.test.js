@@ -158,7 +158,8 @@ test('health personnel creation always requires create, role management, approva
   await harness({ permissions: ['accounts.create', 'accounts.roles.manage', 'accounts.personnel.approve', 'accounts.deactivate'], repo }, async ({ api }) => {
     const result = await api('/users', { method: 'POST', body });
     assert.equal(result.status, 503);
-    assert.match(result.json.error.message, /temporary-password email delivery could not be confirmed/i);
+    assert.equal(result.json.error.code, 'ACCOUNT_CREATED_EMAIL_FAILED');
+    assert.match(result.json.error.message, /account was created.*invitation email was not confirmed/i);
   });
   assert.equal(created, 1);
 });

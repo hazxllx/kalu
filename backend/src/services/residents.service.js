@@ -41,6 +41,7 @@ import { getRiskConfig } from './riskConfig.service.js';
 import { withHistoryLinks } from './consultations.service.js';
 import { classifyBloodPressure } from '../config/bpThresholds.js';
 import { notifyHealthSupervisorsOnce } from './notifications.service.js';
+import { sendResidentInvitationEmail } from './email.service.js';
 import { consultationAssessmentReasons, getManilaDateTime, isConsultationDate, normalizeConsultationRiskLevel, savedConsultationAssessment } from '../../../shared/consultationClinical.js';
 
 const SELF_ROLES = ['resident', 'resident-limited'];
@@ -75,11 +76,12 @@ export const generateTemporaryPassword = (length = 16) => {
 export const buildResidentAccountCreation = ({
   email,
   fullName,
+  residentId = null,
   password = generateTemporaryPassword(),
 } = {}) => {
   const normalizedEmail = String(email ?? '').trim().toLowerCase();
 
-  if (!normalizedEmail) {
+  if (!isEmail(normalizedEmail) || normalizedEmail.length > 254) {
     throw ApiError.badRequest(
       'A valid email is required before a resident login account can be created.',
     );
@@ -93,28 +95,45 @@ export const buildResidentAccountCreation = ({
         String(fullName || '').trim() ||
         normalizedEmail.split('@')[0],
       requested_role: 'resident',
+      ...(residentId ? { resident_id: String(residentId) } : {}),
     },
     profile_status: 'pending_verification',
   };
 };
 
-export const createResidentAuthUser = async ({
-  email,
-  fullName,
-  password,
-} = {}) => {
-  const account = buildResidentAccountCreation({
-    email,
-    fullName,
-    password,
-  });
+const findExistingResidentInvitationAccount = async ({ supabase, email, residentId }) => {
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id,email,role,status')
+    .eq('email', email)
+    .maybeSingle();
+  if (profileError) {
+    throw new ApiError(503, 'The resident account could not be checked safely. Retry this same resident operation.');
+  }
+  if (!profile) return null;
 
-  const supabase = getServiceClient();
-  // Invitation callbacks must target the configured frontend itself. Using
-  // the first CORS origin can select an API/staging origin, while a localhost
-  // fallback sends deployed residents to an unreachable machine.
+  const { data, error } = await supabase.auth.admin.getUserById(profile.id);
+  const authUser = data?.user;
+  if (error || authUser?.id !== profile.id || String(authUser.email || '').trim().toLowerCase() !== email) {
+    throw new ApiError(503, 'The existing account could not be verified. Do not create another resident account.');
+  }
+  if (profile.role !== 'resident' || String(authUser.user_metadata?.resident_id || '') !== String(residentId)) {
+    throw ApiError.conflict('An account already uses this email and is not linked to this resident. Contact an administrator; do not create another account.');
+  }
+  if (profile.status === 'disabled') {
+    throw ApiError.conflict('The resident account is disabled. Reactivate it before issuing an invitation.');
+  }
+
+  return {
+    authUserId: authUser.id,
+    email,
+    invited: Boolean(authUser.email_confirmed_at || authUser.user_metadata?.resident_invitation_delivery === 'sent'),
+    profileStatus: profile.status,
+  };
+};
+
+const residentInvitationRedirect = () => {
   const configuredClientUrl = String(env.clientUrl || '').trim();
-  let clientOrigin;
   try {
     const url = new URL(configuredClientUrl);
     const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
@@ -123,11 +142,37 @@ export const createResidentAuthUser = async ({
       || (env.isProduction && (url.protocol !== 'https:' || localHost))) {
       throw new Error('Invalid frontend origin');
     }
-    clientOrigin = url.origin;
+    return { origin: url.origin, redirectTo: `${url.origin}/reset-password` };
   } catch {
     throw new ApiError(503, 'The resident invitation cannot be sent because the public frontend URL is not configured correctly.');
   }
-  const redirectTo = `${clientOrigin}/reset-password`;
+};
+
+export const createResidentAuthUser = async ({
+  email,
+  fullName,
+  residentId,
+  password,
+} = {}) => {
+  const account = buildResidentAccountCreation({
+    email,
+    fullName,
+    residentId,
+    password,
+  });
+
+  const supabase = getServiceClient();
+  const existing = await findExistingResidentInvitationAccount({
+    supabase,
+    email: account.email,
+    residentId,
+  });
+  if (existing) return existing;
+
+  // Invitation callbacks must target the configured frontend itself. Using
+  // the first CORS origin can select an API/staging origin, while a localhost
+  // fallback sends deployed residents to an unreachable machine.
+  const { redirectTo } = residentInvitationRedirect();
 
   // Invitation flow: create the auth user WITHOUT a password and email them a
   // one-time invitation link. The resident clicks it, lands on /reset-password
@@ -135,13 +180,25 @@ export const createResidentAuthUser = async ({
   // hijack the session), sets their OWN password, and the account is activated.
   // Health personnel never see, set, or manage the resident's password.
 
-  const { data, error } =
-    await supabase.auth.admin.inviteUserByEmail(account.email, {
+  let invitation;
+  try {
+    invitation = await supabase.auth.admin.inviteUserByEmail(account.email, {
       data: account.user_metadata,
       redirectTo,
     });
+  } catch {
+    invitation = { data: null, error: { message: 'INVITATION_REQUEST_FAILED' } };
+  }
+  const { data, error } = invitation;
 
   if (error) {
+    const recovered = await findExistingResidentInvitationAccount({
+      supabase,
+      email: account.email,
+      residentId,
+    });
+    if (recovered) return { ...recovered, invited: false };
+
     if (
       /already been registered|already exists|already registered/i.test(
         error.message || '',
@@ -152,10 +209,8 @@ export const createResidentAuthUser = async ({
       );
     }
 
-    throw new ApiError(
-      500,
-      'The resident invitation could not be sent. Please check the email and try again.',
-    );
+    throw new ApiError(503, 'The resident invitation could not be confirmed. Retry this same resident operation; do not create another account.')
+      .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
   }
 
   const authUserId = data?.user?.id;
@@ -167,7 +222,7 @@ export const createResidentAuthUser = async ({
     );
   }
 
-  const { error: profileError } = await supabase
+  const { data: updatedProfile, error: profileError } = await supabase
     .from('profiles')
     .update({
       email: account.email,
@@ -175,19 +230,25 @@ export const createResidentAuthUser = async ({
       role: 'resident',
       status: account.profile_status,
     })
-    .eq('id', authUserId);
+    .eq('id', authUserId)
+    .select('id')
+    .maybeSingle();
 
-  if (profileError) {
-    try {
-      await supabase.auth.admin.deleteUser(authUserId);
-    } catch {
-      // best effort: leave the orphaned auth record for admin review
-    }
+  if (profileError || updatedProfile?.id !== authUserId) {
+    throw new ApiError(503, 'The resident account was created but setup could not be confirmed. Retry this same resident operation; do not create another account.')
+      .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
+  }
 
-    throw new ApiError(
-      500,
-      'The resident account was created but could not be set up. Please try again.',
-    );
+  const { data: markedUser, error: markError } = await supabase.auth.admin.updateUserById(authUserId, {
+    user_metadata: {
+      ...account.user_metadata,
+      resident_invitation_delivery: 'sent',
+      resident_invitation_last_sent_at: new Date().toISOString(),
+    },
+  });
+  if (markError || markedUser?.user?.id !== authUserId) {
+    throw new ApiError(503, 'The resident account was created, but invitation delivery could not be confirmed. Use Resend invitation on this resident; do not create another account.')
+      .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
   }
 
   return {
@@ -1366,6 +1427,7 @@ export const createResident = async ({
   // can never bypass the caller's CURRENT scope, and before the duplicate guard
   // because the row we are about to find would otherwise match it.
   const operationKey = clean(idempotencyKey) || null;
+  let replayedResident = null;
 
   if (operationKey) {
     const replayed =
@@ -1373,13 +1435,29 @@ export const createResident = async ({
 
     if (replayed) {
       assertWithinScope(user, replayed);
-      return replayed;
+      if (!shouldCreateLoginAccount || replayed.authUserId) {
+        if (shouldCreateLoginAccount && replayed.authUserId) {
+          const { data: authResult, error: authError } = await getServiceClient().auth.admin.getUserById(replayed.authUserId);
+          const authUser = authResult?.user;
+          if (authError || authUser?.id !== replayed.authUserId) {
+            throw new ApiError(503, 'The resident account could not be verified. Do not create another account.');
+          }
+          if (String(authUser.user_metadata?.resident_id || '') === String(replayed.id)
+            && !authUser.email_confirmed_at
+            && authUser.user_metadata?.resident_invitation_delivery !== 'sent') {
+            throw new ApiError(503, `Resident ${replayed.id} and its login account are linked, but invitation delivery was not confirmed. Use Resend invitation on this resident; do not create another account.`)
+              .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
+          }
+        }
+        return replayed;
+      }
+      replayedResident = replayed;
     }
   }
 
   // Duplicate guard: identical identity in the same barangay is a conflict.
   // The same person moving barangays is a legitimate transfer, not a duplicate.
-  const duplicate =
+  const duplicate = replayedResident ? null :
     await repository.findResidentByIdentity({
       lastName,
       firstName,
@@ -1399,8 +1477,7 @@ export const createResident = async ({
     );
   }
 
-  const ids =
-    await repository.nextResidentIds();
+  const ids = replayedResident ? {} : await repository.nextResidentIds();
   const age = ageFromDateOnly(birthDate, dateReference);
   const minorVerification = age !== null && age < 18
     ? {
@@ -1413,10 +1490,61 @@ export const createResident = async ({
       }
     : {};
 
+  const residentFields = {
+    // Verified on creation — the staff registration in person IS the
+    // verification, independently of whether a login account is requested.
+    verificationStatus: 'approved',
+    verifiedBy: user?.id || null,
+    verifiedAt: new Date().toISOString(),
+    ...minorVerification,
+    firstName,
+    middleName,
+    lastName,
+    suffix,
+    birthDate,
+    birthPlace: text(payload.birthPlace),
+    sex,
+    civilStatus,
+    religion: text(payload.religion),
+    employmentStatus: text(payload.employmentStatus),
+    fatherName: text(payload.fatherName),
+    motherName: text(payload.motherName),
+    is4PsMember: Boolean(payload.is4PsMember),
+    philhealthNo: text(payload.philhealthNo),
+    currentAddress,
+    permanentAddress: permanentAddress || currentAddress,
+    cellphoneNo,
+    ...(zone === null ? {} : { zone }),
+    identityNo: text(payload.identityNo),
+    barangay: barangayRow.name,
+    createdById: user?.id || '',
+    createdByRole: user?.role || '',
+  };
+
   if (shouldCreateLoginAccount) {
+    const resident = replayedResident || await insertResidentIdempotent(user, operationKey, {
+      ...ids,
+      ...residentFields,
+    });
+    await notifyHealthSupervisorsOnce({
+      barangayId: barangayRow.id,
+      municipalityId: barangayRow.municipalityId || user?.municipalityId || null,
+      actorId: user?.id,
+      title: 'New resident registered',
+      message: `A resident was added to the ${barangayRow.name} directory.`,
+      relatedType: 'resident_registration',
+      relatedId: resident.id,
+      eventKey: `resident_registration:${resident.id}`,
+    });
+
+    if (resident.authUserId) {
+      throw ApiError.conflict(`Resident ${resident.id} already has a linked login account. No additional account was created.`);
+    }
+
     const account =
       await createResidentAuthUser({
         email: residentEmail,
+        residentId: resident.id,
         fullName: [
           firstName,
           middleName,
@@ -1431,144 +1559,35 @@ export const createResident = async ({
           payload.password || undefined,
       });
 
-    let resident;
-    try {
-      resident = await insertResidentIdempotent(user, operationKey, {
-        ...ids,
-
-        authUserId:
-          account.authUserId,
-
-        // An authorized health worker registering a resident in person IS the
-        // verification, so the resident record is Verified on creation.
-        // This is independent of the login-account state below.
-        verificationStatus: 'approved',
-        verifiedBy: user?.id || null,
-        verifiedAt:
-          new Date().toISOString(),
-        ...minorVerification,
-
-        firstName,
-        middleName,
-        lastName,
-        suffix,
-        birthDate,
-        birthPlace: text(
-          payload.birthPlace,
-        ),
-        sex,
-        civilStatus,
-        religion: text(
-          payload.religion,
-        ),
-        employmentStatus: text(
-          payload.employmentStatus,
-        ),
-        fatherName: text(
-          payload.fatherName,
-        ),
-        motherName: text(
-          payload.motherName,
-        ),
-        is4PsMember: Boolean(
-          payload.is4PsMember,
-        ),
-        philhealthNo: text(
-          payload.philhealthNo,
-        ),
-        currentAddress,
-        permanentAddress: permanentAddress || currentAddress,
-        cellphoneNo,
-        ...(zone === null ? {} : { zone }),
-        identityNo: text(
-          payload.identityNo,
-        ),
-        barangay: barangayRow.name,
-        createdById: user?.id || '',
-        createdByRole:
-          user?.role || '',
-      });
-    } catch (error) {
-      // Auth and the resident row use separate Supabase APIs. Compensate for a
-      // failed row write so a retry does not encounter a stranded invitation.
+    let linked = resident;
+    if (!resident.authUserId) {
       try {
-        await getServiceClient().auth.admin.deleteUser(account.authUserId);
+        linked = await repository.linkResidentToAuthUser(resident.id, account.authUserId);
+        if (!linked) throw new Error('Resident link was not persisted.');
       } catch {
-        // Preserve the original insert failure; cleanup is best effort.
+        throw ApiError.conflict(
+          `The login account could not be linked to resident ${resident.id}. Refresh the resident record and use its account recovery action; do not create another account.`,
+        );
       }
-      throw error;
     }
 
-    await notifyHealthSupervisorsOnce({
-      barangayId: barangayRow.id,
-      municipalityId: barangayRow.municipalityId || user?.municipalityId || null,
-      actorId: user?.id,
-      title: 'New resident registered',
-      message: `A resident was added to the ${barangayRow.name} directory.`,
-      relatedType: 'resident_registration',
-      relatedId: resident.id,
-      eventKey: `resident_registration:${resident.id}`,
-    });
+    await attachAccountStatus([linked]);
+
+    if (!account.invited) {
+      throw new ApiError(503, `Resident ${linked.id} and its login account are linked, but invitation delivery was not confirmed. Use Resend invitation on this resident; do not create another account.`)
+        .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
+    }
 
     return {
-      ...resident,
-      authUserId:
-        account.authUserId,
+      ...linked,
+      authUserId: account.authUserId,
       accountInvited: true,
     };
   }
 
-  const resident = await insertResidentIdempotent(user, operationKey, {
+  const resident = replayedResident || await insertResidentIdempotent(user, operationKey, {
     ...ids,
-
-    // Verified on creation — the staff registration in person is the
-    // verification. No login account is created on this path (Account:
-    // No Account); the resident may create/claim one later.
-    verificationStatus: 'approved',
-    verifiedBy: user?.id || null,
-    verifiedAt:
-      new Date().toISOString(),
-    ...minorVerification,
-
-    firstName,
-    middleName,
-    lastName,
-    suffix,
-    birthDate,
-    birthPlace: text(
-      payload.birthPlace,
-    ),
-    sex,
-    civilStatus,
-    religion: text(
-      payload.religion,
-    ),
-    employmentStatus: text(
-      payload.employmentStatus,
-    ),
-    fatherName: text(
-      payload.fatherName,
-    ),
-    motherName: text(
-      payload.motherName,
-    ),
-    is4PsMember: Boolean(
-      payload.is4PsMember,
-    ),
-    philhealthNo: text(
-      payload.philhealthNo,
-    ),
-    currentAddress,
-    permanentAddress: permanentAddress || currentAddress,
-    cellphoneNo,
-    ...(zone === null ? {} : { zone }),
-    identityNo: text(
-      payload.identityNo,
-    ),
-    barangay: barangayRow.name,
-    createdById: user?.id || '',
-    createdByRole:
-      user?.role || '',
+    ...residentFields,
   });
 
   await notifyHealthSupervisorsOnce({
@@ -1725,7 +1744,7 @@ export const createResidentLoginAccount = async ({ id, email, user } = {}) => {
   }
 
   const normalizedEmail = String(email ?? '').trim().toLowerCase();
-  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+  if (!isEmail(normalizedEmail) || normalizedEmail.length > 254) {
     throw ApiError.unprocessable('Please correct the highlighted fields.', [
       'A valid email is required to create a resident login account.',
     ]);
@@ -1737,24 +1756,20 @@ export const createResidentLoginAccount = async ({ id, email, user } = {}) => {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const account = await createResidentAuthUser({ email: normalizedEmail, fullName });
+  const account = await createResidentAuthUser({
+    email: normalizedEmail,
+    fullName,
+    residentId,
+  });
 
-  // Link the EXISTING record to the new account. If the link cannot be written
-  // (e.g. the resident was linked concurrently and the unique index rejects it),
-  // roll back the orphaned auth user so a failed attempt leaves no dangling
-  // account, and surface a clear conflict.
+  // Link the EXISTING record to the new account. Preserve the Auth user on a
+  // link failure so a retry can reconcile the same identity instead of creating
+  // another user or invalidating an invitation that may already have arrived.
   let linked;
   try {
-    linked = await repository.updateResident(residentId, {
-      authUserId: account.authUserId,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    try {
-      await getServiceClient().auth.admin.deleteUser(account.authUserId);
-    } catch {
-      // best effort: leave the orphaned auth record for admin review
-    }
+    linked = await repository.linkResidentToAuthUser(residentId, account.authUserId);
+    if (!linked) throw new Error('Resident link was not persisted.');
+  } catch {
     throw ApiError.conflict(
       'The login account could not be linked to this resident. It may already be linked. Please refresh and try again.',
     );
@@ -1762,10 +1777,132 @@ export const createResidentLoginAccount = async ({ id, email, user } = {}) => {
 
   await attachAccountStatus([linked]);
 
+  if (!account.invited) {
+    throw new ApiError(503, `Resident ${residentId} and its login account are linked, but invitation delivery was not confirmed. Use Resend invitation on this resident; do not create another account.`)
+      .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
+  }
+
   return {
     ...linked,
     authUserId: account.authUserId,
     accountInvited: true,
+  };
+};
+
+export const resendResidentInvitation = async ({ id, user } = {}) => {
+  if (!isCreateRole(user)) {
+    throw ApiError.forbidden('Your role is not permitted to resend resident invitations.');
+  }
+  const residentId = String(id ?? '').trim();
+  if (!residentId) throw ApiError.badRequest('A resident id is required.');
+
+  const resident = await repository.getResident(residentId);
+  if (!resident) throw ApiError.notFound('Resident record not found');
+  assertWithinScope(user, resident);
+  if (!resident.authUserId) {
+    throw ApiError.conflict('This resident does not have a linked login account. Create the account before resending an invitation.');
+  }
+
+  const supabase = getServiceClient();
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id,email,role,status')
+    .eq('id', resident.authUserId)
+    .maybeSingle();
+  if (profileError || profile?.id !== resident.authUserId || profile.role !== 'resident') {
+    throw new ApiError(503, 'The resident account could not be verified. No invitation was sent.');
+  }
+  if (!isEmail(profile.email)) {
+    throw new ApiError(503, 'The resident account does not have a valid email address. No invitation was sent.');
+  }
+  if (profile.status === 'disabled') {
+    throw ApiError.conflict('This resident account is disabled. Reactivate it before sending an invitation.');
+  }
+
+  const { data: authData, error: authError } = await supabase.auth.admin.getUserById(resident.authUserId);
+  const authUser = authData?.user;
+  if (authError || authUser?.id !== resident.authUserId
+    || String(authUser.email || '').trim().toLowerCase() !== String(profile.email).trim().toLowerCase()) {
+    throw new ApiError(503, 'The linked resident account could not be verified. No invitation was sent.');
+  }
+  if (authUser.email_confirmed_at || profile.status === 'active') {
+    throw ApiError.conflict('This resident has already activated their account; no invitation is needed.');
+  }
+  if (authUser.user_metadata?.resident_id
+    && String(authUser.user_metadata.resident_id) !== residentId) {
+    throw ApiError.conflict('The linked authentication account does not match this resident record.');
+  }
+  const recentInvitationAt = [
+    authUser.user_metadata?.resident_invitation_last_attempt_at,
+    authUser.user_metadata?.resident_invitation_last_sent_at,
+    authUser.invited_at,
+  ]
+    .map((value) => Date.parse(String(value || '')))
+    .filter(Number.isFinite)
+    .reduce((latest, value) => Math.max(latest, value), 0);
+  if (recentInvitationAt && Date.now() - recentInvitationAt < 60_000) {
+    throw ApiError.tooManyRequests('An invitation was issued recently. Check the recipient inbox before requesting another; try again after one minute.');
+  }
+
+  const { origin } = residentInvitationRedirect();
+  const redirectTo = `${origin}/reset-password`;
+  const { data: generated, error: linkError } = await supabase.auth.admin.generateLink({
+    type: 'invite',
+    email: authUser.email,
+    options: { redirectTo },
+  });
+  const tokenHash = generated?.properties?.hashed_token;
+  if (linkError || generated?.user?.id !== resident.authUserId
+    || String(generated?.user?.email || '').trim().toLowerCase() !== String(authUser.email).trim().toLowerCase()
+    || typeof tokenHash !== 'string' || tokenHash.length < 16 || tokenHash.length > 2048) {
+    throw new ApiError(503, 'A new invitation link could not be generated. No email was sent.');
+  }
+
+  const attemptAt = new Date().toISOString();
+  const { data: claimedUser, error: claimError } = await supabase.auth.admin.updateUserById(resident.authUserId, {
+    user_metadata: {
+      ...authUser.user_metadata,
+      resident_id: residentId,
+      requested_role: 'resident',
+      resident_invitation_last_attempt_at: attemptAt,
+    },
+  });
+  if (claimError || claimedUser?.user?.id !== resident.authUserId) {
+    throw new ApiError(503, 'The invitation request could not be safely reserved. No email was sent.');
+  }
+
+  const invitationUrl = new URL('/reset-password', origin);
+  invitationUrl.searchParams.set('token_hash', tokenHash);
+  invitationUrl.searchParams.set('type', 'invite');
+  try {
+    await sendResidentInvitationEmail({
+      email: authUser.email,
+      invitationUrl: invitationUrl.href,
+    });
+  } catch {
+    throw new ApiError(503, 'The resident account exists, but invitation delivery was not confirmed. Do not create another account; retry Resend invitation after checking the mail service.')
+      .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
+  }
+
+  const { data: markedUser, error: markError } = await supabase.auth.admin.updateUserById(resident.authUserId, {
+    user_metadata: {
+      ...authUser.user_metadata,
+      resident_id: residentId,
+      requested_role: 'resident',
+      resident_invitation_delivery: 'sent',
+      resident_invitation_last_sent_at: new Date().toISOString(),
+    },
+  });
+  if (markError || markedUser?.user?.id !== resident.authUserId) {
+    console.error('Resident invitation was accepted but account delivery metadata could not be updated.', {
+      code: String(markError?.code || 'DELIVERY_STATUS_UPDATE_FAILED').replace(/[^A-Z0-9_]/gi, '').slice(0, 64),
+    });
+  }
+
+  return {
+    ...resident,
+    accountInvited: true,
+    invitationDelivery: 'sent',
   };
 };
 

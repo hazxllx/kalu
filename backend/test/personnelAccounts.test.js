@@ -13,6 +13,9 @@ const staff = await import('../src/services/staffAccounts.service.js');
 const validators = await import('../src/validators/users.validators.js');
 const { personnelPasswordSetupValidator } = await import('../src/validators/auth.validators.js');
 const { decryptTemporaryPassword } = await import('../src/utils/temporaryPassword.js');
+const errorHandler = (await import('../src/middleware/errorHandler.js')).default;
+const env = (await import('../src/config/env.js')).default;
+const ApiError = (await import('../src/utils/apiError.js')).default;
 
 const ACTOR = '11111111-1111-4111-8111-111111111111';
 const TARGET = '22222222-2222-4222-8222-222222222222';
@@ -95,6 +98,7 @@ test('creation reserves identity, provisions approval, and confirms the temporar
 test('PHN creates only municipality-scoped Health Supervisor and RHU Personnel accounts', async () => {
   const actor = { id: ACTOR, role: 'phn', municipalityId: MUNICIPALITY, barangayId: null };
   const creations = [];
+  const notifications = [];
   await withMethods(repository, {
     getAccountAssignmentOptions: async () => options(),
     reservePersonnelAccount: async (args) => { assert.equal(args.delegated, true); return { target_id: TARGET, completed: true }; },
@@ -104,7 +108,11 @@ test('PHN creates only municipality-scoped Health Supervisor and RHU Personnel a
     for (const input of [
       creation({ role: 'health_supervisor', barangayId: BARANGAY }),
       creation({ role: 'rhu_personnel', facilityId: FACILITY, rhuStations: ['triage'] }),
-    ]) await users.createUser({ actor, input, notificationProcessor: async () => ({ mailServerAccepted: 1 }) });
+    ]) await users.createUser({
+      actor,
+      input,
+      notificationProcessor: async ({ targetId }) => { notifications.push(targetId); return { mailServerAccepted: 1 }; },
+    });
     await assert.rejects(() => users.createUser({ actor, input: creation({ role: 'bhw', barangayId: BARANGAY }) }),
       (error) => error.statusCode === 403);
     await assert.rejects(() => users.createUser({ actor, input: creation({ role: 'health_supervisor', municipalityId: OTHER_MUNICIPALITY, barangayId: BARANGAY }) }),
@@ -114,6 +122,7 @@ test('PHN creates only municipality-scoped Health Supervisor and RHU Personnel a
   assert.equal(creations[0].barangay_id, BARANGAY);
   assert.equal(creations[1].facility_id, FACILITY);
   assert.deepEqual(creations[1].rhu_stations, ['triage']);
+  assert.deepEqual(notifications, [TARGET, TARGET]);
 });
 
 test('Health Supervisor creates BHW only in the actor assigned barangay', async () => {
@@ -186,7 +195,9 @@ test('unconfirmed temporary-password email delivery is an explicit failure, neve
       input: creation(),
       notificationProcessor: async () => ({ failed: 1 }),
     }), (error) => error.statusCode === 503
+      && error.code === 'ACCOUNT_CREATED_EMAIL_FAILED'
       && /invitation email was not confirmed \(SMTP_RECIPIENT_REJECTED\)/i.test(error.message)
+      && /Resend invitation/i.test(error.message)
       && /do not create another account/i.test(error.message)
       && !/password:\s*\S+/i.test(error.message));
     assert.equal(provisioned.profile.must_change_password, true);
@@ -197,6 +208,7 @@ test('unconfirmed temporary-password email delivery is an explicit failure, neve
 test('health personnel are always approved and activated; administrative account decisions remain separate', async () => {
   for (const role of ['phn', 'admin']) {
     let payload;
+    const notifications = [];
     await withMethods(repository, {
       getAccountAssignmentOptions: async () => options(),
       reservePersonnelAccount: async () => ({ target_id: TARGET, completed: false }),
@@ -207,14 +219,56 @@ test('health personnel are always approved and activated; administrative account
       await users.createUser({
         actorId: ACTOR,
         input: creation({ role, approvalStatus: 'pending', activate: false }),
-        notificationProcessor: async () => ({ mailServerAccepted: 1 }),
+        notificationProcessor: async ({ targetId }) => { notifications.push(targetId); return { mailServerAccepted: 1 }; },
       });
       assert.equal(payload.approval_status, role === 'phn' ? 'approved' : 'pending');
       assert.equal(payload.activation_requested, role === 'phn');
       assert.equal(payload.status, role === 'phn' ? 'disabled' : 'pending_verification');
       assert.deepEqual(payload.rhu_stations, []);
       if (role === 'admin') assert.equal(payload.municipality_id, null);
+      assert.deepEqual(notifications, role === 'phn' ? [TARGET] : []);
     });
+  }
+});
+
+test('approved administrator creation confirms its outbox email inline', async () => {
+  const notifications = [];
+  await withMethods(repository, {
+    reservePersonnelAccount: async () => ({ target_id: TARGET, completed: false }),
+    createManagedAuthAccount: async () => TARGET,
+    createPersonnelAccountProfile: async () => profile({ role: 'admin' }),
+    getProfileById: async () => profile({ role: 'admin', notification: { status: 'sent', eventType: 'approved' } }),
+  }, async () => {
+    const result = await users.createUser({
+      actorId: ACTOR,
+      input: creation({ role: 'admin' }),
+      notificationProcessor: async ({ targetId }) => { notifications.push(targetId); return { mailServerAccepted: 1 }; },
+    });
+    assert.deepEqual(notifications, [TARGET]);
+    assert.equal(result.notification.status, 'sent');
+  });
+});
+
+test('production exposes only the safe partial-account email delivery message', () => {
+  const previous = env.isProduction;
+  env.isProduction = true;
+  try {
+    const response = {
+      statusCode: null,
+      body: null,
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; },
+    };
+    const error = new ApiError(
+      503,
+      'The account was created, but its invitation email was not confirmed (SMTP_EAUTH). Use Resend invitation. Do not create another account.',
+    ).withCode('ACCOUNT_CREATED_EMAIL_FAILED');
+    errorHandler(error, { path: '/api/users', method: 'POST', requestId: 'test' }, response, () => {});
+    assert.equal(response.statusCode, 503);
+    assert.match(response.body.error.message, /account was created/i);
+    assert.equal(response.body.error.code, 'ACCOUNT_CREATED_EMAIL_FAILED');
+  } finally {
+    env.isProduction = previous;
   }
 });
 
@@ -256,6 +310,8 @@ test('invalid operations, manual passwords, invalid contact numbers, and residen
     for (const input of [
       creation({ operationId: undefined }),
       creation({ operationId: 'invalid' }),
+      creation({ email: 'not-an-email' }),
+      creation({ email: 'bad@@example.test' }),
       creation({ password: PASSWORD }),
       creation({ temporaryPassword: PASSWORD }),
       creation({ contact: '0917 123 4567' }),

@@ -1877,6 +1877,37 @@ export const supabaseRepository = {
   },
 
   /**
+   * Atomically links an unlinked resident to one Auth identity without
+   * overwriting a concurrent link. The database unique index also prevents
+   * assigning one Auth user to multiple residents.
+   */
+  async linkResidentToAuthUser(id, authUserId) {
+    const supabase = getServiceClient();
+    const { data: existingLink, error: lookupError } = await supabase
+      .from(TABLES.residents)
+      .select('id')
+      .eq('auth_user_id', authUserId)
+      .maybeSingle();
+    throwOnError(lookupError, 'Could not verify resident account link');
+    if (existingLink) {
+      return existingLink.id === id ? this.getResident(id) : null;
+    }
+
+    const { data, error } = await supabase
+      .from(TABLES.residents)
+      .update({ auth_user_id: authUserId, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .is('auth_user_id', null)
+      .select('*')
+      .maybeSingle();
+    throwOnError(error, 'Could not link resident account');
+    if (data) return residentFromRow(data);
+
+    const current = await this.getResident(id);
+    return current?.authUserId === authUserId ? current : null;
+  },
+
+  /**
    * Manual-verification queue: residents filtered by verification status,
    * scope and search term. Oldest submission first so the reviewer works
    * through the queue in order. Returns { rows, total }.

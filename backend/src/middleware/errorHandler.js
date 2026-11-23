@@ -61,7 +61,7 @@ const errorHandler = (err, req, res, next) => {
 
   const message = clinicalRequest && isServerError
     ? 'The clinical operation could not be confirmed. Your entries are still available; retry using the same form.'
-    : isServerError && env.isProduction
+    : isServerError && env.isProduction && err.code !== 'ACCOUNT_CREATED_EMAIL_FAILED'
     ? 'Something went wrong. Please try again later.'
     : err.message || 'Unexpected error';
 

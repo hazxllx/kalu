@@ -2,11 +2,12 @@ import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
-import idempotency from '../middleware/idempotency.js';
+import idempotency, { createIdempotencyMiddleware } from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import * as residentsController from '../controllers/residents.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import ApiError from '../utils/apiError.js';
 
 /**
  * Master resident-registry and resident self-service profile routes.
@@ -29,6 +30,7 @@ import asyncHandler from '../utils/asyncHandler.js';
  *   GET   /residents/me/health-records  Resident self-service clinical records (`residentSelf`)
  *   GET   /residents/:id                Single resident profile & risk summary (`residents.profile.view`)
  *   POST  /residents/:id/account        Invite & link login account to existing resident (`accounts.create`)
+ *   POST  /residents/:id/resend-invitation Resend setup link for its linked pending account (`accounts.create`)
  *   PUT   /residents/:id                Staff profile correction (`residents.edit`, idempotent)
  *
  * Defense-in-depth scoping:
@@ -60,6 +62,14 @@ const requireAccountCreationPermission = (req, res, next) => {
   if (!requestsAccount) return next();
   return authorize(FEATURE_ROLES.residents, { permission: 'accounts.create' })(req, res, next);
 };
+
+const requireInvitationIdempotencyKey = (req, res, next) => {
+  if (!String(req.get('Idempotency-Key') || '').trim()) {
+    return next(ApiError.badRequest('Resending an invitation requires an Idempotency-Key.').withCode('IDEMPOTENCY_KEY_REQUIRED'));
+  }
+  return next();
+};
+const residentInvitationIdempotency = createIdempotencyMiddleware({ durable: true });
 
 // GET / : Scope-aware resident directory listing and search (query params: `q`, barangay,
 // purok, risk level, verification status, pagination) for Health Supervisor / PHN / MHO.
@@ -107,6 +117,14 @@ router.post(
   '/:id/account',
   authorize(FEATURE_ROLES.residents, { permission: 'accounts.create' }),
   asyncHandler(residentsController.createResidentAccount),
+);
+
+router.post(
+  '/:id/resend-invitation',
+  authorize(FEATURE_ROLES.residents, { permission: 'accounts.create' }),
+  requireInvitationIdempotencyKey,
+  residentInvitationIdempotency,
+  asyncHandler(residentsController.resendResidentInvitation),
 );
 
 // PUT /:id : Applies PHN / Health Supervisor demographic and health profile updates

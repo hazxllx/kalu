@@ -195,6 +195,14 @@ put a service-role key in a `VITE_` variable. Redeploy after adding or changing
 these settings. The dashboard configuration is not available to verify from
 this repository.
 
+Supabase Auth invitations use the checked-in `supabase/templates/invite.html`
+template. Production Auth SMTP is configured for Brevo in
+`supabase/config.production.toml`; provide `SMTP_USER`, `SMTP_PASSWORD`, and
+`SMTP_FROM` as deployment secrets/environment values (with `SMTP_FROM` set to
+the verified sender email address). Apply that configuration to the hosted
+Supabase project as well as configuring the backend's matching SMTP variables.
+Do not store SMTP credentials in source control.
+
 ### Database Setup
 
 Apply and review migrations only through the Supabase project workflow approved
