@@ -1191,7 +1191,7 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
     }
     const { error: linkError } = await supabase.from('follow_ups').update({
       consultation_id: visit.id, linked_service_type: 'consultation', linked_service_id: visit.id,
-      status: 'Completed', completed_at: new Date().toISOString(),
+      status: 'Completed', completed_at: new Date().toISOString(), completed_by: user.id,
     }).eq('id', followUp.id).eq('resident_id', resident.id);
     if (linkError) throw new Error(linkError.message || 'Could not link the completed consultation to its follow-up');
   }

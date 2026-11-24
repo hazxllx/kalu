@@ -133,8 +133,13 @@ function AuthorizedInbox({ user }) {
   }, [detail, user.id]);
 
   const openedReport = detailContent && detailContent.id === detail?.id ? detailContent : null;
-  const isRecipient = openedReport?.recipientRole === user.role && openedReport.createdBy !== user.id &&
-    (user.role !== "rhu_personnel" || openedReport.recipientFacilityId === user.facilityId);
+  const isRecipient = openedReport?.createdBy !== user.id &&
+    (
+      (openedReport?.recipientRole === user.role &&
+        (user.role !== "rhu_personnel" || openedReport.recipientFacilityId === user.facilityId))
+      ||
+      (user.role === "phn" && openedReport?.recipientRole === "rhu_personnel" && openedReport.status === "Submitted")
+    );
   const reviewStatus = isRecipient ? openedReport.status : null;
 
   const sortedRows = useMemo(
@@ -391,7 +396,7 @@ function AuthorizedInbox({ user }) {
               <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
                 <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Close</button>
                  {reviewStatus === "Submitted" && (
-                  <button disabled={busy} onClick={() => act(detail, "Received")} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue disabled:opacity-60">Mark Received</button>
+                  <button disabled={busy} onClick={() => act(detail, "Received")} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue disabled:opacity-60">Mark as Received</button>
                 )}
                  {reviewStatus === "Received" && (
                   <>

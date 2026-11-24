@@ -853,6 +853,7 @@ const DEFAULT_GRANTS = Object.freeze({
     'referrals.reject',
     'referrals.status.update',
     'referrals.history.view',
+    'reports.view',
     'services.view',
   ],
 

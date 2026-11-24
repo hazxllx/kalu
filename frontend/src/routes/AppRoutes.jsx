@@ -555,6 +555,13 @@ const MunicipalSubmissions = appPage(
     )
 );
 
+const RhuIncomingReports = appPage(
+  () =>
+  import(
+    '@/features/reports/pages/RhuIncomingReports'
+  )
+);
+
 const HealthTrends = appPage(
   () =>
     import(
@@ -1302,6 +1309,10 @@ const AppRoutes = () => (
         <Route
           path="incoming-referrals"
           element={<IncomingReferrals />}
+        />
+        <Route
+          path="reports"
+          element={<RhuIncomingReports />}
         />
 
         {/* RHU Personnel accounts are station-assigned; each account sees its own workspace. */}

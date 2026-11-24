@@ -461,6 +461,13 @@ children: [
       group: "Operations",
     },
     {
+      label: "Incoming Reports",
+      icon: "BarChart3",
+      path: "/app/rhu_personnel/reports",
+      permission: "reports.view",
+      group: "Operations",
+    },
+    {
       label: "Consultation",
       icon: "Stethoscope",
       path: "/app/rhu_personnel/consultation",
@@ -472,6 +479,7 @@ children: [
       label: "Medical Certificate Requests",
       icon: "FileText",
       path: "/app/rhu_personnel/certificates",
+      permission: "certificates.request",
       station: "triage",
       group: "Operations",
     },
