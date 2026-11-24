@@ -192,6 +192,7 @@ const toReport = (row) => {
   if (!row) return null;
   const sender = row.sender || null;
   const reviewer = row.reviewer || null;
+  const receiver = row.receiver || null;
   // `content` is only selected by the detail/create/review queries, never the
   // list query, so a listed row has no `content` key at all. Expose
   // `hasContent` only when the column was actually read.
@@ -212,6 +213,8 @@ const toReport = (row) => {
     status: row.status,
     remarks: row.remarks || '',
     submittedAt: row.submitted_at || '',
+    receivedAt: row.received_at || '',
+    receivedByName: receiver?.full_name || receiver?.email || '',
     reviewedAt: row.reviewed_at || '',
     reviewedByName: reviewer?.full_name || reviewer?.email || '',
     createdAt: row.created_at,
@@ -239,14 +242,15 @@ const toHistoryEntry = (row) => ({
 
 const SENDER_EMBED = 'sender:profiles!created_by(full_name, email, role)';
 const REVIEWER_EMBED = 'reviewer:profiles!reviewed_by(full_name, email, role)';
+const RECEIVER_EMBED = 'receiver:profiles!received_by(full_name, email, role)';
 const BARANGAY_EMBED = 'barangay:barangays(name)';
-const EMBEDS = `${SENDER_EMBED}, ${REVIEWER_EMBED}, ${BARANGAY_EMBED}`;
+const EMBEDS = `${SENDER_EMBED}, ${REVIEWER_EMBED}, ${RECEIVER_EMBED}, ${BARANGAY_EMBED}`;
 // Scalar columns common to every query. `content` is intentionally excluded
 // here so list/inbox queries stay lean (a submitted snapshot can be large).
 const BASE_COLUMNS = [
   'id', 'report_type', 'report_period', 'title', 'created_by', 'sender_role',
   'recipient_role', 'recipient_facility_id', 'municipality_id', 'barangay_id', 'status', 'remarks',
-  'submitted_at', 'reviewed_by', 'reviewed_at', 'created_at', 'updated_at',
+  'submitted_at', 'received_by', 'received_at', 'reviewed_by', 'reviewed_at', 'created_at', 'updated_at',
 ].join(', ');
 // List/inbox: metadata + embeds, WITHOUT the content snapshot.
 const LIST_SELECT = `${BASE_COLUMNS}, ${EMBEDS}`;
@@ -319,8 +323,15 @@ export const list = async ({ user, box = 'incoming', status = null, limit = 200,
 
 const isReportRecipient = (user, row) => matchesReportScope(user, row) &&
   row.created_by !== user.id && row.status !== REPORT_STATUS.DRAFT &&
-  row.recipient_role === user.role &&
-  (user.role !== ROLES.RHU_PERSONNEL || row.recipient_facility_id === user.facilityId);
+  (
+    (row.recipient_role === user.role &&
+      (user.role !== ROLES.RHU_PERSONNEL || row.recipient_facility_id === user.facilityId))
+    || (
+      row.recipient_role === ROLES.RHU_PERSONNEL &&
+      user.role === ROLES.PHN &&
+      row.status === REPORT_STATUS.SUBMITTED
+    )
+  );
 
 const canReadReport = (user, row) => isReportSender(user, row) || isReportRecipient(user, row) || (
   matchesReportScope(user, row) && row.created_by !== user.id && row.status !== REPORT_STATUS.DRAFT &&
@@ -557,9 +568,13 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
   const row = {
     status: target,
     remarks: text(remarks) || existing.remarks || '',
-    reviewed_by: user.id,
-    reviewed_at: new Date().toISOString(),
+    reviewed_by: target === REPORT_STATUS.RECEIVED ? null : user.id,
+    reviewed_at: target === REPORT_STATUS.RECEIVED ? null : new Date().toISOString(),
   };
+  if (target === REPORT_STATUS.RECEIVED) {
+    row.received_by = user.id;
+    row.received_at = new Date().toISOString();
+  }
   const { data, error } = await supabase.from(TABLE).update(row)
     .eq('id', id).eq('status', existing.status).select(DETAIL_SELECT).maybeSingle();
   throwOnError(error, 'Could not update report');

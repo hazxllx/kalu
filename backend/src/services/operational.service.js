@@ -693,7 +693,9 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     const completed = status === 'Completed';
     const { error } = await serviceSupabase.from('follow_ups').update({
       linked_service_type: 'immunization', linked_service_id: String(recordId),
-      status: completed ? 'Completed' : 'Ongoing', completed_at: completed ? new Date().toISOString() : null,
+      status: completed ? 'Completed' : 'Ongoing',
+      completed_at: completed ? new Date().toISOString() : null,
+      completed_by: completed ? user.id : null,
     }).eq('id', followUpId).eq('resident_id', resident.id).eq('linked_service_id', '');
     throwOnError(error, 'Could not link the immunization to its follow-up');
   };
@@ -993,6 +995,7 @@ export const update = async ({
   if (normalizedKind === 'maternal') Object.assign(row, validateMaternalRecord(row));
   if (normalizedKind === 'followups' && text(row.status) === 'Completed' && !existing.completed_at) {
     row.completed_at = new Date().toISOString();
+    row.completed_by = user.id;
   }
   if (normalizedKind === 'followups' && Object.prototype.hasOwnProperty.call(payload, 'status')) {
     assertFollowUpTransition(existing, payload.status);
@@ -1023,7 +1026,9 @@ export const update = async ({
     if (linkedFollowUp && linkedFollowUp.status !== 'Completed' && linkedFollowUp.status !== 'Cancelled') {
       const completed = text(data.status) === 'Completed';
       const { error: progressError } = await supabase.from('follow_ups').update({
-        status: completed ? 'Completed' : 'Missed', completed_at: completed ? new Date().toISOString() : null,
+        status: completed ? 'Completed' : 'Missed',
+        completed_at: completed ? new Date().toISOString() : null,
+        completed_by: completed ? user.id : null,
       }).eq('id', linkedFollowUp.id);
       throwOnError(progressError, 'Could not update follow-up progress');
     }
@@ -1037,6 +1042,7 @@ export const update = async ({
       (dateSent && text(existing.scheduled_date) !== text(data.scheduled_date)) ||
       (timeSent && text(existing.scheduled_time).slice(0, 5) !== text(data.scheduled_time).slice(0, 5));
     if (newStatus === 'Completed' && text(existing.status) !== 'Completed') {
+      await audit(supabase, user, 'FOLLOWUP_COMPLETED', table, id, resident);
       await notifyResident(supabase, resident, 'followups', 'completed', data);
     } else if (newStatus === 'Missed' && text(existing.status) !== 'Missed') {
       await notifyResident(supabase, resident, 'followups', 'missed', data);
