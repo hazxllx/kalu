@@ -491,9 +491,15 @@ export function ServiceDetailsDialog({ service, readOnly = false, onClose, onReg
   const statusLabel = readOnly
     ? "Available"
     : isCancelled ? "Cancelled" : plan?.status || (service.registrationFull ? "Fully booked" : availability.open ? "Open for registration" : "Registration closed");
+  const facilityName = service.facilityName || service.facility || "";
+  const serviceBarangay = service.barangay || "";
   const information = [
-    { label: "Facility", value: service.facilityName || service.facility },
-    { label: "Coverage / Barangay", value: service.barangay },
+    ...(facilityName && serviceBarangay
+      ? [
+          { label: "Facility", value: facilityName },
+          { label: "Coverage / Barangay", value: serviceBarangay },
+        ]
+      : [{ label: "Barangay or facility", value: serviceBarangay || facilityName }]),
     { label: "Schedule / Date", value: scheduledDate },
     { label: "Time", value: times },
     { label: "Registration deadline", value: deadline },
@@ -501,9 +507,11 @@ export function ServiceDetailsDialog({ service, readOnly = false, onClose, onReg
     { label: "Recurring days", value: service.weekdays?.length ? formatWeekdays(service.weekdays) : "" },
   ];
   const sections = [
-    { title: "Requirements", content: service.requirements },
-    { title: "Eligibility", content: service.eligibility },
-    { title: "Additional Instructions", content: service.additionalInstructions || service.instructions },
+    ...(service.requirements ? [{ title: "Requirements", content: service.requirements }] : []),
+    ...(service.eligibility ? [{ title: "Eligibility", content: service.eligibility }] : []),
+    ...((service.additionalInstructions || service.instructions)
+      ? [{ title: "Additional Instructions", content: service.additionalInstructions || service.instructions }]
+      : []),
     ...(deadline ? [{ title: "Registration", content: `Please register by ${deadline}.` }] : []),
     ...(service.registrationFull ? [{ title: "Availability", content: "This service has reached its resident registration limit." }] : []),
     ...(!readOnly && !availability.open && !isCancelled && !service.registrationFull

@@ -30,8 +30,8 @@ function ServiceRecordDetail({ label, value }) {
   if (value === null || value === undefined || value === "") return null;
   return (
     <div className="min-w-0">
-      <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</p>
-      <p className="mt-1 whitespace-pre-line break-words text-sm text-brand-ink">{value}</p>
+      <p className="text-xs font-medium text-brand-gray">{label}</p>
+      <p className="mt-1 whitespace-pre-line break-words text-sm leading-5 text-brand-ink">{value}</p>
     </div>
   );
 }
@@ -72,10 +72,10 @@ const selectIconCls = "pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.
 
 const bmiBadgeClass = (category) => {
   const normalized = String(category || "").toLowerCase();
-  if (normalized === "underweight") return "bg-amber-50 text-amber-800 ring-amber-200";
-  if (normalized === "normal") return "bg-green-50 text-green-800 ring-green-200";
-  if (normalized === "overweight") return "bg-orange-50 text-orange-800 ring-orange-200";
-  if (normalized === "obese") return "bg-red-50 text-red-800 ring-red-200";
+  if (normalized === "underweight") return "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-700/50";
+  if (normalized === "normal") return "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700/50";
+  if (normalized === "overweight") return "bg-orange-50 text-orange-800 ring-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:ring-orange-700/50";
+  if (normalized === "obese") return "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:ring-rose-700/50";
   return "";
 };
 
@@ -472,7 +472,7 @@ export default function HealthRecord() {
 
   const renderReferralHistory = () => (
     <section aria-labelledby="referral-history-title">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
         <div>
           <h2 id="referral-history-title" className="text-lg font-semibold leading-6 text-brand-ink">Referral History</h2>
           <p className="mt-1 text-sm text-brand-gray">Referrals created for you by authorized health personnel.</p>
@@ -483,19 +483,19 @@ export default function HealthRecord() {
       {referrals.length === 0 ? (
         <Card className="p-8 text-center text-sm text-brand-gray">No referral records are available.</Card>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-brand-border bg-white">
+        <div className="overflow-hidden rounded-xl border border-brand-border bg-white shadow-card">
           <div className="hidden grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] gap-3 border-b border-brand-border bg-brand-bg/50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-brand-gray md:grid">
             <span>Date</span><span>Destination</span><span>Reason</span><span>Status</span><span>Action</span>
           </div>
           <ul className="divide-y divide-brand-border md:divide-y-0">
             {referrals.map((record) => {
               const status = record.serviceProgressStatus || record.status || "Pending";
-              const statusClass = /Completed/.test(status) ? "bg-green-50 text-green-800"
-                : /Rejected|Cancelled/.test(status) ? "bg-red-50 text-red-800"
+              const statusClass = /Completed/i.test(status) ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                : /Rejected|Cancelled/i.test(status) ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
                   : /Pending/.test(status) ? "bg-amber-50 text-amber-800"
-                    : "bg-blue-50 text-blue-800";
+                    : "bg-blue-50 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
               return (
-                <li key={record.id} className="grid gap-3 px-4 py-4 md:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] md:items-center">
+                <li key={record.id} className="grid gap-3 border-b border-brand-border px-4 py-4 last:border-b-0 md:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] md:items-center md:border-b-0 md:px-4">
                   <div><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Referral Date</p><p className="mt-0.5 text-sm text-brand-ink">{formatDate(record.date)}</p></div>
                   <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Destination</p><p className="mt-0.5 break-words text-sm font-medium text-brand-ink">{record.facility || "Not recorded"}</p></div>
                   <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Reason</p><p className="mt-0.5 break-words text-sm text-brand-gray">{record.reason || "Not recorded"}</p></div>
@@ -569,7 +569,7 @@ export default function HealthRecord() {
 
   const renderHealthServiceHistory = () => (
     <section aria-labelledby="health-service-history-title">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
         <div>
           <h2 id="health-service-history-title" className="text-lg font-semibold leading-6 text-brand-ink">Health Service History</h2>
           <p className="mt-1 text-sm text-brand-gray">Services delivered to you through health programs and scheduled services.</p>
@@ -580,7 +580,7 @@ export default function HealthRecord() {
         <Card className="p-8 text-center text-sm text-brand-gray">No delivered health services have been recorded yet.</Card>
       ) : (
         <>
-          <div className="space-y-3">
+          <div className="space-y-4">
             {visibleServiceRecords.map((record) => (
               <Card key={record.id} className="overflow-hidden p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-brand-border pb-3 dark:border-border">
@@ -592,9 +592,9 @@ export default function HealthRecord() {
                       {record.providedByName && <span>Provided by {record.providedByName}</span>}
                     </div>
                   </div>
-                  <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-800">Completed</span>
+                  <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Completed</span>
                 </div>
-                <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                <div className="mt-4 grid gap-3 border-t border-brand-border pt-4 text-sm sm:grid-cols-2 dark:border-border">
                   <ServiceRecordDetail label="Service provided" value={record.serviceProvided} />
                   <ServiceRecordDetail label="Assessment" value={record.assessment} />
                   <ServiceRecordDetail label="Recommendations" value={record.recommendations} />
@@ -619,7 +619,7 @@ export default function HealthRecord() {
 
   const renderConsultationHistory = () => (
     <section aria-labelledby="consultation-history-title">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div>
             <h2 id="consultation-history-title" className="text-lg font-semibold leading-6 text-brand-ink">Consultation History</h2>
@@ -631,7 +631,7 @@ export default function HealthRecord() {
         </p>
       </div>
 
-      <div className="mb-4 rounded-xl border border-brand-border bg-white p-3 sm:p-4">
+      <div className="mb-4 rounded-xl border border-brand-border bg-white p-4 shadow-card sm:p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand-gray">
             Filter records
@@ -649,13 +649,13 @@ export default function HealthRecord() {
             type="button"
             onClick={resetFilters}
             disabled={!filtersActive(filters) && !hasFilters}
-            className="inline-flex items-center gap-1.5 rounded-btn px-2 py-1 text-xs font-medium text-brand-blue transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-brand-gray/60 disabled:hover:bg-transparent"
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-btn px-2.5 py-1 text-xs font-medium text-brand-blue transition-colors hover:bg-brand-bg disabled:cursor-not-allowed disabled:text-brand-gray/60 disabled:hover:bg-transparent"
           >
             Reset filters
           </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <div>
             <label htmlFor="ch-service" className={compactLabel}>Health Service</label>
             <div className={selectWrapCls}>
@@ -726,7 +726,7 @@ export default function HealthRecord() {
           <p className="mt-0.5 text-xs text-brand-gray">{error}</p>
         </div>
       ) : consultations.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-brand-border p-8 text-center">
+        <div className="rounded-xl border border-dashed border-brand-border bg-white p-6 text-center dark:bg-card sm:p-8">
           {hasFilters ? (
             <>
               <p className="text-sm font-medium text-brand-ink">No consultations match your filters</p>
@@ -734,7 +734,7 @@ export default function HealthRecord() {
               <button
                 type="button"
                 onClick={resetFilters}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue"
+                className="mt-4 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue dark:bg-card"
               >
                 <RotateCcw className="h-3.5 w-3.5" /> Clear Filters
               </button>
@@ -750,8 +750,8 @@ export default function HealthRecord() {
         <>
         <div className="space-y-3">
           {visibleConsultations.map((c) => (
-            <article key={c.id} className="overflow-hidden rounded-xl border border-brand-border bg-white">
-              <div className="grid min-w-0 gap-4 p-4 md:grid-cols-[9.5rem_minmax(0,1fr)] md:gap-5">
+            <article key={c.id} className="overflow-hidden rounded-xl border border-brand-border bg-white shadow-card dark:bg-card">
+              <div className="grid min-w-0 gap-4 p-4 sm:p-5 md:grid-cols-[9.5rem_minmax(0,1fr)] md:gap-5">
                 <div className="flex items-center gap-3 border-b border-brand-border pb-3 md:block md:border-b-0 md:border-r md:pb-0 md:pr-5">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-brand-ink">{formatDate(c.date)}</p>
@@ -765,7 +765,7 @@ export default function HealthRecord() {
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <RiskBadge level={consultationRiskLevel(c)} mediumLabel="Medium" />
                       {c.serviceCategory && (
-                        <span className="rounded-full bg-slate-50 px-2.5 py-1 text-xs font-medium text-brand-gray">{c.serviceCategory}</span>
+                        <span className="rounded-full bg-brand-bg px-2.5 py-1 text-xs font-medium text-brand-gray">{c.serviceCategory}</span>
                       )}
                       {c.seenBy && (
                         <span className="inline-flex items-center gap-1.5 text-xs text-brand-gray">
@@ -776,20 +776,20 @@ export default function HealthRecord() {
                     {c.status && (
                       <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium capitalize ${
                         String(c.status).toLowerCase() === "completed"
-                          ? "bg-green-50 text-green-800"
+                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
                           : "bg-slate-100 text-slate-700"
                       }`}>
                         {String(c.status).replaceAll("_", " ")}
                       </span>
                     )}
                   </div>
-                  <div className="grid min-w-0 gap-x-6 gap-y-3 lg:grid-cols-2 lg:gap-y-2">
+          <div className="grid min-w-0 gap-x-6 gap-y-3 lg:grid-cols-2 lg:gap-y-3">
                     {consultationFields(c).map((column, columnIndex) => (
                       <div key={columnIndex} className="min-w-0 space-y-2">
                         {column.map(({ label, value, preserveLines }) => (
-                          <div key={label} className="grid min-w-0 grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-x-2 text-sm leading-5">
-                            <span className="font-medium text-brand-ink">{label}</span>
-                            <span className={`min-w-0 break-words text-brand-gray ${preserveLines ? "whitespace-pre-line" : ""}`}>{dash(value)}</span>
+                          <div key={label} className="grid min-w-0 grid-cols-1 items-start gap-x-2 text-sm leading-5 sm:grid-cols-[7.5rem_minmax(0,1fr)]">
+                            <span className="text-xs font-medium text-brand-gray sm:text-sm sm:text-brand-ink">{label}</span>
+                            <span className={`min-w-0 break-words text-sm text-brand-ink sm:text-brand-gray ${preserveLines ? "whitespace-pre-line" : ""}`}>{dash(value)}</span>
                           </div>
                         ))}
                       </div>
@@ -798,7 +798,7 @@ export default function HealthRecord() {
                 </div>
               </div>
               {vitalCards(c.vitals, consultationBloodPressureClassification(c)).length > 0 && (
-                <div className="border-t border-brand-border bg-slate-50/60 px-4 py-3">
+                <div className="border-t border-brand-border bg-brand-bg/60 px-4 py-3 sm:px-5">
                   <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-brand-ink">
                     Vital Signs
                   </h3>
@@ -854,7 +854,7 @@ export default function HealthRecord() {
   return (
     <div className="mx-auto w-full max-w-[1180px]">
       <PageHeader
-        eyebrow="Resident Health Services"
+        eyebrow="Resident Health Records"
         title="My Health Record"
         subtitle="A complete view of your medical history and vitals."
         dense
@@ -884,8 +884,8 @@ export default function HealthRecord() {
         <Card className="p-6 text-sm text-brand-gray">Loading your health record…</Card>
       ) : (
         <>
-          <Card className="mb-5 rounded-card px-5 py-5 shadow-none">
-            <div className="grid grid-cols-2 gap-x-0 gap-y-5 text-sm sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+          <Card className="mb-5 rounded-card p-4 shadow-none sm:p-5">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-4 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
               {[
                 ["Resident name", resident?.name],
                 ["Health Record No.", resident?.healthRecordNo || resident?.healthRecordNumber || resident?.health_record_no],
@@ -894,14 +894,14 @@ export default function HealthRecord() {
                 ["Age", resident?.age],
                 ["Sex", resident?.sex],
               ].map(([label, value]) => (
-                <div key={label} className="min-w-0 px-0 pr-3 sm:px-3 sm:first:pl-0 xl:border-l xl:border-brand-border xl:first:border-l-0 xl:first:pl-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-gray">{label}</p>
-                  <p className="mt-1.5 min-w-0 break-words text-sm font-medium text-brand-ink">{dash(value)}</p>
+                <div key={label} className="min-w-0 rounded-lg bg-brand-bg/60 px-3 py-2.5 xl:bg-transparent xl:px-0 xl:py-0 xl:first:pl-0">
+                  <p className="text-xs font-medium text-brand-gray">{label}</p>
+                  <p className="mt-1 min-w-0 break-words text-sm font-semibold leading-5 text-brand-ink">{dash(value)}</p>
                 </div>
               ))}
-              <div className="px-0 sm:px-3 xl:border-l xl:border-brand-border">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-gray">Verification</p>
-                <p className="mt-1.5 inline-flex border-l-2 border-brand-gold bg-brand-bg px-2.5 py-1 text-xs font-semibold text-brand-ink">
+              <div className="min-w-0 rounded-lg bg-brand-bg/60 px-3 py-2.5 xl:bg-transparent xl:px-0 xl:py-0">
+                <p className="text-xs font-medium text-brand-gray">Verification</p>
+                <p className="mt-1 inline-flex max-w-full break-words border-l-2 border-brand-gold bg-brand-bg px-2.5 py-1 text-xs font-semibold text-brand-ink">
                   {dash(resident?.verificationStatus)}
                 </p>
               </div>
@@ -909,7 +909,7 @@ export default function HealthRecord() {
           </Card>
 
           {/* Section tabs — Consultation History is a subsection of this page. */}
-          <div className="mb-5 flex w-full overflow-x-auto border-b border-brand-border" role="tablist" aria-label="Health record sections">
+          <div className="mb-5 flex w-full gap-1 overflow-x-auto rounded-xl border border-brand-border bg-white p-1 shadow-card dark:bg-card" role="tablist" aria-label="Health record sections">
             {[
               { key: "overview", label: "Overview" },
               { key: "consultations", label: "Consultation History" },
@@ -924,10 +924,10 @@ export default function HealthRecord() {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`-mb-px shrink-0 border-b-2 px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors sm:px-5 ${
+                  className={`min-h-10 shrink-0 rounded-lg px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors sm:px-4 ${
                     active
-                      ? "border-b-brand-gold bg-brand-blue text-white"
-                      : "border-transparent text-brand-ink/70 hover:bg-brand-bg hover:text-brand-ink"
+                      ? "bg-brand-blue text-white shadow-sm"
+                      : "text-brand-ink/70 hover:bg-brand-bg hover:text-brand-ink"
                   }`}
                 >
                   {tab.label}
@@ -938,20 +938,20 @@ export default function HealthRecord() {
 
           {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : activeTab === "referrals" ? renderReferralHistory() : (
             <>
-              <div className="mb-2 flex items-center gap-2">
+              <div className="mb-3 flex flex-wrap items-center gap-2.5">
                 <RiskBadge level={consultationRiskLevel(latestRecord?.consultations?.[0])} mediumLabel="Medium" />
                 <h3 className="text-lg font-semibold leading-6 text-brand-ink">
                   Latest Vitals{latestRecord?.consultations?.length ? ` — ${formatDate(latestRecord.consultations[0].date)}` : ""}
                 </h3>
               </div>
-              <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+              <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
                 {latestVitals.length === 0 ? (
                   <Card className="p-5 text-sm text-brand-gray xl:col-span-4">No vitals recorded yet.</Card>
                 ) : (
                   latestVitals.map((v) => (
                     <Card key={v.label} className="rounded-lg p-4 shadow-none">
-                      <p className="text-sm text-brand-gray">{v.label}</p>
-                      <p className="font-sans text-lg font-bold text-brand-ink">
+                      <p className="text-sm font-medium text-brand-gray">{v.label}</p>
+                      <p className="mt-1 font-sans text-xl font-semibold leading-6 text-brand-ink">
                         {v.value} {v.unit && <span className="text-sm font-normal text-brand-gray">{v.unit}</span>}
                       </p>
                       {v.category && <span className={`mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${bloodPressureBadgeClassName({ category: v.category })}`}>{v.category}</span>}
@@ -960,44 +960,44 @@ export default function HealthRecord() {
                 )}
               </div>
 
-              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-                <Card className="rounded-lg p-5 shadow-none">
-                  <h3 className="mb-4 text-base font-semibold leading-5 text-brand-ink">Medical History & Allergies</h3>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <Card className="h-full rounded-lg p-4 shadow-none sm:p-5">
+                  <h3 className="mb-4 text-base font-semibold leading-6 text-brand-ink">Medical History & Allergies</h3>
                   <div className="space-y-3 text-sm">
-                    <div className="flex flex-wrap justify-between gap-2 border-b border-brand-border pb-3"><span className="text-brand-gray">Recorded Conditions</span><span className="break-words text-brand-ink font-medium">{medicalHistory.chronicConditions || "Not recorded"}</span></div>
-                    <div className="flex flex-wrap justify-between gap-2 border-b border-brand-border pb-3"><span className="text-brand-gray">Allergies</span><span className="break-words text-brand-ink font-medium">{medicalHistory.allergies || "Not recorded"}</span></div>
-                    <div className="flex flex-wrap justify-between gap-2 border-b border-brand-border pb-3"><span className="text-brand-gray">Latest Prescriptions</span><span className="break-words text-brand-ink font-medium">{medicalHistory.currentMedications || "Not recorded"}</span></div>
+                    <div className="grid grid-cols-1 gap-1 border-b border-brand-border pb-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] sm:gap-3"><span className="text-brand-gray">Recorded Conditions</span><span className="break-words font-medium leading-5 text-brand-ink">{medicalHistory.chronicConditions || "Not recorded"}</span></div>
+                    <div className="grid grid-cols-1 gap-1 border-b border-brand-border pb-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] sm:gap-3"><span className="text-brand-gray">Allergies</span><span className="break-words font-medium leading-5 text-brand-ink">{medicalHistory.allergies || "Not recorded"}</span></div>
+                    <div className="grid grid-cols-1 gap-1 border-b border-brand-border pb-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] sm:gap-3"><span className="text-brand-gray">Latest Prescriptions</span><span className="break-words font-medium leading-5 text-brand-ink">{medicalHistory.currentMedications || "Not recorded"}</span></div>
                     {showPregnancyStatus && (
-                      <div className="flex flex-wrap justify-between gap-2"><span className="text-brand-gray">Recorded Pregnancy Status</span><span className="break-words text-brand-ink font-medium">{medicalHistory.pregnancyStatus || "Not recorded"}</span></div>
+                      <div className="grid grid-cols-1 gap-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] sm:gap-3"><span className="text-brand-gray">Recorded Pregnancy Status</span><span className="break-words font-medium leading-5 text-brand-ink">{medicalHistory.pregnancyStatus || "Not recorded"}</span></div>
                     )}
                   </div>
                 </Card>
 
-                <Card className="rounded-lg p-5 shadow-none">
-                  <h3 className="mb-4 text-base font-semibold leading-5 text-brand-ink">Vaccinations</h3>
+                <Card className="h-full rounded-lg p-4 shadow-none sm:p-5">
+                  <h3 className="mb-4 text-base font-semibold leading-6 text-brand-ink">Vaccinations</h3>
                   <div className="space-y-3">
                     {!latestRecord?.vaccinations?.length ? (
                       <p className="text-sm text-brand-gray">No vaccinations recorded yet.</p>
                     ) : (
                       latestRecord.vaccinations.map((v) => (
-                        <div key={v.id || `${v.name}-${v.date}`} className="flex items-center justify-between gap-3 border-b border-brand-border pb-3 text-sm last:border-0 last:pb-0">
+                        <div key={v.id || `${v.name}-${v.date}`} className="flex items-start justify-between gap-3 border-b border-brand-border pb-3 text-sm last:border-0 last:pb-0">
                           <div className="min-w-0"><p className="truncate font-medium text-brand-ink">{v.name}{v.dose ? ` · ${v.dose}` : ""}</p><p className="text-xs text-brand-gray">{v.date ? formatDate(v.date) : "Date not recorded"}{v.nextDose ? ` · Next dose ${formatDate(v.nextDose)}` : ""}</p></div>
-                          <span className="text-xs text-brand-green bg-brand-green/10 px-2 py-1 rounded-full">{v.status}</span>
+                          <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{v.status}</span>
                         </div>
                       ))
                     )}
                   </div>
                 </Card>
 
-                <Card className="rounded-lg p-5 shadow-none">
+                <Card className="h-full rounded-lg p-4 shadow-none sm:p-5">
                   <LabResultsPanel canUpload />
                 </Card>
 
               </div>
 
               {latestRecord?.referrals?.length > 0 && (
-                <Card className="mt-5 rounded-card p-5 shadow-none">
-                  <div className="mb-4 flex items-end justify-between gap-3 border-b border-brand-border pb-3">
+                <Card className="mt-5 rounded-card p-4 shadow-none sm:p-5">
+                  <div className="mb-4 flex flex-col gap-3 border-b border-brand-border pb-3 sm:flex-row sm:items-end sm:justify-between">
                     <div><h3 className="text-base font-semibold text-brand-ink">Referrals</h3><p className="mt-1 text-sm text-brand-gray">Actual referral records associated with your account.</p></div>
                     <button type="button" onClick={() => setActiveTab("referrals")} className="shrink-0 text-sm font-semibold text-brand-blue hover:underline">Referral History</button>
                   </div>
@@ -1010,7 +1010,7 @@ export default function HealthRecord() {
                           <p className="mt-1 text-sm text-brand-gray">{record.reason || "Reason not recorded"}</p>
                           <p className="mt-1 text-xs text-brand-gray">{formatDate(record.referralDate || record.date)} · {record.assignedPersonnel || "Personnel not recorded"} · {record.serviceProgressStatus || "Pending"}</p>
                         </div>
-                        <button type="button" onClick={() => viewReferralSlip(record)} disabled={referralDownloadId === record.id} className="h-9 rounded-btn border border-brand-blue px-3 text-sm font-semibold text-brand-blue disabled:opacity-50">View Referral Slip</button>
+                        <button type="button" onClick={() => viewReferralSlip(record)} disabled={referralDownloadId === record.id} className="inline-flex h-10 w-full items-center justify-center rounded-btn border border-brand-blue px-3 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-bg disabled:opacity-50 sm:h-9 sm:w-auto">View Referral Slip</button>
                       </article>
                     ))}
                   </div>
@@ -1018,7 +1018,7 @@ export default function HealthRecord() {
               )}
 
               {followUps.length > 0 && (
-                <Card className="mt-5 rounded-card p-5 shadow-none">
+                <Card className="mt-5 rounded-card p-4 shadow-none sm:p-5">
                   <div className="mb-4 border-b border-brand-border pb-3"><h3 className="text-base font-semibold text-brand-ink">Follow-ups</h3><p className="mt-1 text-sm text-brand-gray">Scheduled follow-up records associated with your account.</p></div>
                   <div className="divide-y divide-brand-border">
                     {[...followUps].sort((a, b) => String(a.date).localeCompare(String(b.date))).map((record) => (
@@ -1028,18 +1028,18 @@ export default function HealthRecord() {
                           <p className="mt-1 text-sm font-medium text-brand-ink">{formatDate(record.date)}{record.time ? ` · ${record.time}` : ""}</p>
                           <p className="mt-1 text-xs text-brand-gray">{record.assignedPersonnel || "Assigned personnel not recorded"} · {record.serviceProgressStatus || "Scheduled"}</p>
                         </div>
-                        <button type="button" onClick={() => setSelectedFollowUp(record)} className="h-9 rounded-btn border border-brand-blue px-3 text-sm font-semibold text-brand-blue">View Details</button>
+                        <button type="button" onClick={() => setSelectedFollowUp(record)} className="inline-flex h-10 w-full items-center justify-center rounded-btn border border-brand-blue px-3 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-bg sm:h-9 sm:w-auto">View Details</button>
                       </article>
                     ))}
                   </div>
                 </Card>
               )}
 
-              <Card className="mt-5 rounded-lg p-5 shadow-none">
+              <Card className="mt-5 rounded-lg p-4 shadow-none sm:p-5">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div><h3 className="text-lg font-semibold leading-6 text-brand-ink">Health timeline</h3><p className="mt-1 text-sm text-brand-gray">Consultations, referrals, and follow-ups, newest first.</p></div>
                   <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter health timeline">
-                    {[['all','All Records'],['consultations','Consultations'],['referrals','Referrals'],['follow-ups','Follow-Ups']].map(([value,label]) => <button key={value} type="button" onClick={() => setHistoryTypeFilter(value)} aria-pressed={historyTypeFilter === value} className={`rounded-full border px-3 py-1.5 text-xs font-medium ${historyTypeFilter === value ? 'border-brand-blue bg-brand-blue text-white' : 'border-brand-border text-brand-gray hover:text-brand-ink'}`}>{label}</button>)}
+                    {[['all','All Records'],['consultations','Consultations'],['referrals','Referrals'],['follow-ups','Follow-Ups']].map(([value,label]) => <button key={value} type="button" onClick={() => setHistoryTypeFilter(value)} aria-pressed={historyTypeFilter === value} className={`min-h-9 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue ${historyTypeFilter === value ? 'border-brand-blue bg-brand-blue text-white' : 'border-brand-border text-brand-gray hover:bg-brand-bg hover:text-brand-ink'}`}>{label}</button>)}
                   </div>
                 </div>
                 {visibleTimeline.length ? (
@@ -1047,7 +1047,7 @@ export default function HealthRecord() {
                     <span aria-hidden="true" className="absolute bottom-3 left-[6px] top-3 w-px bg-brand-border" />
                     {visibleTimeline.map((item) => (
                       <li key={item.id} className="relative flex gap-4 py-3 first:pt-0 last:pb-0">
-                        <span className={`relative z-10 mt-1 h-[13px] w-[13px] shrink-0 rounded-full ring-4 ring-white ${
+                        <span className={`relative z-10 mt-1 h-[13px] w-[13px] shrink-0 rounded-full ring-4 ring-white dark:ring-card ${
                           item.tone === "green" ? "bg-brand-green" : item.tone === "yellow" ? "bg-brand-gold" : "bg-brand-blue"
                         }`} />
                         <div className="min-w-0 flex-1">
