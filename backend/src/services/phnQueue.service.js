@@ -32,6 +32,7 @@ import { buildEncounterAssessment, validateClinicalIndicators, encounterBloodPre
   loadEncounterClinicalContext, reconcileConsultationClinicalContext, resolveConsultationMaternal,
   validateConsultationRiskReview } from './clinicalAssessment.service.js';
 import { resolveConsultationMedications } from './consultations.service.js';
+import { normalizeMedications } from './medicines.service.js';
 import { getManilaDateTime, validateConsultationVitals, validateConsultationDateTime } from '../../../shared/consultationClinical.js';
 import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
 import env from '../config/env.js';
@@ -184,6 +185,14 @@ export const normalizePhnVisit = (visit = {}) => {
   if (visit.chiefComplaint !== undefined) patch.chiefComplaint = pickText(visit.chiefComplaint);
   if (visit.clinicalHistory !== undefined) patch.clinicalHistory = pickText(visit.clinicalHistory);
   if (visit.findings !== undefined) patch.findings = pickText(visit.findings);
+  if (visit.diagnosis !== undefined) {
+    if (typeof visit.diagnosis !== 'string' || visit.diagnosis.length > 10000) {
+      throw ApiError.unprocessable('Please correct the consultation details.', {
+        diagnosis: 'Use text of 10,000 characters or fewer.',
+      });
+    }
+    patch.diagnosis = pickText(visit.diagnosis);
+  }
   if (visit.treatmentGiven !== undefined) patch.treatmentGiven = pickText(visit.treatmentGiven);
   if (visit.recommendation !== undefined) patch.recommendation = pickText(visit.recommendation);
   if (visit.healthServiceId !== undefined || visit.health_service_id !== undefined) {
@@ -193,7 +202,7 @@ export const normalizePhnVisit = (visit = {}) => {
   // same catalogue-aware helper the Health-Supervisor consultation uses, so the
   // PHN check-up persists prescriptions identically. Only written when the
   // client includes the field, so unrelated PHN edits never clear it.
-  if (visit.medications !== undefined) patch.medications = visit.medications;
+  if (visit.medications !== undefined) patch.medications = normalizeMedications(visit.medications);
   if (vitals) patch.vitals = vitals;
   if (visit.phn) {
     const phnPatch = {};
@@ -277,6 +286,7 @@ export const updateSubmissionForPhn = async ({
     };
     const same = Object.entries(requested).every(([key, value]) => {
       if (key === 'phn') return Object.entries(value).every(([field, text]) => String(submission.phn?.[field] || '').trim() === text);
+      if (key === 'diagnosis') return String(submission.consultationDetails?.diagnosis || '').trim() === value;
       const saved = key === 'medications' ? normalizeMedications(submission.medications || []) : submission[key];
       return JSON.stringify(comparable(saved)) === JSON.stringify(comparable(value));
     });
@@ -297,6 +307,14 @@ export const updateSubmissionForPhn = async ({
   }
 
   const normalized = normalizePhnVisit(patch);
+  if (normalized.diagnosis !== undefined) {
+    normalized.consultationDetails = {
+      ...submission.consultationDetails,
+      ...normalized.consultationDetails,
+      diagnosis: normalized.diagnosis,
+    };
+    delete normalized.diagnosis;
+  }
   if (normalized.medications !== undefined) normalized.medications = await resolveConsultationMedications({ medications: normalized.medications, previous: submission.medications || [], repo });
   if (normalized.healthServiceId !== undefined) {
     if (!normalized.healthServiceId) {
@@ -345,6 +363,7 @@ export const updateSubmissionForPhn = async ({
         ...(normalized.findings !== undefined ? { findings: normalized.findings } : {}) } };
   const clinicalChanged = complete
     || ['findings','treatmentGiven'].some((field) => normalized[field] !== undefined && normalized[field] !== submission[field])
+    || patch.diagnosis !== undefined
     || (normalized.phn?.assessment !== undefined && normalized.phn.assessment !== submission.phn?.assessment)
     || (normalized.medications !== undefined && JSON.stringify(normalized.medications) !== JSON.stringify(submission.medications || []))
     || ['clinicalIndicators','clinicalContext','maternal','riskReview','consultationDate','consultationTime'].some((field) => patch[field] !== undefined);

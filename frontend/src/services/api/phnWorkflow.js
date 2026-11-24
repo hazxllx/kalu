@@ -230,6 +230,7 @@ export const phnWorkflowApi = {
   completeCheckup: async (id, recorded = {}) => {
     const patch = {
       findings: recorded.assessment || "",
+      diagnosis: recorded.diagnosis || "",
       treatmentGiven: recorded.recommendations || "",
       recommendation: recorded.recommendations || "",
       // The workbench captures an optional health-service association; forward

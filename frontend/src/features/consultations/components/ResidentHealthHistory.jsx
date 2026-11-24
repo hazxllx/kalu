@@ -104,7 +104,7 @@ function ConsultationEntry({ row, onView }) {
   </li>;
 }
 
-export default function ResidentHealthHistory({ residentId, residentName = "", bloodType = "", ownerId, scopeKey, revision, consultationId = "", onViewConsultation }) {
+export default function ResidentHealthHistory({ residentId, residentName = "", bloodType = "", ownerId, scopeKey, revision, consultationId = "", onViewConsultation = null }) {
   const [history, setHistory] = useState(null);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);

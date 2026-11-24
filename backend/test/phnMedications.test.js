@@ -44,6 +44,15 @@ test('normalizePhnVisit with an explicit empty array normalizes to []', () => {
   assert.deepEqual(patch.medications, []);
 });
 
+test('normalizePhnVisit preserves a PHN diagnosis for consultation details', () => {
+  const patch = normalizePhnVisit({ diagnosis: 'Acute bronchitis' });
+  assert.equal(patch.diagnosis, 'Acute bronchitis');
+  assert.throws(
+    () => normalizePhnVisit({ diagnosis: { value: 'not text' } }),
+    (error) => error.statusCode === 422 && Boolean(error.details.diagnosis),
+  );
+});
+
 test('toResidentRecord reads STRUCTURED medications and formats a readable string', () => {
   const record = toResidentRecord({
     id: 'V1',

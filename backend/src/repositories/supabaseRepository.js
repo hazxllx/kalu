@@ -1433,7 +1433,20 @@ export const supabaseRepository = {
     if (!data) return null;
     const members = await listHouseholdMembersFor(supabase, id);
     const assignment = Array.isArray(data.cluster_assignment) ? data.cluster_assignment[0] : data.cluster_assignment;
-    return { ...householdFromRow(data), members, riskClusterLevel: assignment?.risk_cluster_level ?? null };
+    const assessmentResult = await supabase
+      .from('environmental_masterlist')
+      .select('*')
+      .eq('household_id', id)
+      .order('assessment_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(300);
+    throwOnError(assessmentResult.error, 'Could not load household assessment records');
+    return {
+      ...householdFromRow(data),
+      members,
+      riskClusterLevel: assignment?.risk_cluster_level ?? null,
+      assessmentRecords: assessmentResult.data || [],
+    };
   },
 
   /** Lists recorded `household_visits` rows for `householdId`, ordered by `visit_number` descending. */

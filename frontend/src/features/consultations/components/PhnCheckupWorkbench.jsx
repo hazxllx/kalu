@@ -6,7 +6,8 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
-import MedicineSelector from "@/features/consultations/components/MedicineSelector";
+import ConsultationClinicalFields from "@/features/consultations/components/ConsultationClinicalFields";
+import ConsultationHealthServiceField from "@/features/consultations/components/ConsultationHealthServiceField";
 import { formatClinicalDateTime } from "@/lib/dateUtils";
 import ResidentHealthHistory from "@/features/consultations/components/ResidentHealthHistory";
 
@@ -103,6 +104,7 @@ const OutcomeItem = ({ label, value }) => (
  */
 export default function PhnCheckupWorkbench({ patient, onClose, onComplete = undefined, onOutcome = undefined }) {
   const [assessment, setAssessment] = useState("");
+  const [diagnosis, setDiagnosis] = useState("");
   const [healthConcern, setHealthConcern] = useState("");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [recommendations, setRecommendations] = useState("");
@@ -148,6 +150,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     hydratedRecord.current = identity;
     const saved = checkup || patient?.checkupDraft;
     setAssessment(saved?.assessment || "");
+    setDiagnosis(saved?.diagnosis || "");
     setHealthConcern(saved?.healthConcern || "");
     setClinicalNotes(saved?.clinicalNotes || "");
     setRecommendations(saved?.recommendations || "");
@@ -210,6 +213,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     submittingRef.current = true;
     const recorded = {
       assessment: assessment.trim(),
+      diagnosis: diagnosis.trim(),
       healthConcern: healthConcern.trim(),
       consultationLocation,
       clinicalNotes: clinicalNotes.trim(),
@@ -274,8 +278,8 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4" onClick={() => { if (!submitting) onClose(); }}>
-      <div className="w-full max-w-3xl min-w-0" onClick={(e) => e.stopPropagation()}>
-        <Card role="dialog" aria-modal="true" aria-label={`PHN check-up for ${patient?.patient}`} className="flex h-[min(92dvh,780px)] min-h-0 flex-col overflow-hidden sm:max-h-[92dvh]">
+      <div className="w-full max-w-4xl min-w-0" onClick={(e) => e.stopPropagation()}>
+        <Card role="dialog" aria-modal="true" aria-label={`PHN check-up for ${patient?.patient}`} className="flex h-[min(90dvh,820px)] min-h-0 flex-col overflow-hidden sm:max-h-[90dvh]">
           {/* Header */}
           <div className="flex shrink-0 items-start gap-3 border-b border-brand-border px-4 py-3 sm:items-center sm:px-6 sm:py-4">
             <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -303,12 +307,12 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
+          <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-4">
             {submitError && <p className="mb-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3 py-2.5 text-sm text-brand-danger" role="alert">{submitError}</p>}
             {/* Patient Information */}
-            <div className="mb-6">
+            <div className="mb-4">
               <SectionTitle step={1} title="Patient Information" />
-              <div className="grid grid-cols-2 gap-3 rounded-btn bg-brand-bg/60 border border-brand-border px-4 py-3 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 rounded-btn border border-brand-border bg-brand-bg/60 px-3 py-2 sm:grid-cols-4">
                 <InfoItem label="Patient Name" value={patient?.patient} />
                 <InfoItem label="Age at Triage" value={measurement(patient?.age, "yrs")} />
                 <InfoItem label="Sex" value={patient?.sex} />
@@ -320,10 +324,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
             </div>
 
             {/* Triage Information — READ ONLY */}
-            <div className="mb-6">
+            <div className="mb-4">
               <SectionTitle step={2} title="Triage Information (collected by RHU Personnel)" />
-              <div className="rounded-btn border border-brand-border px-4 py-3">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-btn border border-brand-border px-3 py-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <div className="sm:col-span-2 lg:col-span-3">
                     <InfoItem label="Chief Complaint / Reason for Visit" value={patient?.triage?.chiefComplaint || patient?.reason} />
                   </div>
@@ -340,10 +344,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   <InfoItem label="Triage Personnel" value={patient?.triage?.personnel} />
                   <InfoItem label="Triage / Encounter ID" value={patient?.triage?.id || patient?.id} />
                 </div>
-                <div className="mt-3 border-t border-brand-border pt-3">
-                  <p className="text-xs text-brand-gray mb-1">Triage Notes</p>
-                  <p className="text-sm text-brand-ink whitespace-pre-line">{patient?.triage?.notes || "Not recorded"}</p>
-                </div>
+                <details className="mt-2 border-t border-brand-border pt-2">
+                  <summary className="cursor-pointer text-xs font-medium text-brand-blue">Triage notes</summary>
+                  <p className="mt-1 whitespace-pre-line text-sm text-brand-ink">{patient?.triage?.notes || "Not recorded"}</p>
+                </details>
                 {patient?.triage?.warnings?.length > 0 && (
                   <div className="mt-3 rounded-btn border border-brand-accent/30 bg-brand-accent/5 p-3 text-xs text-brand-ink" role="note">
                     <p className="font-semibold">Measurements flagged for clinical review</p>
@@ -357,8 +361,11 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
 
             {user?.id && patient?.residentId && can("consultation.history.view")
               && ["phn", "health_supervisor", "mho"].includes(user.role) && (
-                <ResidentHealthHistory residentId={patient.residentId} consultationId={patient.id} ownerId={user.id}
-                  scopeKey={JSON.stringify([user.role, user.municipalityId, user.barangayId])} revision={`${patient.id}:${completed || justCompleted}`} />
+                <details className="mb-4 rounded-btn border border-brand-border px-3">
+                  <summary className="cursor-pointer py-2 text-xs font-medium text-brand-blue">Resident health history</summary>
+                  <ResidentHealthHistory residentId={patient.residentId} consultationId={patient.id} ownerId={user.id}
+                    scopeKey={JSON.stringify([user.role, user.municipalityId, user.barangayId])} revision={`${patient.id}:${completed || justCompleted}`} />
+                </details>
               )}
             {/* PHN Check-up */}
             {completed && checkup ? (
@@ -367,8 +374,9 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                 <div className="space-y-3">
                   <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
                     <h5 className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Assessment</h5>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <InfoItem label="Assessment / Findings" value={checkup.assessment} />
+                      <InfoItem label="Diagnosis / Assessment" value={checkup.diagnosis} />
                       <InfoItem label="Health Concern" value={checkup.healthConcern} />
                       <InfoItem label="Health Service" value={patient?.serviceName || patient?.raw?.healthServiceName} fallback="No specific health service" />
                       <div>
@@ -452,87 +460,61 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
             ) : (
               <div>
                 <SectionTitle step={3} title="PHN Check-up" />
-                <p className="mb-4 flex items-start gap-2 rounded-btn bg-brand-blue/5 border border-brand-blue/10 px-3 py-2.5 text-xs text-brand-gray">
+                <p className="mb-3 flex items-start gap-2 rounded-btn border border-brand-blue/10 bg-brand-blue/5 px-3 py-2 text-xs text-brand-gray">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-brand-accent" />
                   Do not re-enter information already collected during triage. Record only your assessment and
                   recommendations for this check-up.
                 </p>
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
-                    <label htmlFor="phn-health-service" className="text-sm font-medium text-brand-ink block mb-1.5">
-                      Health Service
-                    </label>
-                    <select
-                      id="phn-health-service"
+                    <ConsultationHealthServiceField
                       value={healthServiceId}
-                      onChange={(event) => setHealthServiceId(event.target.value)}
-                      disabled={healthServicesLoading}
-                      className={inputCls(false)}
-                    >
-                      <option value="">General consultation (no specific service)</option>
-                      {healthServiceId && !healthServices.some((service) => service.id === healthServiceId) && (
-                        <option value={healthServiceId} disabled>
-                          {patient?.serviceName || patient?.raw?.healthServiceName || "Previously selected service"} (inactive or unavailable)
-                        </option>
-                      )}
-                      {healthServices.map((service) => (
-                        <option key={service.id} value={service.id}>
-                          {service.name}{service.category ? ` — ${service.category}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    {healthServicesLoading ? (
-                      <p className="mt-1 text-xs text-brand-gray">Loading active health services…</p>
-                    ) : healthServicesError ? (
-                      <p className="mt-1 text-xs text-brand-danger" role="alert">{healthServicesError}</p>
-                    ) : healthServices.length === 0 ? (
-                      <p className="mt-1 text-xs text-brand-gray">No active health services are available in your consultation scope.</p>
-                    ) : (
-                      <p className="mt-1 text-xs text-brand-gray">Optional. Choose the registered service associated with this consultation.</p>
-                    )}
+                      onChange={setHealthServiceId}
+                      services={healthServices}
+                      loading={healthServicesLoading}
+                      serviceError={healthServicesError}
+                      recordedName={patient?.serviceName || patient?.raw?.healthServiceName || ""}
+                    />
                   </div>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <div>
-                      <label htmlFor="phn-assessment" className="text-sm font-medium text-brand-ink block mb-1.5">
-                        Assessment / Findings <span className="text-brand-danger">*</span>
-                      </label>
-                      <textarea
-                        id="phn-assessment"
-                        rows={3}
-                        placeholder="e.g. BP re-check shows 140/90 after rest..."
-                        value={assessment}
-                        onChange={(e) => {
-                          setAssessment(e.target.value);
-                          if (errors.assessment) setErrors((prev) => ({ ...prev, assessment: "" }));
-                        }}
-                        className={`${inputCls(errors.assessment)} max-h-40 resize-y`}
-                      />
-                      {errors.assessment && <p className="text-xs text-brand-danger mt-1">{errors.assessment}</p>}
-                    </div>
-                    <div>
-                      <label htmlFor="phn-health-concern" className="text-sm font-medium text-brand-ink block mb-1.5">
-                        Health Concern <span className="text-brand-danger">*</span>
-                      </label>
-                      <input
-                        id="phn-health-concern"
-                        type="text"
-                        list="phn-health-concerns"
-                        placeholder="e.g. Hypertension"
-                        value={healthConcern}
-                        onChange={(e) => {
-                          setHealthConcern(e.target.value);
-                          if (errors.healthConcern) setErrors((prev) => ({ ...prev, healthConcern: "" }));
-                        }}
-                        className={inputCls(errors.healthConcern)}
-                      />
-                      <datalist id="phn-health-concerns">
-                        {HEALTH_CONCERNS.map((c) => (
-                          <option key={c} value={c} />
-                        ))}
-                      </datalist>
-                      {errors.healthConcern && <p className="text-xs text-brand-danger mt-1">{errors.healthConcern}</p>}
-                    </div>
-                  </div>
+                  <label htmlFor="phn-health-concern" className="block text-xs font-medium text-brand-gray">
+                    Health Concern <span className="text-brand-danger">*</span>
+                    <input
+                      id="phn-health-concern"
+                      type="text"
+                      list="phn-health-concerns"
+                      placeholder="e.g. Hypertension"
+                      value={healthConcern}
+                      onChange={(event) => {
+                        setHealthConcern(event.target.value);
+                        if (errors.healthConcern) setErrors((previous) => ({ ...previous, healthConcern: "" }));
+                      }}
+                      className={`${inputCls(errors.healthConcern)} mt-1`}
+                    />
+                    <datalist id="phn-health-concerns">
+                      {HEALTH_CONCERNS.map((concern) => <option key={concern} value={concern} />)}
+                    </datalist>
+                  </label>
+                  {errors.healthConcern && <p className="text-xs text-brand-danger" role="alert">{errors.healthConcern}</p>}
+
+                  <ConsultationClinicalFields
+                    findings={assessment}
+                    onFindingsChange={(value) => {
+                      setAssessment(value);
+                      if (errors.assessment) setErrors((previous) => ({ ...previous, assessment: "" }));
+                    }}
+                    diagnosis={diagnosis}
+                    onDiagnosisChange={setDiagnosis}
+                    medications={medications}
+                    onMedicationsChange={setMedications}
+                    recommendations={recommendations}
+                    onRecommendationsChange={(value) => {
+                      setRecommendations(value);
+                      if (errors.recommendations) setErrors((previous) => ({ ...previous, recommendations: "" }));
+                    }}
+                    errors={{ ...errors, findings: errors.assessment }}
+                    findingsLabel="Assessment / Findings"
+                    recommendationsRequired
+                  />
 
                   {/* Automatic risk level */}
                   <div>
@@ -559,30 +541,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                       value={clinicalNotes}
                       onChange={(e) => setClinicalNotes(e.target.value)}
                         className={`${inputCls()} max-h-32 resize-y`}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="phn-recommendations" className="text-sm font-medium text-brand-ink block mb-1.5">Treatment / Recommendations *</label>
-                    <textarea
-                      id="phn-recommendations"
-                      rows={2}
-                      placeholder="Record the treatment or recommendations actually given during this consultation."
-                      value={recommendations}
-                      onChange={(e) => setRecommendations(e.target.value)}
-                      aria-invalid={!!errors.recommendations}
-                      aria-describedby={errors.recommendations ? 'phn-recommendations-error' : undefined}
-                      className={`${inputCls(!!errors.recommendations)} max-h-32 resize-y`}
-                    />
-                    {errors.recommendations && <p id="phn-recommendations-error" className="mt-1 text-xs text-brand-danger">{errors.recommendations}</p>}
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-brand-ink block mb-1.5">
-                      Medications / Prescriptions
-                    </label>
-                    <MedicineSelector
-                      value={medications}
-                      onChange={setMedications}
-                      errors={errors}
                     />
                   </div>
                   <div>

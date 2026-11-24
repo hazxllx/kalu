@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
-import { CalendarDays, CheckCircle2, Clock3, FileText, HeartPulse, Loader2, MapPin, RotateCcw, X, ZoomIn } from "lucide-react";
+import { CheckCircle2, FileText, HeartPulse, Loader2, RotateCcw, X, ZoomIn } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
 import { Skeleton } from "@/components/common/Skeleton";
 import TablePagination from "@/components/tables/TablePagination";
 import DateRangeFilter from "@/components/common/DateRangeFilter";
+import UniversalDetailsModal from "@/components/common/UniversalDetailsModal";
 import { useAuth } from "@/context/AuthContext";
 import { healthServicesApi, visitPlansApi } from "@/services/api";
 import VisitPlanModal from "../components/VisitPlanModal";
@@ -382,7 +382,7 @@ function SectionEmpty() {
 }
 
 /** Compact service summary; full information and actions live in the details dialog. */
-function ServiceCard({ service, readOnly = false, onViewDetails, onPreviewPubmat }) {
+export function ServiceCard({ service, readOnly = false, onViewDetails, onPreviewPubmat = null, bannerLocation = null }) {
   const [pubmatFailed, setPubmatFailed] = useState(false);
   const schedule = formatWeekdays(service.weekdays);
   const window = formatWindow(service.windowStart, service.windowEnd);
@@ -422,7 +422,7 @@ function ServiceCard({ service, readOnly = false, onViewDetails, onPreviewPubmat
       <div className="absolute inset-x-4 bottom-3 text-left">
         {service.category && <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-gold">{service.category}</p>}
         <h3 className="mt-0.5 line-clamp-2 text-[19px] font-semibold leading-6 text-white">{service.name}</h3>
-        <p className="mt-1 truncate text-xs text-white/85">{service.facilityName || "Health service"}</p>
+        <p className="mt-1 truncate text-xs text-white/85">{bannerLocation || service.facilityName || "Health service"}</p>
         {(eventDate || schedule || window) && <p className="mt-0.5 truncate text-xs text-white/80">{[eventDate, schedule, window].filter(Boolean).join(" · ")}</p>}
       </div>
       {service.pubmatUrl && !pubmatFailed && (
@@ -435,7 +435,7 @@ function ServiceCard({ service, readOnly = false, onViewDetails, onPreviewPubmat
 
   return (
     <article className="group flex min-w-0 flex-col overflow-hidden break-words rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40 [overflow-wrap:anywhere] dark:bg-card">
-      {service.pubmatUrl && !pubmatFailed ? (
+      {service.pubmatUrl && !pubmatFailed && onPreviewPubmat ? (
         <button
           type="button"
           onClick={() => onPreviewPubmat?.({ url: service.pubmatUrl, name: service.name })}
@@ -467,7 +467,7 @@ function ServiceCard({ service, readOnly = false, onViewDetails, onPreviewPubmat
   );
 }
 
-function ServiceDetailsDialog({ service, readOnly = false, onClose, onRegister, onCancel, onPreviewMemo }) {
+export function ServiceDetailsDialog({ service, readOnly = false, onClose, onRegister, onCancel, onPreviewMemo }) {
   if (!service) return null;
   const availability = availabilityLine(service);
   const isCancelled = service.cancelled === true || String(service.status || "").toLowerCase() === "cancelled";
@@ -477,10 +477,10 @@ function ServiceDetailsDialog({ service, readOnly = false, onClose, onRegister, 
   const schedule = service.schedule || {};
   const startDate = formatFullDate(schedule.startDate);
   const endDate = schedule.endDate && schedule.endDate !== schedule.startDate ? formatFullDate(schedule.endDate) : "";
-  const scheduledDate = startDate ? `${startDate}${endDate ? ` – ${endDate}` : ""}` : "To be announced";
+  const scheduledDate = startDate ? `${startDate}${endDate ? ` – ${endDate}` : ""}` : "";
   const times = schedule.startTime || schedule.endTime
     ? [schedule.startTime ? formatTime(schedule.startTime) : "", schedule.endTime ? formatTime(schedule.endTime) : ""].filter(Boolean).join(" – ")
-    : formatWindow(service.windowStart, service.windowEnd) || "To be announced";
+    : formatWindow(service.windowStart, service.windowEnd);
   const registrationType = service.visitPolicy === "walk_in" ? "Walk-in" : service.visitPolicy === "by_notice" ? "Registration required (by notice)" : "Registration required";
   const deadlineText = formatDeadline(schedule.registrationDeadline);
   const deadlineDate = formatFullDate(String(schedule.registrationDeadline || "").slice(0, 10));
@@ -491,77 +491,86 @@ function ServiceDetailsDialog({ service, readOnly = false, onClose, onRegister, 
   const statusLabel = readOnly
     ? "Available"
     : isCancelled ? "Cancelled" : plan?.status || (service.registrationFull ? "Fully booked" : availability.open ? "Open for registration" : "Registration closed");
+  const information = [
+    { label: "Facility", value: service.facilityName || service.facility },
+    { label: "Coverage / Barangay", value: service.barangay },
+    { label: "Schedule / Date", value: scheduledDate },
+    { label: "Time", value: times },
+    { label: "Registration deadline", value: deadline },
+    { label: "Registration type", value: registrationType },
+    { label: "Recurring days", value: service.weekdays?.length ? formatWeekdays(service.weekdays) : "" },
+  ];
+  const sections = [
+    { title: "Requirements", content: service.requirements },
+    { title: "Eligibility", content: service.eligibility },
+    { title: "Additional Instructions", content: service.additionalInstructions || service.instructions },
+    ...(deadline ? [{ title: "Registration", content: `Please register by ${deadline}.` }] : []),
+    ...(service.registrationFull ? [{ title: "Availability", content: "This service has reached its resident registration limit." }] : []),
+    ...(!readOnly && !availability.open && !isCancelled && !service.registrationFull
+      ? [{ title: "Availability", content: availability.text }]
+      : []),
+    ...(isCancelled ? [{ title: "Availability", content: "This service has been cancelled." }] : []),
+    ...(readOnly
+      ? [{ title: "Registration", content: "Registration and resident-specific actions are available after verification." }]
+      : []),
+    ...(service.memo?.url ? [{
+      title: "Memorandum",
+      content: (
+        <button
+          type="button"
+          onClick={() => onPreviewMemo?.({ ...service.memo, name: service.name })}
+          className="inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-card"
+          title={service.memo.filename || "View memorandum"}
+        >
+          <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
+        </button>
+      ),
+    }] : []),
+  ];
+  const actions = (
+    <>
+      {activePlan && (
+        <button
+          type="button"
+          onClick={() => onCancel(service)}
+          className="h-10 rounded-btn px-3 text-sm font-medium text-brand-blue hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+        >
+          Cancel registration
+        </button>
+      )}
+      {!readOnly && registrationOpen && !plan && (
+        <button
+          type="button"
+          onClick={() => onRegister(service)}
+          className="h-10 rounded-btn bg-brand-blue px-5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
+        >
+          Register
+        </button>
+      )}
+      {!readOnly && !plan && !registrationOpen && (
+        <span className="self-center text-sm font-medium text-brand-gray">
+          {isCancelled ? "Service Cancelled" : service.registrationFull ? "Fully Booked" : "Registration Closed"}
+        </span>
+      )}
+    </>
+  );
 
   return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-[1px]" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-[85] flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-brand-border bg-white shadow-2xl focus:outline-none dark:bg-card">
-          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-brand-border px-5 py-4 sm:px-6">
-            <div className="min-w-0">
-              {service.category && <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-blue">{service.category}</p>}
-              <Dialog.Title className="mt-1 break-words text-xl font-semibold leading-tight text-brand-ink dark:text-foreground">{service.name}</Dialog.Title>
-              <Dialog.Description className="sr-only">Service information and registration options</Dialog.Description>
-              <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                statusLabel === "Attended" ? "bg-emerald-50 text-emerald-700" : ["Registered", "Missed"].includes(statusLabel) ? "bg-brand-blue/10 text-brand-blue" : service.registrationFull && !plan ? "bg-amber-50 text-amber-800" : availability.open && !isCancelled && !plan ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
-              }`}>
-                {statusLabel}
-              </span>
-            </div>
-            <Dialog.Close asChild>
-              <button type="button" className="shrink-0 rounded-full p-2 text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue" aria-label="Close service details">
-                <X className="h-5 w-5" aria-hidden="true" />
-              </button>
-            </Dialog.Close>
-          </header>
-
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
-            {service.description && <p className="whitespace-pre-line text-sm leading-relaxed text-brand-gray dark:text-muted-foreground">{service.description}</p>}
-            <dl className="grid gap-4 rounded-lg bg-brand-bg/70 p-4 text-sm dark:bg-background sm:grid-cols-2">
-              <DetailItem icon={MapPin} label="Barangay or facility" value={service.facilityName || "Health facility"} />
-              <DetailItem icon={CalendarDays} label="Scheduled date" value={scheduledDate} />
-              <DetailItem icon={Clock3} label="Time" value={times} />
-              <DetailItem icon={CalendarDays} label="Registration deadline" value={deadline || "Not specified"} />
-              <DetailItem icon={HeartPulse} label="Registration type" value={registrationType} />
-              {service.weekdays?.length > 0 && <DetailItem icon={CalendarDays} label="Recurring days" value={formatWeekdays(service.weekdays)} />}
-            </dl>
-            {deadline && <p className="text-xs text-brand-gray dark:text-muted-foreground">Please register by {deadline}.</p>}
-            {service.memo?.url && (
-              <button
-                type="button"
-                onClick={() => onPreviewMemo?.({ ...service.memo, name: service.name })}
-                className="inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-card"
-                title={service.memo.filename || "View memorandum"}
-              >
-                <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
-              </button>
-            )}
-            {service.registrationFull && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">This service has reached its resident registration limit.</p>}
-            {!readOnly && !availability.open && !isCancelled && !service.registrationFull && <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-brand-gray">{availability.text}</p>}
-            {isCancelled && <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-brand-gray">This service has been cancelled.</p>}
-          </div>
-
-          <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-brand-border bg-white px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 dark:bg-card">
-            <button type="button" onClick={onClose} className="h-10 rounded-btn border border-brand-border px-4 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-muted-foreground">
-              Close
-            </button>
-            {readOnly ? (
-              <p className="self-center text-xs text-brand-gray dark:text-muted-foreground">Registration and resident-specific actions are available after verification.</p>
-            ) : <div className="flex flex-col-reverse gap-2 sm:flex-row">
-              {activePlan && <button type="button" onClick={() => onCancel(service)} className="h-10 rounded-btn px-3 text-sm font-medium text-brand-blue hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">Cancel registration</button>}
-              {registrationOpen && !plan ? (
-                <button type="button" onClick={() => onRegister(service)} className="h-10 rounded-btn bg-brand-blue px-5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2">Register</button>
-              ) : !plan && (
-                <button type="button" disabled className="h-10 cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 text-sm font-medium text-slate-400">
-                  {isCancelled ? "Service Cancelled" : service.registrationFull ? "Fully Booked" : "Registration Closed"}
-                </button>
-              )}
-            </div>}
-          </footer>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <UniversalDetailsModal
+      open={Boolean(service)}
+      onClose={onClose}
+      record={{
+        title: service.name,
+        category: service.category,
+        status: statusLabel,
+        image: service.pubmatUrl ? { src: service.pubmatUrl, alt: `${service.name} publication material` } : null,
+        description: service.description,
+        information,
+        sections,
+      }}
+      actions={actions}
+    />
   );
 }
 
@@ -570,20 +579,8 @@ function formatFullDate(value) {
   return date ? `${date} ${String(value).slice(0, 4)}` : "";
 }
 
-function DetailItem({ icon: Icon, label, value }) {
-  return (
-    <div className="flex min-w-0 gap-2.5">
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-      <div className="min-w-0">
-        <dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">{label}</dt>
-        <dd className="mt-0.5 break-words text-sm font-medium text-brand-ink dark:text-foreground">{value}</dd>
-      </div>
-    </div>
-  );
-}
-
 /** Confirm dialog for cancelling an active registration. */
-function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
+export function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
   return (
     <div
       className="fixed inset-0 z-[75] flex items-center justify-center bg-black/50 p-4"

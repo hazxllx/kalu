@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Plus, Trash2, Pill } from "lucide-react";
 import { medicinesApi } from "@/services/api";
 import SearchableSelect from "@/components/common/SearchableSelect";
+import { isDuplicateMedicine } from "../lib/consultationForm";
 import { PRESCRIPTION_ROUTES, PRESCRIPTION_FREQUENCIES } from "../../../../../shared/consultationClinical.js";
 
 const inputCls =
@@ -57,6 +58,8 @@ const SourceTag = ({ source }) => {
  *
  * Custom entries are kept verbatim and never silently replaced by a catalog
  * entry. The value is an array of medication objects owned by the parent form.
+ *
+ * @param {{value?: any[], onChange: (value: any[]) => void, errors?: Record<string, string>, disabled?: boolean}} props
  */
 export default function MedicineSelector({ value = [], onChange, errors = {}, disabled = false }) {
   const medications = Array.isArray(value) ? value : [];
@@ -66,6 +69,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
   const [searchError, setSearchError] = useState("");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+  const searchInputRef = useRef(null);
   const debounceRef = useRef(null);
 
   // Debounced catalog search (matches generic name, brand name, strength, form).
@@ -103,9 +107,14 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
 
   const addMedication = (med) => {
     if (disabled) return;
+    if (isDuplicateMedicine(medications, med)) {
+      setSearchError("This medicine is already in the prescription list.");
+      return;
+    }
     onChange([...medications, med]);
     setQuery("");
     setResults([]);
+    setSearchError("");
     setOpen(false);
   };
 
@@ -153,13 +162,13 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
       {errors.medications && <p role="alert" className="mb-2 text-xs text-brand-danger">{errors.medications}</p>}
       {/* Added medicines */}
       {medications.length > 0 && (
-        <ul className="mb-3 space-y-3">
+        <ul className="mb-3 space-y-2">
           {medications.map((m, i) => (
             <li
               key={`${m.medicineId || "custom"}-${i}`}
-              className="min-w-0 rounded-btn border border-brand-border bg-brand-bg/40 p-3 sm:p-4 dark:border-border dark:bg-card/40"
+              className="min-w-0 rounded-btn border border-brand-border bg-brand-bg/40 p-3 dark:border-border dark:bg-card/40"
             >
-              <div className="flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+              <div className="flex items-start justify-between gap-3 border-b border-brand-border pb-2">
                 <div className="flex min-w-0 items-center gap-2">
                   <Pill className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
                   <span className="min-w-0 break-words text-sm font-semibold text-brand-ink">
@@ -188,7 +197,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
                 </p>
               )}
 
-              <div className="mt-4 grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="mt-3 grid min-w-0 grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                 {m.custom ? (
                   <>
                     <input
@@ -256,9 +265,10 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
 
       {/* Search / add */}
       <div ref={wrapRef} className="relative">
-        <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 focus-within:border-brand-blue dark:border-border dark:bg-card">
+        <div className="flex min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 focus-within:border-brand-blue dark:border-border dark:bg-card">
           <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
           <input
+            ref={searchInputRef}
             value={query}
             disabled={disabled}
             onChange={(e) => {
@@ -272,9 +282,10 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
           />
         </div>
 
-        {open && !disabled && query.trim() && (
+        {open && !disabled && (
           <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-btn border border-brand-border bg-white shadow-float dark:border-border dark:bg-card">
             <ul role="listbox" className="max-h-64 overflow-y-auto py-1">
+              {!query.trim() && <li className="px-3 py-2 text-sm text-brand-gray">Search by generic or brand name.</li>}
               {loading && (
                 <li className="px-3 py-2 text-sm text-brand-gray">Searching...</li>
               )}
@@ -299,13 +310,13 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
                     </button>
                   </li>
                 ))}
-              {!loading && !searchError && visibleResults.length === 0 && (
+              {!loading && !searchError && query.trim() && visibleResults.length === 0 && (
                 <li className="px-3 py-2 text-sm text-brand-gray">
                   No matching medicine in the catalog.
                 </li>
               )}
               {searchError && <li className="px-3 py-2 text-sm text-brand-danger" role="alert">{searchError}</li>}
-              {!loading && !exactMatch && (
+              {!loading && query.trim() && !exactMatch && (
                 <li className="border-t border-brand-border">
                   <button
                     type="button"
@@ -321,10 +332,19 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
           </div>
         )}
       </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          setOpen(true);
+          searchInputRef.current?.focus();
+        }}
+        className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-blue px-3 py-1.5 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" /> Add Medicine
+      </button>
+      {!open && searchError && <p className="mt-1 text-xs text-brand-danger" role="alert">{searchError}</p>}
       {errors.medications && <p className="mt-1 text-xs text-brand-danger" role="alert">{errors.medications}</p>}
-      <p className="mt-1.5 text-xs text-brand-gray">
-        Search the catalog or add a custom medicine. Add as many as needed; each can be removed.
-      </p>
     </div>
   );
 }

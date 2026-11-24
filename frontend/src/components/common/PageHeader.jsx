@@ -41,6 +41,7 @@ import { ChevronRight } from "lucide-react";
  *   crumbs?: Array<string|{label: string, to?: string}>,
  *   eyebrow?: string,
  *   title: import("react").ReactNode,
+ *   titleClassName?: string,
  *   subtitle?: string,
  *   subtitleClassName?: string,
  *   action?: import("react").ReactNode,
@@ -55,6 +56,7 @@ export default function PageHeader({
   crumbs = [],
   eyebrow = null,
   title,
+  titleClassName = "",
   subtitle = "",
   action = null,
   meta = null,
@@ -132,7 +134,7 @@ export default function PageHeader({
         )}
         <div className={`ui-page-header-main flex flex-col md:flex-row md:items-end md:justify-between ${management || dense ? "gap-3" : "gap-4"}`}>
           <div className="min-w-0 w-full flex-1 md:w-auto">
-            <h1 className={`break-words font-heading font-semibold leading-tight tracking-tight text-white ${management ? "text-[26px]" : dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"}`}>
+            <h1 className={`break-words font-heading font-semibold leading-tight tracking-tight text-white ${management ? "text-[26px]" : dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"} ${titleClassName}`}>
               {title}
             </h1>
             {subtitle && (

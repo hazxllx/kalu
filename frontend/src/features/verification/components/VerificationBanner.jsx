@@ -75,7 +75,7 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 };
 
-export default function VerificationBanner({ showVerificationMethod = false }) {
+export default function VerificationBanner({ showVerificationMethod = false, compact = false, refreshKey = 0 }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -143,7 +143,7 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   const openResubmit = () => {
     setGovIdType("");
@@ -216,6 +216,7 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
   };
 
   if (loading) {
+    if (compact) return null;
     return (
       <Card className="flex items-center gap-4 p-6" role="status" aria-label="Loading verification status">
         <div className="h-12 w-12 shrink-0 animate-pulse rounded-xl bg-slate-100" />
@@ -242,6 +243,7 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
     Boolean(idSelfie);
 
   if (state && state.hasResidentRecord === false) {
+    if (compact) return null;
     return (
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
         <Card className="border-blue-200 bg-blue-50 p-4 sm:p-5">
@@ -254,7 +256,9 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
+    <>
+      {!compact && (
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
       <Card className={`p-6 ${meta.tone}`}>
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-4">
@@ -331,6 +335,25 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
           </p>
         )}
       </Card>
+        </motion.div>
+      )}
+
+      {compact && (canResubmit || error) && (
+        <div className="flex flex-col items-start gap-1">
+          {canResubmit && (
+            <button
+              type="button"
+              onClick={openResubmit}
+              disabled={resubmitting}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-brand-blue transition-colors hover:bg-blue-50 disabled:opacity-60"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Resubmit Documents
+            </button>
+          )}
+          {error && <p role="alert" className="max-w-48 text-xs text-brand-danger">{error}</p>}
+        </div>
+      )}
 
       {/* Resubmission document upload — reuses the registration upload component,
           private storage endpoint and validation rules. Fixed header/footer with
@@ -476,6 +499,6 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
           </div>
         </div>
       )}
-    </motion.div>
+    </>
   );
 }

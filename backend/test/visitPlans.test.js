@@ -60,7 +60,7 @@ const resident = {
 };
 const residentUser = { id: 'u1', role: 'resident' };
 
-const bhcService = { id: 'svc-bhc', name: 'Blood Pressure Monitoring', description: 'Check-up.', municipality_id: 'm1', barangay_id: 'b1', active: true, visit_policy: 'walk_in' };
+const bhcService = { id: 'svc-bhc', name: 'Blood Pressure Monitoring', description: 'Check-up.', municipality_id: 'm1', barangay_id: 'b1', active: true, visit_policy: 'walk_in', custom_location: 'San Isidro Hall', created_at: '2026-01-03T08:00:00Z' };
 const rhuService = { id: 'svc-rhu', name: 'Prenatal Care', description: 'For expecting mothers.', municipality_id: 'm1', barangay_id: null, active: true, visit_policy: 'by_notice' };
 
 test('listDirectory groups services by facility and embeds the resident plan', async () => {
@@ -86,6 +86,8 @@ test('listDirectory groups services by facility and embeds the resident plan', a
   assert.equal(bhc.type, 'BHC');
   assert.equal(bhc.name, 'San Isidro');
   assert.equal(bhc.services[0].facilityType, 'BHC');
+  assert.equal(bhc.services[0].location, 'San Isidro Hall');
+  assert.equal(bhc.services[0].publishedAt, '2026-01-03T08:00:00Z');
   assert.equal(bhc.services[0].plan.plannedDate, '2026-01-12');
   assert.equal(bhc.services[0].hasUpcoming, true);
   assert.deepEqual(bhc.services[0].weekdays, [1]);

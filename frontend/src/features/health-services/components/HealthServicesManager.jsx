@@ -7,6 +7,7 @@ import StatusBadge from "@/components/common/StatusBadge";
 import ErrorState from "@/components/common/ErrorState";
 import EmptyState from "@/components/common/EmptyState";
 import DateRangeFilter from "@/components/common/DateRangeFilter";
+import UniversalDetailsModal from "@/components/common/UniversalDetailsModal";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
@@ -259,6 +260,7 @@ export default function HealthServicesManager({ subtitle }) {
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [statusBusyId, setStatusBusyId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [detailsServiceId, setDetailsServiceId] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleteBlocked, setDeleteBlocked] = useState(false);
@@ -846,6 +848,35 @@ export default function HealthServicesManager({ subtitle }) {
     ? [["All", "All Categories"], ...[...new Set([...categories, ...services.map((service) => service.category).filter(Boolean)])].map((category) => [category, CATEGORY_LABELS[category] || category])]
     : CATEGORY_FILTERS;
   const referencesUnavailable = referenceState.loading || referenceState.errors.length > 0;
+  const detailsService = detailsServiceId
+    ? services.find((service) => service.id === detailsServiceId) || null
+    : null;
+  const detailsCreator = detailsService?.createdBy === user?.id
+    ? user?.name || user?.email
+    : personnel.find((person) => person.id === detailsService?.createdBy)?.name;
+  const parsedDetailsCreatedDate = detailsService?.createdAt ? new Date(detailsService.createdAt) : null;
+  const detailsCreatedDate = parsedDetailsCreatedDate && !Number.isNaN(parsedDetailsCreatedDate.getTime())
+    ? parsedDetailsCreatedDate.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    : "";
+  const detailsBarangayLevel = Boolean(detailsService?.barangayId || detailsService?.barangay);
+  const detailsPersonnel = (detailsService?.assignedPersonnel || [])
+    .map((person) => person.name)
+    .filter(Boolean)
+    .join(", ");
+  const detailInformation = detailsService ? [
+    { label: "Facility", value: detailsService.facilityMeta?.label || facilityLabel(detailsService) },
+    { label: "Coverage / Barangay", value: detailsBarangayLevel ? detailsService.barangay : "Municipality-wide" },
+    { label: "Schedule / Date and Time", value: scheduleSummary(detailsService.schedule) },
+    { label: "Assigned Personnel", value: detailsPersonnel },
+    { label: "Registration Deadline", value: deadlineSummary(detailsService.schedule) },
+    { label: "Date Created", value: detailsCreatedDate },
+    { label: "Created By", value: detailsCreator },
+  ] : [];
+  const detailSections = detailsService ? [
+    { title: "Requirements", content: detailsService.requirements },
+    { title: "Eligibility", content: detailsService.eligibility },
+    { title: "Additional Instructions", content: detailsService.additionalInstructions || detailsService.instructions },
+  ] : [];
 
   return (
     <div className={isSupervisor ? "supervisor-module" : "contents"}>
@@ -1053,20 +1084,18 @@ export default function HealthServicesManager({ subtitle }) {
                            />
                           )}
                         </div>
-                        <h3 className="mt-1 font-display text-xl font-medium leading-tight text-brand-ink dark:text-foreground xl:text-2xl">{s.name}</h3>
+                        <h3 className="mt-1 line-clamp-2 min-h-[3.1rem] font-display text-xl font-medium leading-tight text-brand-ink dark:text-foreground xl:text-2xl">{s.name}</h3>
                         <span className="mt-2 inline-block rounded-full bg-brand-blue/10 px-2 py-0.5 text-[11px] font-medium text-brand-blue dark:bg-brand-blue/20 dark:text-blue-300">
                           {barangayLevel ? `Barangay-level${s.barangay ? ` · ${s.barangay}` : ""}` : "Municipality-wide"}
                         </span>
-                        {s.description && (
-                          <details className="group mt-2 text-sm leading-5 text-slate-600 dark:text-slate-300">
-                            <summary className="cursor-pointer list-none text-brand-blue hover:underline dark:text-blue-300 [&::-webkit-details-marker]:hidden">
-                              <span className="mb-1 line-clamp-2 text-slate-600 group-open:hidden dark:text-slate-300">{s.description}</span>
-                              <span className="group-open:hidden">View Details</span>
-                              <span className="hidden group-open:inline">Hide Details</span>
-                            </summary>
-                            <p className="mt-2 whitespace-pre-wrap border-l-2 border-brand-blue/30 pl-3">{s.description}</p>
-                          </details>
-                        )}
+                        <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-600 dark:text-slate-300">{s.description}</p>
+                        <button
+                          type="button"
+                          onClick={() => setDetailsServiceId(s.id)}
+                          className="mt-2 w-fit text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-blue-300"
+                        >
+                          View Details
+                        </button>
                       </div>
                     </div>
 
@@ -1541,6 +1570,20 @@ export default function HealthServicesManager({ subtitle }) {
           followUpStart={followUpStartRequest}
         />
       )}
+
+      <UniversalDetailsModal
+        open={Boolean(detailsService)}
+        onClose={() => setDetailsServiceId(null)}
+        record={detailsService ? {
+          title: detailsService.name,
+          category: CATEGORY_LABELS[detailsService.category] || detailsService.category,
+          status: deriveStatus(detailsService),
+          image: pubmatUrls[detailsService.id] || "",
+          description: detailsService.description,
+          information: detailInformation,
+          sections: detailSections,
+        } : null}
+      />
     </div>
   );
 }
@@ -1679,6 +1722,10 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
   const [statusFilter, setStatusFilter] = useState("all");
   const [deliveryTarget, setDeliveryTarget] = useState(null);
   const [missedTarget, setMissedTarget] = useState(null);
+  const [attendanceDetailId, setAttendanceDetailId] = useState(null);
+  const attendanceDetail = attendanceDetailId
+    ? registrations.find((registration) => registration.id === attendanceDetailId) || null
+    : null;
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -1859,18 +1906,13 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                       </div>
                     </div>
                     {reg.attendance?.status === "attended" && reg.attendance.serviceProvided && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs font-medium text-brand-blue">View Record</summary>
-                        <div className="mt-2 grid gap-x-5 gap-y-1.5 text-xs sm:grid-cols-2">
-                          <p><span className="font-semibold text-brand-ink">Provided:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.serviceProvided}</span></p>
-                          {reg.attendance.assessment && <p><span className="font-semibold text-brand-ink">Assessment:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.assessment}</span></p>}
-                          {reg.attendance.recommendations && <p><span className="font-semibold text-brand-ink">Recommendations:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.recommendations}</span></p>}
-                          {reg.attendance.immunization && <p><span className="font-semibold text-brand-ink">Immunization:</span> <span className="text-brand-gray">{reg.attendance.immunization.vaccine}{reg.attendance.immunization.dose ? ` · ${reg.attendance.immunization.dose}` : ""} · {reg.attendance.immunization.status}{reg.attendance.immunization.administeredDate ? ` · ${formatDate(reg.attendance.immunization.administeredDate)}` : ""}</span></p>}
-                          {reg.attendance.followUpRequired && <p><span className="font-semibold text-brand-ink">Follow-up:</span> <span className="text-brand-gray">{reg.attendance.followUpDate || "Required"}</span></p>}
-                          {reg.attendance.providedByName && <p><span className="font-semibold text-brand-ink">Recorded by:</span> <span className="text-brand-gray">{reg.attendance.providedByName}</span></p>}
-                          {reg.attendance.notes && <p><span className="font-semibold text-brand-ink">Notes:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.notes}</span></p>}
-                        </div>
-                      </details>
+                      <button
+                        type="button"
+                        onClick={() => setAttendanceDetailId(reg.id)}
+                        className="mt-2 text-xs font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+                      >
+                        View Record
+                      </button>
                     )}
                     {canEdit && reg.status !== "Cancelled" && (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -1935,6 +1977,43 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
           }}
         />
       )}
+      <UniversalDetailsModal
+        open={Boolean(attendanceDetail)}
+        onClose={() => setAttendanceDetailId(null)}
+        record={attendanceDetail ? {
+          title: `${attendanceDetail.residentName} — ${service.name}`,
+          category: "Service Delivery Record",
+          status: registrationLabel(attendanceDetail),
+          description: attendanceDetail.attendance?.serviceProvided,
+          information: [
+            { label: "Assessment", value: attendanceDetail.attendance?.assessment },
+            { label: "Recommendations", value: attendanceDetail.attendance?.recommendations },
+            {
+              label: "Immunization",
+              value: attendanceDetail.attendance?.immunization
+                ? [
+                  attendanceDetail.attendance.immunization.vaccine,
+                  attendanceDetail.attendance.immunization.dose,
+                  attendanceDetail.attendance.immunization.status,
+                  attendanceDetail.attendance.immunization.administeredDate
+                    ? formatDate(attendanceDetail.attendance.immunization.administeredDate)
+                    : "",
+                ].filter(Boolean).join(" · ")
+                : "",
+            },
+            {
+              label: "Follow-up",
+              value: attendanceDetail.attendance?.followUpRequired
+                ? attendanceDetail.attendance.followUpDate || "Required"
+                : "",
+            },
+            { label: "Recorded By", value: attendanceDetail.attendance?.providedByName },
+          ],
+          sections: attendanceDetail.attendance?.notes
+            ? [{ title: "Notes", content: attendanceDetail.attendance.notes }]
+            : [],
+        } : null}
+      />
     </div>
   );
 }

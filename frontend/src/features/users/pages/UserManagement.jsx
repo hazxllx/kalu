@@ -797,7 +797,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     const assignmentChanged = isNew || role !== initial.roleId || Object.keys(coveragePatch).length > 0;
     if (!form.name.trim() || form.name.trim().length > 120) next.name = "Enter a name of 1–120 characters.";
     if (isNew && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) next.email = "Enter a valid email address.";
-    if (isNew && personnel && !/^09\d{9}$/.test(form.contact)) next.contact = "Enter exactly 11 digits starting with 09.";
+    if (personnel && !/^09\d{9}$/.test(form.contact)) next.contact = "Enter exactly 11 digits starting with 09.";
     if (isNew && personnel && !selectedMunicipalityId) next.municipalityId = "Your municipality assignment is unavailable.";
     if (!role || ((isNew || role !== initial.roleId) && (!options.roles.some((item) => item.id === role) || (personnelOnly && !personnel) || (delegated && !allowedRoles.includes(role))))) next.role = "Select an available account role.";
     if (!isNew && role !== initial.roleId && (!canManageRoles || residentRole)) next.role = "Role changes are not allowed for this account.";

@@ -35,4 +35,16 @@ export async function downloadReferralPdf(referral, { residents = [] } = {}) {
   doc.save(referralNo ? `Referral-${referralNo}.pdf` : "Referral-Form.pdf");
 }
 
+export async function openReferralPdf(referral, { residents = [] } = {}) {
+  if (!referral) return null;
+  const linked = referral.residentId
+    ? residents.find((r) => r.id === referral.residentId)
+    : null;
+  const enriched = linked ? { ...referral, resident: { ...(referral.resident || {}), ...linked } } : referral;
+  const branding = await loadDocumentBranding("barangay_rhu_referral");
+  const doc = renderReferralPdf(enriched, branding);
+  if (!doc) return null;
+  return doc.output("bloburl");
+}
+
 export default downloadReferralPdf;

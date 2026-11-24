@@ -48,10 +48,15 @@ import { formatBloodPressureInput } from "@/features/consultations/utils/bpClass
 const STATUSES = REFERRAL_STATUSES;
 const PRIORITIES = ["Low", "Medium", "High"];
 const STATUS_FILTERS = ["All", "Pending", "Completed", "Historical"];
-const referralDisplayStatus = (status) => {
-  if (["Pending", "Accepted", "In Progress"].includes(status)) return "Pending";
-  return status || "Pending";
+const REFERRAL_PROGRESS_COLORS = {
+  Pending: "bg-amber-50 text-amber-700",
+  Accepted: "bg-brand-blue/10 text-brand-blue",
+  "In Progress": "bg-brand-blue/10 text-brand-blue",
+  Completed: "bg-emerald-50 text-emerald-700",
+  Rejected: "bg-rose-50 text-rose-700",
+  Cancelled: "bg-slate-100 text-slate-600",
 };
+const referralDisplayStatus = (status) => status || "Pending";
 const scheduleResponseLabel = (value) => value === "Default Confirmed" || value === "Awaiting Response"
   ? "Confirmed by default"
   : value || "Confirmed by default";
@@ -1364,9 +1369,10 @@ export default function HealthReferrals() {
     };
   }, [openActionMenu]);
 
+  const showReferralTypeFilter = canWrite && canCreate;
   const columns = isResident
-    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Schedule / Progress", "Actions"]
-    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Schedule / Progress", "Actions"];
+    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Referral Status", "Actions"]
+    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Referral Status", "Actions"];
 
   return (
     <>
@@ -1434,10 +1440,10 @@ export default function HealthReferrals() {
       />
 
       <Card className="p-4 mb-5">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 xl:items-end">
-          {canWrite && canCreate && (
-            <label className="min-w-0 text-sm font-medium text-brand-gray xl:col-span-2">
-              Referral
+        <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${showReferralTypeFilter ? "xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,1.8fr)_minmax(0,1.5fr)]" : "xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,1.8fr)_minmax(0,1.5fr)]"} xl:items-end`}>
+          {showReferralTypeFilter && (
+            <label className="min-w-0 text-xs font-medium text-brand-gray">
+              Referral Type
               <select
                 value={box}
                 onChange={(event) => setBox(event.target.value)}
@@ -1449,23 +1455,27 @@ export default function HealthReferrals() {
               </select>
             </label>
           )}
-          <label className="min-w-0 text-sm font-medium text-brand-gray sm:col-span-2 xl:col-span-5">
+          <label className="min-w-0 text-xs font-medium text-brand-gray">
+            Status
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Referral status filter" className="mt-1 h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-medium text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-border dark:bg-input dark:text-foreground">
+              {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "Historical" ? "Historical (Rejected / Cancelled)" : s === "All" ? "All Status" : s}</option>)}
+            </select>
+          </label>
+          <label className="min-w-0 text-xs font-medium text-brand-gray">
+            Priority
+            <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} aria-label="Referral priority filter" className="mt-1 h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground">
+              <option value="All">All Priorities</option>
+              {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+          <label className="min-w-0 text-xs font-medium text-brand-gray sm:col-span-2 xl:col-span-1">
             Search
             <div className="mt-1 flex h-10 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input">
               <Search className="h-4 w-4 shrink-0 text-brand-gray" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search resident, reason, facility..." className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-brand-gray/70" />
             </div>
           </label>
-          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="xl:col-span-3" />
-          <div className="grid grid-cols-1 gap-2 sm:col-span-2 sm:grid-cols-2 xl:col-span-4">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Referral status filter" className="h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-medium text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-border dark:bg-input dark:text-foreground">
-              {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "Historical" ? "Historical (Rejected / Cancelled)" : s === "All" ? "All Status" : s}</option>)}
-            </select>
-            <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} aria-label="Referral priority filter" className="h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground">
-              <option value="All">All Priorities</option>
-              {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </div>
+          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="sm:col-span-2 xl:col-span-1 [&>label]:text-xs" />
         </div>
       </Card>
 
@@ -1508,14 +1518,16 @@ export default function HealthReferrals() {
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${PRIORITY_COLORS[r.priority] || ""}`}>{r.priority}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="min-w-[145px] space-y-2 leading-4">
+                    <div className="min-w-[145px] space-y-1.5 leading-4">
                       <div>
                         <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-brand-gray">Schedule</span>
-                        <span className="inline-flex max-w-full rounded-full bg-brand-blue/10 px-2.5 py-1 text-[11px] font-medium leading-tight text-brand-blue">{r.scheduleResponseStatus}</span>
+                        <span className="inline-flex max-w-full whitespace-normal break-words rounded-full bg-brand-blue/10 px-2 py-1 text-[11px] font-medium leading-tight text-brand-blue">{r.scheduleResponseStatus}</span>
                       </div>
                       <div>
                         <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-brand-gray">Service progress</span>
-                        <StatusBadge value={referralDisplayStatus(r.status)} className="whitespace-nowrap" />
+                        <span className={`inline-flex max-w-full whitespace-normal break-words rounded-full px-2 py-1 text-[11px] font-medium leading-tight ${REFERRAL_PROGRESS_COLORS[referralDisplayStatus(r.status)] || "bg-slate-100 text-slate-600"}`}>
+                          {referralDisplayStatus(r.status)}
+                        </span>
                       </div>
                     </div>
                   </td>

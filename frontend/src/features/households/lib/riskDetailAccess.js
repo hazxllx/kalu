@@ -10,7 +10,7 @@
 export function getHouseholdDetailAccess({ user, can }) {
   const canViewWorkflow = Boolean(can?.('followups.view'));
   const canEditWorkflow = Boolean(can?.('followups.edit'));
-  const canViewVisits = Boolean(user?.role === 'bhw' && can?.('households.view'));
+  const canViewVisits = Boolean(['bhw', 'health_supervisor', 'phn'].includes(user?.role) && can?.('households.view'));
   const canCreateVisits = Boolean(user?.role === 'bhw' && can?.('households.create'));
 
   return {

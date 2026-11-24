@@ -79,6 +79,8 @@ export const toRiskCluster = (household = {}, workflow = null) => {
 
   return {
     id: household.id,
+    assessmentProfile: household,
+    assessmentRecords: Array.isArray(household.assessmentRecords) ? household.assessmentRecords : [],
     head: household.headName || "",
     surname: surnameFrom(household.headName),
     barangay: household.barangay || "",

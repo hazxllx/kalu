@@ -401,7 +401,7 @@ function PhnTclInbox({ user }) {
 
       {/* Filter toolbar — search, barangay, category dropdowns aligned horizontally */}
        <Card className="mb-3 p-3">
-         <div className="flex flex-wrap items-center gap-2">
+         <div className="grid gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
            {/* Search by document */}
            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-input border border-brand-border bg-white px-3 py-2 dark:bg-card sm:min-w-[200px]">
              <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
@@ -419,7 +419,7 @@ function PhnTclInbox({ user }) {
              value={barangayFilter}
              onChange={(e) => setBarangayFilter(e.target.value)}
              aria-label="Filter by barangay"
-             className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card"
+             className="min-w-0 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card lg:w-auto"
            >
              <option value="All">All Barangays</option>
              {barangayOptions.map((b) => (
@@ -432,7 +432,7 @@ function PhnTclInbox({ user }) {
              value={categoryFilter}
              onChange={(e) => setCategoryFilter(e.target.value)}
              aria-label="Filter by health program category"
-             className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card"
+             className="min-w-0 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card lg:w-auto"
            >
              <option value="All">All Categories</option>
              {categoryOptions.map((c) => (
@@ -482,14 +482,14 @@ function PhnTclInbox({ user }) {
        ) : view === "all" ? (
         /* ---- All Submissions: one consolidated, dense table ---- */
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] border-collapse text-sm">
+           <div className="hidden overflow-hidden md:block">
+             <table className="w-full table-fixed border-collapse text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left">
                   {["Barangay", "Health Program Category", "TCL Document", "Submitted By", "Date Submitted", "Status", "Action"].map((h, i) => (
                     <th
                       key={h || i}
-                      className={`border-b border-gray-200 px-4 py-3 text-xs font-semibold text-gray-700 ${i === 6 ? "text-right" : ""}`}
+                       className={`border-b border-gray-200 px-2 py-3 text-xs font-semibold text-gray-700 lg:px-3 ${i === 6 ? "text-right" : ""}`}
                     >
                       {h}
                     </th>
@@ -499,22 +499,41 @@ function PhnTclInbox({ user }) {
               <tbody className="divide-y divide-gray-200">
                 {paged.map((s) => (
                   <tr key={s.id} className="bg-white hover:bg-gray-50 transition-colors">
-                    <td className="whitespace-nowrap px-4 py-3 font-medium text-brand-ink">{s.barangayName}</td>
-                    <td className="px-4 py-3 text-gray-700">{s.category}</td>
-                    <td className="px-4 py-3 text-brand-ink">
-                      <span className="block max-w-xs truncate" title={s.documentName}>{s.documentName}</span>
+                    <td className="px-2 py-3 font-medium text-brand-ink lg:px-3">{s.barangayName}</td>
+                    <td className="px-2 py-3 text-gray-700 lg:px-3">{s.category}</td>
+                    <td className="px-2 py-3 text-brand-ink lg:px-3">
+                      <span className="block break-words" title={s.documentName}>{s.documentName}</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2 py-3 lg:px-3">
                       <p className="text-brand-ink font-medium">{s.senderName || "—"}</p>
                       <p className="text-xs text-gray-600">{ROLE_LABELS[s.senderRole] || s.senderRole}</p>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDate(s.effectiveIso)}</td>
-                    <td className="px-4 py-3"><StatusBadge raw={s.status} /></td>
-                    <td className="px-4 py-3 text-right"><RowActions s={s} /></td>
+                    <td className="px-2 py-3 text-gray-700 lg:px-3">{formatDate(s.effectiveIso)}</td>
+                    <td className="px-2 py-3 lg:px-3"><StatusBadge raw={s.status} /></td>
+                    <td className="px-2 py-3 text-right lg:px-3"><RowActions s={s} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="divide-y divide-brand-border md:hidden">
+            {paged.map((s) => (
+              <article key={s.id} className="p-3">
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-brand-ink">{s.documentName}</p>
+                    <p className="mt-0.5 text-xs text-brand-gray">{s.category}</p>
+                  </div>
+                  <StatusBadge raw={s.status} />
+                </div>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                  <div><dt className="text-brand-gray">Barangay</dt><dd className="mt-0.5 font-medium text-brand-ink">{s.barangayName}</dd></div>
+                  <div><dt className="text-brand-gray">Date Submitted</dt><dd className="mt-0.5 font-medium text-brand-ink">{formatDate(s.effectiveIso)}</dd></div>
+                  <div className="col-span-2"><dt className="text-brand-gray">Submitted By</dt><dd className="mt-0.5 font-medium text-brand-ink">{s.senderName || "—"} <span className="font-normal text-brand-gray">· {ROLE_LABELS[s.senderRole] || s.senderRole}</span></dd></div>
+                </dl>
+                <div className="mt-3 flex justify-end"><RowActions s={s} /></div>
+              </article>
+            ))}
           </div>
 
           {/* Pagination */}
@@ -560,8 +579,8 @@ function PhnTclInbox({ user }) {
                           <h3 className="text-xs font-semibold text-gray-700">{category}</h3>
                           <span className="text-xs text-gray-600">· {items.length}</span>
                         </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full min-w-[640px] border-collapse text-sm">
+                        <div className="hidden overflow-hidden md:block">
+                          <table className="w-full table-fixed border-collapse text-sm">
                             <thead>
                               <tr className="bg-white text-left">
                                 {["TCL Document", "Submitted By", "Date Submitted", "Status", "Action"].map((h, i) => (
@@ -587,6 +606,21 @@ function PhnTclInbox({ user }) {
                             </tbody>
                           </table>
                         </div>
+                        <div className="divide-y divide-brand-border md:hidden">
+                          {items.map((s) => (
+                            <article key={s.id} className="p-3">
+                              <div className="mb-2 flex items-start justify-between gap-3">
+                                <p className="min-w-0 break-words text-sm font-semibold text-brand-ink">{s.documentName}</p>
+                                <StatusBadge raw={s.status} />
+                              </div>
+                              <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                                <div><dt className="text-brand-gray">Submitted By</dt><dd className="mt-0.5 font-medium text-brand-ink">{s.senderName || "—"}</dd></div>
+                                <div><dt className="text-brand-gray">Date Submitted</dt><dd className="mt-0.5 font-medium text-brand-ink">{formatDate(s.effectiveIso)}</dd></div>
+                              </dl>
+                              <div className="mt-3 flex justify-end"><RowActions s={s} /></div>
+                            </article>
+                          ))}
+                        </div>
                       </section>
                     ))}
                   </div>
@@ -597,17 +631,17 @@ function PhnTclInbox({ user }) {
         </div>
       )}
 
-      {/* ---- Document detail + review drawer ---- */}
+      {/* ---- Document detail modal ---- */}
       {detail && (
-        <div className="fixed inset-0 z-[70]">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-2 sm:p-6">
           <div className="absolute inset-0 bg-black/60" onClick={closeDetail} />
-          <div role="dialog" aria-modal="true" aria-label="Submitted TCL document" className="absolute right-0 top-0 flex h-[100dvh] w-full max-w-3xl flex-col bg-white shadow-2xl dark:bg-card">
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-5 py-4">
+          <div role="dialog" aria-modal="true" aria-label="Submitted TCL document" className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-brand-border bg-white shadow-2xl dark:bg-card sm:max-h-[calc(100dvh-3rem)]">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-5">
               <div className="min-w-0">
-                <p className="truncate text-base font-semibold text-brand-ink">{detail.documentName}</p>
-                <p className="text-xs text-brand-gray">{detail.barangayName} · {detail.category}</p>
+                <p className="break-words text-base font-semibold text-brand-ink">{detail.documentName}</p>
+                <p className="mt-0.5 break-words text-xs text-brand-gray">{detail.barangayName} · {detail.category}</p>
               </div>
-              <button onClick={closeDetail} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+              <button onClick={closeDetail} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto break-words p-3 sm:p-5">

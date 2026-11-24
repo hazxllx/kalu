@@ -44,9 +44,9 @@ function getScheduleSummary(service) {
 }
 
 /** Compact, database-backed service link used on the resident dashboards. */
-export default function ResidentServiceCard({ service, to }) {
+export default function ResidentServiceCard({ service, to, statusOverride = null }) {
   const Icon = CATEGORY_ICONS[service.category] || Stethoscope;
-  const status = getServiceStatus(service);
+  const status = statusOverride || getServiceStatus(service);
   const schedule = getScheduleSummary(service);
 
   return (
@@ -59,11 +59,11 @@ export default function ResidentServiceCard({ service, to }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-brand-ink dark:text-foreground">{service.name}</span>
+          <span className="min-w-0 flex-1 line-clamp-2 text-sm font-semibold leading-snug text-brand-ink dark:text-foreground">{service.name}</span>
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_STYLES[status] || STATUS_STYLES.Closed}`}>{status}</span>
         </span>
         <span className="mt-1 block truncate text-xs text-brand-gray dark:text-muted-foreground">
-          {[service.category, service.facilityName || "Health service"].filter(Boolean).join(" · ")}
+          {[service.category, service.location || service.facilityName || "Health service"].filter(Boolean).join(" · ")}
         </span>
         {service.description && (
           <span className="mt-1 block line-clamp-2 text-xs leading-relaxed text-brand-gray dark:text-muted-foreground">{service.description}</span>

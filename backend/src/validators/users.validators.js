@@ -79,6 +79,10 @@ const fieldsValidator = (body, { create = false } = {}) => {
     for (const field of ['approvalStatus', 'activationRequested', 'activate', 'setupRequired', 'setupCompletedAt', 'suspendedAt', 'decisionReason']) {
       if (Object.hasOwn(input, field)) errors[field] = 'Use an explicit personnel lifecycle action for this field.';
     }
+    if (Object.hasOwn(input, 'contact') && ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(text(input.role))
+        && !isStrictMobile(input.contact)) {
+      errors.contact = 'Enter an 11-digit mobile number starting with 09 (e.g. 09171234567).';
+    }
   }
   if (input.suspensionReason !== undefined && text(input.suspensionReason).length > 1000) {
     errors.suspensionReason = 'Use a reason of at most 1000 characters.';

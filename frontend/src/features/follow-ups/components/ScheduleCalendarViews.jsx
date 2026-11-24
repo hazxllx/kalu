@@ -1,6 +1,7 @@
 import React from "react";
 import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
+import UniversalDetailsModal from "@/components/common/UniversalDetailsModal";
 import { Bell, CalendarClock, CalendarDays, Check, ChevronRight, Clock, HeartPulse, MapPin, Plus, Stethoscope, TriangleAlert, User, Users, X } from "lucide-react";
 import { buildMonthGrid, calendarEventKey, formatCalendarStatus, parseCalendarDate, toDateKey } from "@/features/dashboards/components/scheduleCalendarUtils";
 import ScheduleStatusBadge, { ConfirmationBadge, STATUS_DOTS, STATUS_TONES } from "./ScheduleStatusBadge";
@@ -483,26 +484,27 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
     const date = parseCalendarDate(schedule.date);
     if (schedule.type === "calendar-activity") {
       return (
-        <dialog ref={dialogRef} aria-labelledby="supervisor-activity-title" onCancel={(event) => { event.preventDefault(); onClose(); }} className="supervisor-modal m-auto max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/50 sm:p-5">
-          <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
-            <div className="min-w-0">
-              <p className="text-caption text-brand-gray">{schedule.activityType} · Personal activity</p>
-              <h2 id="supervisor-activity-title" className="mt-0.5 break-words text-section font-semibold">{schedule.label}</h2>
-            </div>
-            <button type="button" onClick={onClose} className="supervisor-button is-icon" aria-label="Close activity details"><X className="h-4 w-4" aria-hidden="true" /></button>
-          </div>
-          <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-            <div><dt className="text-caption text-brand-gray">Date</dt><dd className="mt-0.5 text-ui">{date?.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) || "Date not specified"}</dd></div>
-            <div><dt className="text-caption text-brand-gray">Time</dt><dd className="mt-0.5 text-ui">{activityTime(schedule)}</dd></div>
-            {schedule.residentId && <div><dt className="text-caption text-brand-gray">Linked resident</dt><dd className="mt-0.5 break-words text-ui">{schedule.residentName || schedule.residentId}</dd></div>}
-          </dl>
-          <div className="mt-4 border-t border-brand-border pt-3">
-            <p className="text-caption text-brand-gray">Notes / Description</p>
-            <p className="mt-1 whitespace-pre-wrap break-words text-ui">{schedule.notes || "No notes recorded."}</p>
-          </div>
-          {error && <p role="alert" className="mt-4 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
-          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-brand-border pt-3">{actions}<button type="button" onClick={onClose} className="supervisor-button">Close</button></div>
-        </dialog>
+        <UniversalDetailsModal
+          open={Boolean(schedule)}
+          onClose={onClose}
+          record={{
+            title: schedule.label,
+            category: [schedule.activityType, "Personal activity"].filter(Boolean).join(" · "),
+            status: schedule.status ? formatCalendarStatus(schedule.status) : "",
+            description: schedule.notes,
+            information: [
+              { label: "Date", value: date?.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) },
+              { label: "Time", value: schedule.time ? activityTime(schedule) : "" },
+              { label: "Linked resident", value: schedule.residentId ? schedule.residentName || schedule.residentId : "" },
+              { label: "Location", value: schedule.location },
+            ],
+            sections: error ? [{
+              title: "Action status",
+              content: <p role="alert" className="text-brand-danger">{error}</p>,
+            }] : [],
+          }}
+          actions={actions}
+        />
       );
     }
     const details = [

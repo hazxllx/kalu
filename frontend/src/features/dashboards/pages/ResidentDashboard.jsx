@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, FileText, HeartPulse, X } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import ResidentHealthSnapshot from "@/features/dashboards/components/ResidentHealthSnapshot";
-import ResidentServiceCard from "@/features/dashboards/components/ResidentServiceCard";
+import { CancelRegistrationDialog, ServiceCard, ServiceDetailsDialog } from "@/features/health-services/pages/ResidentHealthServices";
+import VisitPlanModal from "@/features/health-services/components/VisitPlanModal";
 import { residentsApi, residentFollowUpsApi, referralsApi, visitPlansApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { manilaDateKey } from "@/features/follow-ups/lib/scheduleDates";
@@ -36,6 +37,101 @@ export default function ResidentDashboard() {
   const [referrals, setReferrals] = useState([]);
   const [services, setServices] = useState(null); // null = not yet loaded; [] = loaded, none offered
   const [servicesError, setServicesError] = useState(false);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [detailsService, setDetailsService] = useState(null);
+  const [registerModal, setRegisterModal] = useState(null);
+  const [removeTarget, setRemoveTarget] = useState(null);
+  const [removing, setRemoving] = useState(false);
+  const [toast, setToast] = useState("");
+  const [previewMemo, setPreviewMemo] = useState(null);
+  const toastTimer = useRef(null);
+
+  const loadServices = useCallback(async (showLoading = false) => {
+    if (showLoading) setServicesLoading(true);
+    setServicesError(false);
+    try {
+      const result = await visitPlansApi.directory();
+      const facilities = result?.facilities || [];
+      setServices(
+        facilities.flatMap((facility) =>
+          (facility.services || []).map((service) => ({
+            ...service,
+            facilityName: service.location || service.facilityName || facility.name,
+            barangay: service.barangay || user?.barangay || facility.name,
+          })),
+        ),
+      );
+    } catch {
+      setServicesError(true);
+    } finally {
+      if (showLoading) setServicesLoading(false);
+    }
+  }, [user?.barangay]);
+
+  const patchServicePlan = useCallback((serviceId, plan) => {
+    setServices((previous) => (previous || []).map((service) => (
+      service.id === serviceId ? { ...service, plan } : service
+    )));
+  }, []);
+
+  const showToast = useCallback((message) => {
+    setToast(message);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(""), 4000);
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  const onPlanConfirmed = useCallback((plan) => {
+    if (registerModal && plan) {
+      patchServicePlan(registerModal.id, {
+        id: plan.id,
+        plannedDate: plan.plannedDate,
+        note: plan.note || "",
+        status: "Registered",
+        attendanceStatus: null,
+      });
+    }
+  }, [registerModal, patchServicePlan]);
+
+  const confirmRemove = useCallback(async () => {
+    if (!removeTarget?.plan?.id) return;
+    setRemoving(true);
+    try {
+      await visitPlansApi.remove(removeTarget.plan.id);
+      patchServicePlan(removeTarget.serviceId, null);
+      showToast("Your registration has been cancelled.");
+      setRemoveTarget(null);
+    } catch (error) {
+      showToast(error?.message || "Could not cancel your registration. Please try again.");
+    } finally {
+      setRemoving(false);
+    }
+  }, [removeTarget, patchServicePlan, showToast]);
+
+  useEffect(() => {
+    loadServices(true);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") loadServices();
+    };
+    const refreshInterval = window.setInterval(refreshWhenVisible, 5 * 60 * 1000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(refreshInterval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadServices]);
+
+  useEffect(() => {
+    if (!previewMemo) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setPreviewMemo(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [previewMemo]);
 
   const loadFollowUps = React.useCallback(() => {
     setFollowUpsLoading(true);
@@ -64,15 +160,8 @@ export default function ResidentDashboard() {
     setLoading(true);
     // Each source is independent; a failure in one (e.g. referrals) must never
     // blank the whole dashboard, so they are settled individually.
-    Promise.allSettled([
-      residentsApi.myHealthRecords(),
-      referralsApi.list(),
-      // Barangay-scoped, backend-authoritative services directory. Scope,
-      // eligibility and availability are all enforced server-side (and mirrored
-      // by Supabase RLS); the client sends no barangay/resident id.
-      visitPlansApi.directory(),
-    ])
-      .then(([healthRes, referralRes, servicesRes]) => {
+    Promise.allSettled([residentsApi.myHealthRecords(), referralsApi.list()])
+      .then(([healthRes, referralRes]) => {
         if (!active) return;
         if (healthRes.status === "fulfilled") {
           setHealth(healthRes.value || null);
@@ -81,18 +170,6 @@ export default function ResidentDashboard() {
           setHealthError("Unable to load your health record.");
         }
         if (referralRes.status === "fulfilled") setReferrals(referralRes.value?.rows || referralRes.value?.records || []);
-        if (servicesRes.status === "fulfilled") {
-          const facilities = servicesRes.value?.facilities || [];
-          // Flatten the facility groups into a single ordered list, carrying the
-          // resolved facility name onto each service for display.
-          setServices(
-            facilities.flatMap((f) =>
-              (f.services || []).map((svc) => ({ ...svc, facilityName: svc.facilityName || f.name })),
-            ),
-          );
-        } else {
-          setServicesError(true);
-        }
       })
       .finally(() => active && setLoading(false));
     return () => { active = false; };
@@ -100,6 +177,20 @@ export default function ResidentDashboard() {
 
   const displayName = user?.name || health?.resident?.name || "Resident";
   const first = displayName.split(" ")[0];
+  const dashboardServices = useMemo(() => (services || [])
+    .filter((service) => {
+      const status = String(service.status || "").toLowerCase();
+      return service.active === true
+        && service.availability?.open === true
+        && service.registrationFull !== true
+        && service.cancelled !== true
+        && !["closed", "completed", "cancelled", "inactive"].includes(status);
+    })
+    .sort((a, b) => {
+      const updatedAt = (service) => String(service.updatedAt || service.publishedAt || service.createdAt || "");
+      return updatedAt(b).localeCompare(updatedAt(a));
+    })
+    .slice(0, 3), [services]);
 
   // Chronological, newest-first health timeline built from the resident's own
   // records (consultations, follow-ups, referrals). No internal ids, staff-only
@@ -176,45 +267,124 @@ export default function ResidentDashboard() {
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-gray dark:text-muted-foreground">Ongoing health services</p>
             <h2 id="resident-services-title" className="mt-1 font-display text-lg font-semibold leading-tight text-brand-ink dark:text-foreground sm:text-xl">Services available to your barangay</h2>
           </div>
-          {services && services.length > 0 && (
-            <Link
-              to={HEALTH_SERVICES_PATH}
-              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-brand-border px-3 py-2 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:text-blue-300 dark:hover:bg-blue-400/10"
-            >
-              View all <ArrowRight className="h-4 w-4" strokeWidth={1.8} />
-            </Link>
-          )}
+          <Link
+            to={HEALTH_SERVICES_PATH}
+            className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-brand-border px-3 py-2 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:text-blue-300 dark:hover:bg-blue-400/10"
+          >
+            View all <ArrowRight className="h-4 w-4" strokeWidth={1.8} />
+          </Link>
         </div>
 
-        {loading && (
-          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-            {[0, 1, 2].map((item) => <div key={item} className="aspect-[4/5] animate-pulse rounded-lg bg-brand-light" />)}
+        {servicesLoading && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Loading health services" aria-busy="true">
+            {[0, 1, 2].map((item) => (
+              <div key={item} className="overflow-hidden rounded-lg border border-brand-border dark:border-border">
+                <div className="h-40 animate-pulse bg-brand-blue/15" />
+                <div className="space-y-3 p-4">
+                  <div className="h-6 w-24 animate-pulse rounded-full bg-brand-light" />
+                  <div className="h-4 w-1/2 animate-pulse rounded bg-brand-light" />
+                  <div className="h-3 w-1/3 animate-pulse rounded bg-brand-light" />
+                </div>
+                <div className="border-t border-brand-border p-3 dark:border-border">
+                  <div className="h-9 animate-pulse rounded-btn bg-brand-light" />
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
-        {!loading && servicesError && (
+        {!servicesLoading && servicesError && (
           <p className="rounded-lg border border-brand-border bg-white px-5 py-6 text-center text-sm text-brand-gray dark:border-border dark:bg-card dark:text-muted-foreground">
             We couldn't load your health services right now. Please refresh to try again.
           </p>
         )}
 
-        {!loading && !servicesError && services && services.length === 0 && (
-          <div className="rounded-lg border border-dashed border-brand-border bg-white px-5 py-8 text-center dark:border-border dark:bg-card">
-            <p className="text-sm font-medium text-brand-ink dark:text-foreground">
-              No health services are currently available for your barangay.
-            </p>
-            <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Please check again later for upcoming services.</p>
+        {!servicesLoading && !servicesError && dashboardServices.length === 0 && (
+          <div className="rounded-lg border border-dashed border-brand-border bg-white px-5 py-6 text-center dark:border-border dark:bg-card">
+            <HeartPulse className="mx-auto h-5 w-5 text-brand-gray/60 dark:text-muted-foreground" aria-hidden="true" />
+            <p className="mt-2 text-sm text-brand-gray dark:text-muted-foreground">No available health services at the moment.</p>
           </div>
         )}
 
-        {!loading && !servicesError && services && services.length > 0 && (
-          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-            {services.map((service) => (
-              <ResidentServiceCard key={service.id} service={service} to={HEALTH_SERVICES_PATH} />
+        {!servicesLoading && !servicesError && dashboardServices.length > 0 && (
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {dashboardServices.map((service) => (
+              <ServiceCard
+                key={service.id}
+                service={service}
+                bannerLocation={service.barangay}
+                onViewDetails={() => setDetailsService(service)}
+              />
             ))}
           </div>
         )}
       </section>
+
+      <ServiceDetailsDialog
+        service={detailsService}
+        onClose={() => setDetailsService(null)}
+        onRegister={(service) => { setDetailsService(null); setRegisterModal(service); }}
+        onCancel={(service) => { setDetailsService(null); setRemoveTarget({ serviceId: service.id, plan: service.plan }); }}
+        onPreviewMemo={setPreviewMemo}
+      />
+
+      <VisitPlanModal
+        open={Boolean(registerModal)}
+        service={registerModal}
+        onClose={() => setRegisterModal(null)}
+        onConfirmed={onPlanConfirmed}
+        showToast={showToast}
+      />
+
+      {removeTarget && (
+        <CancelRegistrationDialog
+          plan={removeTarget.plan}
+          busy={removing}
+          onCancel={() => (removing ? null : setRemoveTarget(null))}
+          onConfirm={confirmRemove}
+        />
+      )}
+
+      {toast && (
+        <div role="status" className="fixed bottom-4 right-4 z-[80] flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
+          <span className="text-sm">{toast}</span>
+        </div>
+      )}
+
+      {previewMemo && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${previewMemo.name} memorandum`}
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewMemo(null); }}
+        >
+          <div className="flex h-[86vh] max-h-[1100px] w-[94vw] max-w-[640px] flex-col overflow-hidden rounded-card bg-white shadow-2xl dark:bg-card">
+            <div className="flex items-center justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold text-brand-ink dark:text-foreground">{previewMemo.name}</h2>
+                <p className="truncate text-xs text-brand-gray dark:text-muted-foreground">{previewMemo.filename || "Memorandum"}</p>
+              </div>
+              <button type="button" onClick={() => setPreviewMemo(null)} className="rounded-full p-2 text-brand-gray hover:bg-brand-bg hover:text-brand-ink dark:text-muted-foreground dark:hover:bg-hover" aria-label="Close memorandum">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {previewMemo.mimeType === "application/pdf" ? (
+              <iframe
+                title={`${previewMemo.name} memorandum`}
+                src={`${previewMemo.url}#toolbar=0&navpanes=0&scrollbar=0`}
+                className="min-h-0 w-full flex-1 bg-slate-100 dark:bg-background"
+              />
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
+                <FileText className="h-10 w-10 text-brand-blue" aria-hidden="true" />
+                <p className="text-sm font-semibold text-brand-ink dark:text-foreground">This memorandum can’t be previewed in the portal.</p>
+                <p className="max-w-sm text-xs text-brand-gray dark:text-muted-foreground">Please ask the health center to provide the memorandum as a PDF for in-page viewing.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

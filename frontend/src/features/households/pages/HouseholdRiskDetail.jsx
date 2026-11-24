@@ -63,6 +63,194 @@ function InfoCell({ icon: Icon, label, value }) {
   );
 }
 
+const assessmentValue = (value) => {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "Not recorded";
+  if (value === null || value === undefined || value === "") return "Not recorded";
+  return String(value);
+};
+
+const assessmentStatus = (householdStatus) => {
+  if (householdStatus === "Submitted") return "Submitted";
+  if (householdStatus === "Approved") return "Completed";
+  if (["Pending", "Ongoing", "Needs Update"].includes(householdStatus)) return "Draft";
+  return householdStatus || "Not recorded";
+};
+
+const formatAssessmentDate = (value) => {
+  if (!value) return "Not recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+};
+
+const environmentalFieldLabels = {
+  assessment_date: "Date accomplished",
+  se_status: "SE status",
+  water_supply_type: "Type of water supply",
+  water_supply_other: "Water supply — other",
+  within_premises: "Located within premises",
+  available_247: "Available 24/7",
+  water_micro_validation_date: "Microbiological validation date",
+  water_micro_result: "Microbiological validation result",
+  water_physico_date: "Physico-chemical test date",
+  water_physico_result: "Physico-chemical test result",
+  sanitary_facility_type: "Type of sanitary facility",
+  unsanitary_facility_type: "Type of unsanitary facility",
+  open_defecation: "Open defecation",
+  toilet_not_shared: "Toilet not shared",
+  excreta_disposal: "Excreta disposal/treatment",
+  waste_segregation: "Waste segregation",
+  waste_backyard_composting: "Backyard composting",
+  waste_recycling: "Recycling/reuse",
+  waste_collected: "Municipal collection",
+  waste_others: "Other waste practice",
+  remarks: "Remarks",
+};
+
+function AssessmentDetails({ household, visits, assessmentRecords }) {
+  const latestVisit = visits?.[0] || null;
+  const snapshot = latestVisit?.profileSnapshot || household?.assessmentProfile || household || null;
+  const memberRows = Array.isArray(snapshot?.members)
+    ? snapshot.members
+    : (Array.isArray(household?.assessmentProfile?.members) ? household.assessmentProfile.members : []);
+  const latestEnvironmental = assessmentRecords?.[0] || null;
+  const environmentalData = latestEnvironmental?.data || {};
+
+  const profileFields = [
+    ["Household head", snapshot?.headName],
+    ["Number of families", snapshot?.families],
+    ["Monthly income", snapshot?.monthlyIncome],
+    ["Household status", snapshot?.hhStatus],
+    ["Approval status", snapshot?.approvalStatus],
+    ["Assigned BHW", snapshot?.collectorName],
+    ["Respondent", [snapshot?.respondentFirst, snapshot?.respondentLast].filter(Boolean).join(" ")],
+    ["Mother's maiden name", snapshot?.respondentMaiden],
+  ];
+
+  const demographicFields = [
+    ["NHTS household status", snapshot?.nhts],
+    ["Indigenous People status", snapshot?.ip],
+    ["PhilHealth member", snapshot?.philhealthMember],
+    ["PhilHealth ID", snapshot?.philhealthId],
+    ["PhilHealth category", snapshot?.philhealthCategory],
+  ];
+
+  const environmentFields = [
+    ["Water source", snapshot?.waterSource],
+    ["Water source type", snapshot?.waterType],
+    ["Distance to water source", snapshot?.waterDistance],
+    ["Water availability", snapshot?.waterAvailability],
+    ["Water treatment practiced", snapshot?.waterTreated],
+    ["Treatment methods", snapshot?.treatmentMethods],
+    ["Toilet facility", snapshot?.toiletType],
+    ["Sanitation facility access", snapshot?.sanitationAccess],
+    ["Waste disposal", snapshot?.wasteDisposal],
+    ["Waste segregation practiced", snapshot?.wasteSegregation],
+  ];
+
+  return (
+    <Card className="p-5">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-brand-ink">Household Assessment Details</h3>
+        <p className="mt-1 text-sm text-brand-gray">Complete saved information from the BHW assessment.</p>
+      </div>
+      {!snapshot && !latestEnvironmental ? (
+        <p className="rounded-xl border border-dashed border-brand-border px-4 py-5 text-center text-sm text-brand-gray">No completed household assessment is recorded.</p>
+      ) : (
+        <div className="space-y-2">
+          <details open className="rounded-xl border border-brand-border bg-white">
+            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-brand-ink">Assessment Information</summary>
+            <div className="grid grid-cols-1 gap-3 border-t border-brand-border p-4 sm:grid-cols-2">
+              <InfoCell label="Assessment status" value={assessmentStatus(snapshot?.hhStatus)} />
+              <InfoCell label="Date submitted" value={latestVisit?.createdAt ? formatAssessmentDate(latestVisit.createdAt) : (snapshot?.createdAt ? formatAssessmentDate(snapshot.createdAt) : "Not recorded")} />
+              <InfoCell label="BHW who conducted assessment" value={latestVisit?.recordedByName || snapshot?.collectorName} />
+              <InfoCell label="Date of household visit" value={latestVisit?.visitDate ? formatDate(latestVisit.visitDate) : "Not recorded"} />
+              <InfoCell label="Last updated" value={snapshot?.updatedAt ? formatAssessmentDate(snapshot.updatedAt) : "Not recorded"} />
+              <InfoCell label="Assessment reason" value={latestVisit?.visitReason} />
+            </div>
+          </details>
+
+          <details open className="rounded-xl border border-brand-border bg-white">
+            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-brand-ink">Household Profile</summary>
+            <div className="grid grid-cols-1 gap-3 border-t border-brand-border p-4 sm:grid-cols-2">
+              {[...profileFields, ...demographicFields].map(([label, value]) => <InfoCell key={label} label={label} value={assessmentValue(value)} />)}
+            </div>
+          </details>
+
+          <details open className="rounded-xl border border-brand-border bg-white">
+            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-brand-ink">Household Members</summary>
+            <div className="border-t border-brand-border p-4">
+              {Array.isArray(memberRows) && memberRows.length ? (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {memberRows.map((member, index) => (
+                    <div key={member.id || `${member.name}-${index}`} className="min-w-0 rounded-xl bg-brand-bg/60 p-3 [overflow-wrap:anywhere]">
+                      <p className="text-sm font-semibold text-brand-ink">{member.name || "Not recorded"}</p>
+                      <dl className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                        {[["Relationship", member.relationship], ["Sex", member.sex], ["Birth date", member.birthday], ["Age", member.age], ["Classification", member.classification], ["Contact", member.contact], ["Person with disability", member.isPwd], ["PhilHealth", member.philhealth], ["Family planning", member.fpMethod], ["Quarter status", member.quarterStatus]].map(([label, value]) => (
+                          <div key={label}><dt className="text-brand-gray">{label}</dt><dd className="mt-0.5 font-medium text-brand-ink">{assessmentValue(value)}</dd></div>
+                        ))}
+                      </dl>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-sm text-brand-gray">Not recorded</p>}
+            </div>
+          </details>
+
+          <details open className="rounded-xl border border-brand-border bg-white">
+            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-brand-ink">Water and Sanitation</summary>
+            <div className="grid grid-cols-1 gap-3 border-t border-brand-border p-4 sm:grid-cols-2">
+              {environmentFields.map(([label, value]) => <InfoCell key={label} label={label} value={assessmentValue(value)} />)}
+              {latestEnvironmental && [
+                ["Environmental assessment date", latestEnvironmental.assessment_date],
+                ["SE status", latestEnvironmental.se_status],
+                ["Sanitary facility", latestEnvironmental.sanitary_facility_type],
+                ["Unsanitary facility", latestEnvironmental.unsanitary_facility_type],
+                ["Open defecation", latestEnvironmental.open_defecation],
+                ["Remarks", latestEnvironmental.remarks],
+              ].map(([label, value]) => <InfoCell key={label} label={label} value={assessmentValue(value)} />)}
+            </div>
+          </details>
+
+          {latestEnvironmental && (
+            <details open className="rounded-xl border border-brand-border bg-white">
+              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-brand-ink">Environmental Conditions</summary>
+              <div className="grid grid-cols-1 gap-3 border-t border-brand-border p-4 sm:grid-cols-2">
+                {Object.entries({ ...latestEnvironmental, ...environmentalData }).filter(([key]) => key !== "id" && key !== "data" && !["household_id", "municipality_id", "barangay_id", "created_by", "created_at", "updated_at", "has_basic_safe_water", "has_sanitary_toilet", "complete_sanitation", "open_defecation", "sanitary_facility_type", "unsanitary_facility_type", "assessment_date", "se_status", "water_supply_type", "water_supply_other", "within_premises", "available_247", "remarks"].includes(key)).map(([key, value]) => (
+                  <InfoCell key={key} label={environmentalFieldLabels[key] || key.replaceAll("_", " ")} value={assessmentValue(value)} />
+                ))}
+                {["water_supply_type", "water_supply_other", "within_premises", "available_247"].map((key) => (
+                  <InfoCell key={key} label={environmentalFieldLabels[key]} value={assessmentValue(latestEnvironmental[key] ?? environmentalData[key])} />
+                ))}
+              </div>
+            </details>
+          )}
+
+          {assessmentRecords?.length > 1 && (
+            <details className="rounded-xl border border-brand-border bg-white">
+              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-brand-ink">Previous Environmental Assessments</summary>
+              <div className="space-y-3 border-t border-brand-border p-4">
+                {assessmentRecords.slice(1).map((record) => (
+                  <details key={record.id} className="rounded-lg border border-brand-border p-3">
+                    <summary className="cursor-pointer text-sm font-medium text-brand-ink">{record.assessment_date ? formatDate(record.assessment_date) : "Assessment date not recorded"}{record.created_at ? ` · ${formatAssessmentDate(record.created_at)}` : ""}</summary>
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {Object.entries({ ...record, ...(record.data || {}) }).filter(([key]) => key !== "id" && !["household_id", "municipality_id", "barangay_id", "created_by", "created_at", "updated_at", "data"].includes(key)).map(([key, value]) => (
+                        <InfoCell key={key} label={environmentalFieldLabels[key] || key.replaceAll("_", " ")} value={assessmentValue(value)} />
+                      ))}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function HouseholdRiskDetail() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -295,6 +483,12 @@ export default function HouseholdRiskDetail() {
             <InfoCell icon={FileText} label="Last Assessment" value={formatDate(h.lastAssessment)} />
           </div>
         </Card>
+
+        <AssessmentDetails
+          household={h}
+          visits={visits}
+          assessmentRecords={h.assessmentRecords}
+        />
 
         {access.canViewVisits && (
           <Card className="p-5">

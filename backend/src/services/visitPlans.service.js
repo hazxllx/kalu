@@ -303,6 +303,10 @@ const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityN
     name: service.name,
     description: service.description || '',
     category: service.category || '',
+    location: service.custom_location || facilityName,
+    publishedAt: service.created_at || null,
+    updatedAt: service.updated_at || null,
+    active: service.active === true,
     pubmatUrl: service.pubmatUrl || null,
     memo: service.memo || null,
     facilityType: facilityTypeOf(service, resident),
@@ -358,7 +362,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
 
   const { data: services, error } = await supabase
     .from(SERVICE_TABLE)
-    .select('id, name, description, category, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline, registration_capacity')
+    .select('id, name, description, category, municipality_id, barangay_id, custom_location, created_at, updated_at, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline, registration_capacity')
     .eq('municipality_id', scope.municipality_id)
     .eq('active', true)
     .order('name');

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { residentsApi, visitPlansApi, referralsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
-import { downloadReferralPdf } from "@/features/referrals/lib/referralPdf";
+import { downloadReferralPdf, openReferralPdf } from "@/features/referrals/lib/referralPdf";
 import { downloadHealthRecordPdf, medicalHistoryForRecord } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
@@ -116,6 +116,8 @@ export default function HealthRecord() {
   const [healthServiceRecords, setHealthServiceRecords] = useState([]);
   const [referrals, setReferrals] = useState([]);
   const [selectedReferral, setSelectedReferral] = useState(null);
+  const [selectedReferralPdf, setSelectedReferralPdf] = useState("");
+  const [selectedFollowUp, setSelectedFollowUp] = useState(null);
   const [referralDetailLoading, setReferralDetailLoading] = useState(false);
   const [referralDownloadId, setReferralDownloadId] = useState("");
   const [referralActionError, setReferralActionError] = useState("");
@@ -337,6 +339,28 @@ export default function HealthRecord() {
       setReferralDownloadId("");
     }
   }, [user?.id, referralDownloadId]);
+
+  const viewReferralSlip = useCallback(async (record) => {
+    if (!record?.id || !user?.id) return;
+    setReferralDownloadId(record.id);
+    setReferralActionError("");
+    try {
+      const data = await referralsApi.get(record.id, { ownerId: user.id, cache: "no-store" });
+      if (!data?.record?.id) throw new Error("Could not load the saved referral.");
+      const url = await openReferralPdf(data.record);
+      if (!url) throw new Error("Could not generate the referral document.");
+      setSelectedReferralPdf(String(url));
+    } catch (err) {
+      setReferralActionError(err?.message || "Could not open the referral slip.");
+    } finally {
+      setReferralDownloadId("");
+    }
+  }, [user?.id, referralDownloadId]);
+
+  const closeReferralSlip = useCallback(() => {
+    if (selectedReferralPdf?.startsWith("blob:")) URL.revokeObjectURL(selectedReferralPdf);
+    setSelectedReferralPdf("");
+  }, [selectedReferralPdf]);
 
   /**
    * Export the resident's own health record as a formatted PDF document. The
@@ -830,6 +854,7 @@ export default function HealthRecord() {
   return (
     <div className="mx-auto w-full max-w-[1180px]">
       <PageHeader
+        eyebrow="Resident Health Services"
         title="My Health Record"
         subtitle="A complete view of your medical history and vitals."
         dense
@@ -839,7 +864,7 @@ export default function HealthRecord() {
               onClick={exportHealthRecord}
               disabled={loading || !!error || exporting}
               aria-busy={exporting}
-              className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-brand-gold px-4 text-sm font-semibold text-brand-dark transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-btn border border-brand-gold/60 bg-brand-gold px-4 text-sm font-semibold text-brand-dark transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {exporting ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating PDF...</> : <><Download className="w-4 h-4" /> Export Health Record</>}
             </button>
@@ -859,23 +884,24 @@ export default function HealthRecord() {
         <Card className="p-6 text-sm text-brand-gray">Loading your health record…</Card>
       ) : (
         <>
-          <Card className="mb-5 rounded-lg px-5 py-5 shadow-none">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 xl:grid-cols-6">
+          <Card className="mb-5 rounded-card px-5 py-5 shadow-none">
+            <div className="grid grid-cols-2 gap-x-0 gap-y-5 text-sm sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
               {[
                 ["Resident name", resident?.name],
+                ["Health Record No.", resident?.healthRecordNo || resident?.healthRecordNumber || resident?.health_record_no],
                 ["Barangay", resident?.barangay],
                 ["Birthday", resident?.birthDate ? formatDate(resident.birthDate) : null],
                 ["Age", resident?.age],
                 ["Sex", resident?.sex],
               ].map(([label, value]) => (
-                <div key={label} className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{label}</p>
+                <div key={label} className="min-w-0 px-0 pr-3 sm:px-3 sm:first:pl-0 xl:border-l xl:border-brand-border xl:first:border-l-0 xl:first:pl-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-gray">{label}</p>
                   <p className="mt-1.5 min-w-0 break-words text-sm font-medium text-brand-ink">{dash(value)}</p>
                 </div>
               ))}
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">Verification</p>
-                <p className="mt-1.5 inline-flex rounded-full border border-brand-border bg-brand-bg px-2.5 py-1 text-xs font-semibold text-brand-ink">
+              <div className="px-0 sm:px-3 xl:border-l xl:border-brand-border">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-gray">Verification</p>
+                <p className="mt-1.5 inline-flex border-l-2 border-brand-gold bg-brand-bg px-2.5 py-1 text-xs font-semibold text-brand-ink">
                   {dash(resident?.verificationStatus)}
                 </p>
               </div>
@@ -883,7 +909,7 @@ export default function HealthRecord() {
           </Card>
 
           {/* Section tabs — Consultation History is a subsection of this page. */}
-          <div className="mb-5 flex overflow-x-auto gap-1 border-b border-brand-border" role="tablist" aria-label="Health record sections">
+          <div className="mb-5 flex w-full overflow-x-auto border-b border-brand-border" role="tablist" aria-label="Health record sections">
             {[
               { key: "overview", label: "Overview" },
               { key: "consultations", label: "Consultation History" },
@@ -898,10 +924,10 @@ export default function HealthRecord() {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`-mb-px border-b-2 px-3.5 py-3 text-sm font-medium transition-colors ${
+                  className={`-mb-px shrink-0 border-b-2 px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors sm:px-5 ${
                     active
-                      ? "border-brand-blue text-brand-blue"
-                      : "border-transparent text-brand-gray hover:text-brand-ink"
+                      ? "border-b-brand-gold bg-brand-blue text-white"
+                      : "border-transparent text-brand-ink/70 hover:bg-brand-bg hover:text-brand-ink"
                   }`}
                 >
                   {tab.label}
@@ -967,26 +993,47 @@ export default function HealthRecord() {
                   <LabResultsPanel canUpload />
                 </Card>
 
-                <Card className="rounded-lg p-5 shadow-none">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <h3 className="text-base font-semibold leading-5 text-brand-ink">Recent Referrals</h3>
-                    <button type="button" onClick={() => setActiveTab("referrals")} className="shrink-0 text-xs font-semibold text-brand-blue hover:underline">View all</button>
-                  </div>
-                  {!latestRecord?.referrals?.length ? (
-                    <p className="text-sm text-brand-gray">No referral records available.</p>
-                  ) : (
-                    <ul className="divide-y divide-brand-border">
-                      {latestRecord.referrals.slice(0, 3).map((record) => (
-                        <li key={record.id} className="py-2.5 first:pt-0 last:pb-0">
-                          <p className="text-sm font-medium text-brand-ink">{record.facility || "Receiving facility not recorded"}</p>
-                          <p className="mt-0.5 line-clamp-2 text-xs text-brand-gray">{record.reason || "Referral reason not recorded"}</p>
-                          <div className="mt-1 flex items-center justify-between gap-2 text-xs text-brand-gray"><span>{formatDate(record.referralDate || record.date)}</span><span>{record.serviceProgressStatus || "Pending"}</span></div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </Card>
               </div>
+
+              {latestRecord?.referrals?.length > 0 && (
+                <Card className="mt-5 rounded-card p-5 shadow-none">
+                  <div className="mb-4 flex items-end justify-between gap-3 border-b border-brand-border pb-3">
+                    <div><h3 className="text-base font-semibold text-brand-ink">Referrals</h3><p className="mt-1 text-sm text-brand-gray">Actual referral records associated with your account.</p></div>
+                    <button type="button" onClick={() => setActiveTab("referrals")} className="shrink-0 text-sm font-semibold text-brand-blue hover:underline">Referral History</button>
+                  </div>
+                  <div className="divide-y divide-brand-border">
+                    {[...latestRecord.referrals].sort((a, b) => String(b.referralDate || b.date).localeCompare(String(a.referralDate || a.date))).map((record) => (
+                      <article key={record.id} className="grid gap-3 py-4 first:pt-0 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-end last:pb-0">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{record.referenceNo ? `Referral ${record.referenceNo}` : "Referral"}</p>
+                          <p className="mt-1 font-medium text-brand-ink">{record.facility || "Destination not recorded"}</p>
+                          <p className="mt-1 text-sm text-brand-gray">{record.reason || "Reason not recorded"}</p>
+                          <p className="mt-1 text-xs text-brand-gray">{formatDate(record.referralDate || record.date)} · {record.assignedPersonnel || "Personnel not recorded"} · {record.serviceProgressStatus || "Pending"}</p>
+                        </div>
+                        <button type="button" onClick={() => viewReferralSlip(record)} disabled={referralDownloadId === record.id} className="h-9 rounded-btn border border-brand-blue px-3 text-sm font-semibold text-brand-blue disabled:opacity-50">View Referral Slip</button>
+                      </article>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {followUps.length > 0 && (
+                <Card className="mt-5 rounded-card p-5 shadow-none">
+                  <div className="mb-4 border-b border-brand-border pb-3"><h3 className="text-base font-semibold text-brand-ink">Follow-ups</h3><p className="mt-1 text-sm text-brand-gray">Scheduled follow-up records associated with your account.</p></div>
+                  <div className="divide-y divide-brand-border">
+                    {[...followUps].sort((a, b) => String(a.date).localeCompare(String(b.date))).map((record) => (
+                      <article key={record.id} className="grid gap-3 py-4 first:pt-0 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-end last:pb-0">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{record.purpose || "Follow-up"}</p>
+                          <p className="mt-1 text-sm font-medium text-brand-ink">{formatDate(record.date)}{record.time ? ` · ${record.time}` : ""}</p>
+                          <p className="mt-1 text-xs text-brand-gray">{record.assignedPersonnel || "Assigned personnel not recorded"} · {record.serviceProgressStatus || "Scheduled"}</p>
+                        </div>
+                        <button type="button" onClick={() => setSelectedFollowUp(record)} className="h-9 rounded-btn border border-brand-blue px-3 text-sm font-semibold text-brand-blue">View Details</button>
+                      </article>
+                    ))}
+                  </div>
+                </Card>
+              )}
 
               <Card className="mt-5 rounded-lg p-5 shadow-none">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -1016,6 +1063,44 @@ export default function HealthRecord() {
                 )}
               </Card>
             </>
+          )}
+          {selectedReferralPdf && (
+            <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-white sm:inset-6 sm:h-auto sm:rounded-xl sm:border sm:border-brand-border sm:shadow-2xl" role="dialog" aria-modal="true" aria-label="Referral slip">
+              <div className="flex h-14 shrink-0 items-center justify-between border-b border-brand-border px-4 sm:px-5">
+                <h3 className="text-sm font-semibold text-brand-ink">Referral Slip</h3>
+                <div className="flex items-center gap-2">
+                  <a href={selectedReferralPdf} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center rounded-btn border border-brand-border px-3 text-sm font-semibold text-brand-blue">Open / Print</a>
+                  <button type="button" onClick={closeReferralSlip} className="grid h-9 w-9 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close referral slip"><X className="h-4 w-4" /></button>
+                </div>
+              </div>
+              <iframe title="Official referral slip" src={selectedReferralPdf} className="min-h-0 w-full flex-1 border-0" />
+            </div>
+          )}
+          {selectedFollowUp && (
+            <div className="fixed inset-0 z-[90] flex h-[100dvh] items-stretch bg-black/50 sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true" aria-label="Follow-up details">
+              <div className="flex max-h-[100dvh] w-full flex-col bg-white sm:h-auto sm:max-h-[85dvh] sm:max-w-2xl sm:rounded-xl sm:border sm:border-brand-border sm:shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-brand-border px-5 py-4">
+                  <div><p className="text-[11px] font-semibold uppercase tracking-wide text-brand-blue">Follow-up</p><h3 className="mt-1 text-lg font-semibold text-brand-ink">{selectedFollowUp.purpose || "Follow-up Details"}</h3></div>
+                  <button type="button" onClick={() => setSelectedFollowUp(null)} className="grid h-9 w-9 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close follow-up details"><X className="h-4 w-4" /></button>
+                </div>
+                <dl className="grid min-h-0 flex-1 gap-x-6 gap-y-4 overflow-y-auto px-5 py-5 sm:grid-cols-2">
+                  {[
+                    ["Follow-up reference", selectedFollowUp.id],
+                    ["Scheduled date", formatDate(selectedFollowUp.date)],
+                    ["Scheduled time", selectedFollowUp.time],
+                    ["Status", selectedFollowUp.serviceProgressStatus || "Scheduled"],
+                    ["Assigned healthcare personnel", selectedFollowUp.assignedPersonnel],
+                    ["Location", selectedFollowUp.facility],
+                    ["Purpose", selectedFollowUp.purpose],
+                    ["Instructions", selectedFollowUp.notes],
+                    ["Completion date", selectedFollowUp.completedAt ? formatLongDate(selectedFollowUp.completedAt) : ""],
+                  ].filter(([, value]) => value).map(([label, value]) => (
+                    <div key={label} className="min-w-0"><dt className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-brand-ink">{value}</dd></div>
+                  ))}
+                </dl>
+                <div className="flex justify-end border-t border-brand-border px-5 py-3"><button type="button" onClick={() => setSelectedFollowUp(null)} className="h-10 rounded-btn border border-brand-border px-4 text-sm font-semibold text-brand-gray">Close</button></div>
+              </div>
+            </div>
           )}
         </>
       )}

@@ -32,7 +32,7 @@ export default function UploadComponent({
   allowedExts = DEFAULT_EXTS,
   hint = "",
   screening = null,
-  onRetry,
+  onRetry = null,
   manualReview = false,
 }) {
   const [dragging, setDragging] = useState(false);

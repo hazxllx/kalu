@@ -17,7 +17,8 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { api, consultationsApi, residentsApi, healthServicesApi } from "@/services/api";
-import MedicineSelector from "@/features/consultations/components/MedicineSelector";
+import ConsultationClinicalFields from "@/features/consultations/components/ConsultationClinicalFields";
+import ConsultationHealthServiceField from "@/features/consultations/components/ConsultationHealthServiceField";
 import DateRangePicker from "@/features/consultations/components/DateRangePicker";
 import { formatLongDate } from "@/lib/dateUtils";
 import { classifyBloodPressure as classifyBp, formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
@@ -38,7 +39,8 @@ import LabResultsPanel from "@/features/health-records/components/LabResultsPane
 import ResidentHealthHistory from "@/features/consultations/components/ResidentHealthHistory";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { loadServerRows } from "@/lib/serverRows";
-import { consultationRiskLevel, consultationAssessment, consultationServiceName, consultationHealthServiceLabel, consultationTemperatureWarningVisible, consultationRiskReasons, consultationFollowUp, consultationBloodPressureClassification } from "@/features/consultations/lib/consultationRisk";
+import { consultationRiskLevel, consultationAssessment, consultationServiceName, consultationTemperatureWarningVisible, consultationRiskReasons, consultationFollowUp, consultationBloodPressureClassification } from "@/features/consultations/lib/consultationRisk";
+import { hasMaternalDetails, hasMaternalInformation, isMaternalHealthService } from "@/features/consultations/lib/consultationForm";
 import ButtonSelectGroup from "@/components/system/ButtonSelectGroup";
 import {
   getManilaDateTime, calculateConsultationBmi, validateConsultationVitals,
@@ -194,14 +196,6 @@ const emptyForm = (now = new Date()) => ({
 const conditionValue = (condition) => typeof condition === "string"
   ? { name: condition, status: "stable", significant: false }
   : { ...condition, name: condition.name || condition.condition || condition.diagnosis || "", status: condition.status || "stable", significant: condition.significant === true };
-
-const hasMaternalInformation = (maternal) => Boolean(maternal && [
-  "careType", "pregnancyId", "maternalRecordId", "lmpDate", "eddDate", "gestationalAgeWeeks",
-].some((field) => maternal[field] != null && String(maternal[field]).trim() !== ""));
-const hasMaternalDetails = (maternal) => Boolean(maternal && (
-  maternal.pregnancyId || maternal.maternalRecordId || maternal.lmpDate || maternal.eddDate
-  || String(maternal.gestationalAgeWeeks ?? "").trim() || ["prenatal", "postpartum"].includes(maternal.careType)
-));
 
 const toResidentOption = (r) => ({
   id: r.id,
@@ -393,9 +387,11 @@ export default function TreatmentConsultation() {
   }, [formData.bloodPressure, formData.chiefComplaint, formData.findings, formData.clinicalIndicators]);
 
   const selectedService = healthServices.find((service) => service.id === formData.serviceId);
-  const maternalService = /\b(maternal|prenatal)\b/i.test(selectedService?.category || formData.serviceCategory || "");
+  const maternalService = isMaternalHealthService(selectedService || {
+    name: formData.serviceName,
+    category: formData.serviceCategory,
+  });
   const confirmedPregnancy = clinicalContext?.pregnancy;
-  const pregnancyClinicalTextIndicator = clinicalTextIndicatesPregnancy(`${formData.chiefComplaint}\n${formData.findings}`);
 
   useEffect(() => {
     if (mode !== "form" || !selectedResident?.id || !ownerId || reviewLocalId
@@ -692,22 +688,23 @@ export default function TreatmentConsultation() {
     });
   };
 
-  const validateMaternalInformation = () => {
+  const validateMaternalInformation = (data = formData, serviceIsMaternal = maternalService) => {
     const next = {};
-    if (!maternalService) return next;
-    if (formData.maternal.careType === "prenatal" && !confirmedPregnancy?.isPregnant && !pregnancyClinicalTextIndicator) {
+    if (!serviceIsMaternal) return next;
+    if (data.maternal.careType === "prenatal" && !confirmedPregnancy?.isPregnant
+      && !clinicalTextIndicatesPregnancy(`${data.chiefComplaint}\n${data.findings}`)) {
       next["maternal.careType"] = "Record pregnancy-related terms in the Chief Complaint or Clinical Findings, or use a confirmed same-resident pregnancy episode for prenatal care.";
     }
     for (const field of ["lmpDate", "eddDate"]) {
-      const value = formData.maternal[field];
+      const value = data.maternal[field];
       if (value && validateConsultationDateTime({ consultationDate: value }, { required: false }).consultationDate) {
         next[`maternal.${field}`] = "Enter a valid calendar date.";
       }
     }
-    if (formData.maternal.lmpDate && formData.maternal.eddDate && formData.maternal.eddDate <= formData.maternal.lmpDate) {
+    if (data.maternal.lmpDate && data.maternal.eddDate && data.maternal.eddDate <= data.maternal.lmpDate) {
       next["maternal.eddDate"] = "Estimated delivery must be after the last menstrual period.";
     }
-    const weeks = formData.maternal.gestationalAgeWeeks;
+    const weeks = data.maternal.gestationalAgeWeeks;
     if (weeks !== "" && weeks != null && (!/^\d+(?:\.\d+)?$/.test(String(weeks)) || Number(weeks) > 45)) {
       next["maternal.gestationalAgeWeeks"] = "Enter a gestational age between 0 and 45 weeks.";
     }
@@ -1014,11 +1011,11 @@ export default function TreatmentConsultation() {
 
   /* ------------------------- Entry form (unchanged style) ------------------------- */
   const renderForm = () => (
-    <div className="grid lg:grid-cols-3 gap-5">
+    <div className="grid gap-3 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,2fr)]">
       {/* Left Panel - Resident Search */}
-      <Card className="p-5 lg:col-span-1 h-fit">
-        <h3 className="font-semibold text-brand-ink mb-4">Resident Search</h3>
-        <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2.5 mb-5">
+      <Card className="h-fit p-3 lg:col-span-1">
+        <h3 className="mb-3 font-semibold text-brand-ink">Resident Search</h3>
+        <div className="mb-3 flex items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2">
           <Search className="w-4 h-4 text-brand-gray" />
           <input
             value={searchQuery}
@@ -1028,7 +1025,7 @@ export default function TreatmentConsultation() {
             className="bg-transparent text-sm outline-none w-full"
           />
         </div>
-        <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+        <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
           {filteredResidents.map((resident) => {
             const active = selectedResident?.id === resident.id;
             const initials = resident.name.split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
@@ -1048,7 +1045,7 @@ export default function TreatmentConsultation() {
             return (
               <div
                 key={resident.id}
-                className={`rounded-xl border p-3 transition-colors ${
+                className={`rounded-btn border p-2.5 transition-colors ${
                   active ? "border-brand-blue bg-brand-light" : "border-brand-border bg-white dark:border-border dark:bg-card"
                 }`}
               >
@@ -1066,7 +1063,7 @@ export default function TreatmentConsultation() {
                   type="button"
                   disabled={busy || Boolean(reviewLocalId) || Boolean(editingId)}
                   onClick={selectResident}
-                  className={`mt-3 min-h-9 w-full rounded-btn border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  className={`mt-2 min-h-8 w-full rounded-btn border px-3 py-1 text-sm font-medium transition-colors ${
                     active
                       ? "border-brand-blue bg-brand-blue text-white"
                       : "border-brand-border bg-white text-brand-blue hover:border-brand-blue hover:bg-brand-light dark:border-border dark:bg-card"
@@ -1085,8 +1082,8 @@ export default function TreatmentConsultation() {
       </Card>
 
       {/* Right Panel - Consultation Form */}
-      <Card className="p-5 lg:col-span-2">
-        <div className="flex items-center justify-between gap-3 mb-5">
+      <Card className="min-w-0 p-3 lg:col-span-1 sm:p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <h3 className="font-semibold text-brand-ink">
             {reviewLocalId ? "Review Queued Consultation" : editingId ? "Edit Treatment Consultation" : "Treatment Consultation Form"}
           </h3>
@@ -1107,9 +1104,9 @@ export default function TreatmentConsultation() {
 
         {/* Resident summary */}
         <div className="mb-5">
-          <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-brand-gray">Selected Resident</h4>
+          <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-brand-gray">Resident Information</h4>
           {selectedResident ? (
-            <div className="grid min-w-0 gap-x-4 gap-y-2 rounded-btn border border-brand-border bg-brand-bg/40 p-3 sm:grid-cols-2 lg:grid-cols-3 dark:border-border dark:bg-card/40">
+            <div className="grid min-w-0 gap-x-3 gap-y-1.5 rounded-btn border border-brand-border bg-brand-bg/40 p-2.5 sm:grid-cols-2 lg:grid-cols-3 dark:border-border dark:bg-card/40">
               <div className="min-w-0">
                 <p className="mb-0.5 text-xs text-brand-gray">Full Name</p>
                 <p className="truncate text-sm font-semibold text-brand-ink" title={selectedResident.name}>{selectedResident.name}</p>
@@ -1136,16 +1133,19 @@ export default function TreatmentConsultation() {
           )}
         </div>
 
-        {renderHistory(selectedResident,
+        {canViewHistory && ownerId && selectedResident?.id && <details className="mb-3 rounded-btn border border-brand-border px-3 dark:border-border">
+          <summary className="cursor-pointer py-2 text-xs font-medium text-brand-blue">Resident health history</summary>
+          {renderHistory(selectedResident,
           selectedResident?.id && savedHistory?.resident?.id === selectedResident.id ? savedHistory.revision
             : syncStatus.ownerId === ownerId ? syncStatus.lastSyncedAt : null,
           editingId)}
+        </details>}
 
         {/* Consultation Information */}
-        <div className="mb-5">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Consultation Information</h4>
+        <div className="mb-4">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue">Consultation Information</h4>
           {contextError && <p role="alert" className="mb-3 text-xs text-brand-danger">{contextError} <button type="button" onClick={() => setContextRetry((value) => value + 1)} className="font-medium text-brand-blue hover:underline">Retry</button></p>}
-          <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3 mb-3">
+          <div className="mb-3 grid gap-x-3 gap-y-2 sm:grid-cols-2">
             <div>
               <label htmlFor="consultation-date" className="block text-xs text-brand-gray mb-1">Consultation Date <span className="text-brand-danger">*</span></label>
               <input
@@ -1173,33 +1173,41 @@ export default function TreatmentConsultation() {
               {errors.consultationTime && <p className="mt-1 text-xs text-brand-danger">{errors.consultationTime}</p>}
             </div>
             <div className="sm:col-span-2">
-              <SearchableSelect
-                id="consult-service" label="Health Service Provided" ariaLabel="Health Service Provided"
+              <ConsultationHealthServiceField
                 value={formData.serviceId}
-                onChange={(serviceId) => {
-                  const service = healthServices.find((item) => item.id === serviceId);
-                  setFormData({ ...formData, serviceId, serviceName: service?.name || "", serviceCategory: service?.category || "" });
-                  if (errors.serviceId) setErrors((prev) => ({ ...prev, serviceId: "" }));
+                services={healthServices}
+                loading={servicesLoading}
+                fieldError={errors.serviceId || ""}
+                serviceError={servicesError}
+                disabled={Boolean(reviewLocalId)}
+                recordedName={formData.serviceName}
+                recordedCategory={formData.serviceCategory}
+                onChange={(selectedId) => {
+                  const service = healthServices.find((item) => item.id === selectedId);
+                  const nextFormData = {
+                    ...formData,
+                    serviceId: selectedId,
+                    serviceName: service?.name || "",
+                    serviceCategory: service?.category || "",
+                  };
+                  const nextIsMaternal = isMaternalHealthService(service || {
+                    name: nextFormData.serviceName,
+                    category: nextFormData.serviceCategory,
+                  });
+                  setFormData(nextFormData);
+                  setErrors((previous) => {
+                    const next = { ...previous, serviceId: "" };
+                    for (const field of Object.keys(next)) if (field.startsWith("maternal.")) delete next[field];
+                    if (!nextIsMaternal && ((maternalInfoTouched && hasMaternalDetails(nextFormData.maternal))
+                      || (maternalInfoProtected && hasMaternalInformation(nextFormData.maternal)))) {
+                      next.serviceId = "Select a Prenatal / Maternal health service to save the entered maternal information.";
+                    } else if (nextIsMaternal) {
+                      Object.assign(next, validateMaternalInformation(nextFormData, true));
+                    }
+                    return next;
+                  });
                 }}
-                options={[
-                  ...(formData.serviceId && !healthServices.some((service) => service.id === formData.serviceId)
-                    ? [{ value: formData.serviceId, label: consultationHealthServiceLabel({
-                      name: formData.serviceName || "Previously selected service", category: formData.serviceCategory,
-                    }) }] : []),
-                  ...healthServices.map((service) => ({ value: service.id, label: consultationHealthServiceLabel(service) })),
-                ]}
-                error={errors.serviceId || ""} disabled={servicesLoading || Boolean(reviewLocalId)} compact portalDropdown
-                placeholder="Select a registered health service"
               />
-                {servicesLoading ? (
-                  <p className="mt-1 text-xs text-brand-gray">Loading health services…</p>
-                ) : servicesError ? (
-                  <p className="mt-1 text-xs text-brand-danger" role="alert">{servicesError}</p>
-                ) : healthServices.length === 0 ? (
-                   <p className="mt-1 text-xs text-brand-gray">No active registered services are available. An unlinked record does not create a new service category.</p>
-                ) : (
-                <p className="mt-1 text-xs text-brand-gray">Select the registered health service this consultation belongs to.</p>
-              )}
             </div>
             {maternalService && <section aria-label="Maternal Information" className="rounded-btn border border-brand-border bg-brand-bg/40 p-3 dark:border-border dark:bg-card/40 sm:col-span-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1291,9 +1299,9 @@ export default function TreatmentConsultation() {
         </div>
 
         {/* Vital Signs */}
-        <div className="mb-5">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Vital Signs</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-3">
+        <div className="mb-4">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue">Vital Signs</h4>
+          <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
             <div className="min-w-0">
               <label htmlFor="vital-blood-pressure" className="mb-1 block text-xs text-brand-gray">Blood Pressure (mmHg) <span className="text-brand-danger">*</span></label>
               <div className={`flex w-full min-w-0 items-center rounded-btn border bg-white px-3 py-2 focus-within:border-brand-blue dark:bg-card ${errors.bloodPressure ? "border-brand-danger dark:border-brand-danger" : "border-brand-border dark:border-border"}`}>
@@ -1391,47 +1399,25 @@ export default function TreatmentConsultation() {
           </div>
         </div>
 
-        {/* Clinical Assessment */}
-        <div className="mb-5">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Clinical Findings</h4>
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="clinical-findings" className="block text-xs text-brand-gray mb-1">Clinical Findings <span className="text-brand-danger">*</span></label>
-              <textarea
-                id="clinical-findings" required rows={3}
-                value={formData.findings}
-                onChange={(e) => setFormData({ ...formData, findings: e.target.value })}
-                placeholder="Record examination findings, observed symptoms and relevant clinical information."
-                aria-invalid={Boolean(errors.findings)} className={`${inputCls(errors.findings)} resize-y w-full`}
-              />
-              {errors.findings && <p className="mt-1 text-xs text-brand-danger">{errors.findings}</p>}
-            </div>
-            <div>
-              <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
-              <MedicineSelector
-                value={formData.medications}
-                onChange={(medications) => setFormData((prev) => ({ ...prev, medications }))}
-                errors={errors}
-                disabled={Boolean(reviewLocalId)}
-              />
-            </div>
-            <div>
-              <label htmlFor="treatment-recommendations" className="text-xs text-brand-gray mb-1 block">Recommendations / Instructions</label>
-              <textarea
-                id="treatment-recommendations"
-                rows={2}
-                value={formData.adviceGiven}
-                onChange={(e) => {
-                  const adviceGiven = e.target.value;
-                  setFormData({ ...formData, adviceGiven });
-                  if (adviceGiven.length <= 10000) setErrors((previous) => ({ ...previous, adviceGiven: "" }));
-                }}
-                placeholder="Record follow-up care, self-care guidance, referral instructions or recommendations."
-                aria-invalid={Boolean(errors.adviceGiven)}
-                className={`${inputCls(errors.adviceGiven)} resize-y`}
-              />
-              {errors.adviceGiven && <p role="alert" className="mt-1 text-xs text-brand-danger">{errors.adviceGiven}</p>}
-            </div>
+        <ConsultationClinicalFields
+          findings={formData.findings}
+          onFindingsChange={(findings) => setFormData((current) => ({ ...current, findings }))}
+          diagnosis={formData.diagnosis}
+          onDiagnosisChange={(diagnosis) => setFormData((current) => ({ ...current, diagnosis }))}
+          medications={formData.medications}
+          onMedicationsChange={(medications) => setFormData((current) => ({ ...current, medications }))}
+          recommendations={formData.adviceGiven}
+          onRecommendationsChange={(adviceGiven) => {
+            setFormData((current) => ({ ...current, adviceGiven }));
+            if (adviceGiven.length <= 10000) setErrors((previous) => ({ ...previous, adviceGiven: "" }));
+          }}
+          errors={errors}
+          disabled={Boolean(reviewLocalId)}
+        />
+
+        <div className="mb-4">
+          <section className="mt-3" aria-label="Follow-up and referral">
+            <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-brand-blue">Follow-up and Referral</h4>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="text-xs text-brand-gray">Follow-up Required</p>
@@ -1453,7 +1439,7 @@ export default function TreatmentConsultation() {
                 <textarea rows={2} aria-label="Clinical history or remarks" value={formData.remarks} onChange={(event) => setFormData((current) => ({ ...current, remarks: event.target.value }))} className={`${inputCls(errors.remarks)} mt-1.5 resize-y`} />
               </label>}
             </div>
-          </div>
+          </section>
         </div>
 
         </fieldset>

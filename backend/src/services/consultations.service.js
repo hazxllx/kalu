@@ -978,6 +978,10 @@ export const get = async ({ user, id, repo = repository, supabase = serviceClien
 export const consultationFieldErrors = (payload = {}, { requireResident = false, requireClinical = true } = {}) => {
   const errors = { ...validateVitalsByField(payload, { required: requireClinical }),
     ...validateConsultationDateTime(payload, { required: requireClinical }) };
+  if (payload.consultationDate && isConsultationDate(payload.consultationDate)) {
+    const today = getManilaDateTime().date;
+    if (payload.consultationDate > today) errors.consultationDate = 'Encounter date cannot be in the future.';
+  }
   const required = (field, message) => {
     if (!text(payload[field])) errors[field] = message;
   };

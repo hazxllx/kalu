@@ -5,8 +5,6 @@ import { ROLES } from "@/lib/brand";
 import { getAssignedBarangay } from "@/lib/barangayScope";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
-import VerificationBadge from "@/features/verification/components/VerificationBadge";
-import VerificationBanner from "@/features/verification/components/VerificationBanner";
 import SubmittedRequests from "@/features/settings/components/SubmittedRequests";
 import OfficialLogosSection from "@/features/settings/components/OfficialLogosSection";
 import { fetchMyVerification } from "@/services/api/verificationsApi";
@@ -53,7 +51,6 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const pwStrength = checkPasswordStrength(pw.new);
 
   const isResident = roleKey === "resident" || roleKey === "resident-limited";
-  const isLimitedResident = roleKey === "resident-limited";
 
   // Official resident details and verification status come from the resident
   // record; account details remain available from the authenticated profile.
@@ -268,13 +265,14 @@ export default function SettingsPage({ roleKey = "resident" }) {
   };
 
   return (
-    <div className={isResident && isProfileRoute ? "mx-auto w-full max-w-[1120px]" : undefined}>
+    <div className={`${isResident && isProfileRoute ? "mx-auto w-full max-w-[1120px] " : ""}font-body`}>
       <PageHeader
         management={roleKey === "admin"}
         crumbs={roleKey === "admin"
           ? [{ label: "Admin", to: "/app/admin/dashboard" }, isProfileRoute ? "Profile" : "System Settings"]
           : [isProfileRoute ? "Profile" : "Settings"]}
         title={isProfileRoute ? "Profile" : roleKey === "admin" ? "System Settings" : "Settings"}
+        titleClassName={isResident && isProfileRoute ? "text-2xl md:text-[26px]" : undefined}
         subtitle={isProfileRoute
           ? "View and update your account information."
           : roleKey === "admin"
@@ -285,17 +283,15 @@ export default function SettingsPage({ roleKey = "resident" }) {
       <div className="space-y-5">
         {roleKey === "admin" && !isProfileRoute && <OfficialLogosSection />}
 
-        {isResident && isProfileRoute && <VerificationBanner showVerificationMethod />}
         {isResident && isProfileRoute && <SubmittedRequests />}
 
         {isResident && isProfileRoute && (
           <Card className="rounded-xl p-4 shadow-sm sm:p-6">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3 sm:mb-5">
               <div>
-                <h2 className="font-display text-lg font-semibold text-brand-ink dark:text-foreground">Resident details</h2>
+                <h2 className="font-heading text-xl font-semibold text-brand-ink dark:text-foreground">Resident details</h2>
                 <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Your account information and linked official resident record.</p>
               </div>
-              {isLimitedResident && <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"><ShieldCheck className="h-3.5 w-3.5" /> Pending verification</span>}
             </div>
             {accountError && (
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3" role="alert">
@@ -318,8 +314,8 @@ export default function SettingsPage({ roleKey = "resident" }) {
                 { label: "Address", value: account?.address },
               ].map((item) => (
                 <div key={item.label} className="min-w-0 border-b border-brand-border pb-3 dark:border-border">
-                  <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-gray dark:text-muted-foreground">{item.label}</dt>
-                  <dd className="mt-1 min-w-0 break-words text-sm font-medium leading-relaxed text-brand-ink dark:text-foreground">
+                  <dt className="text-xs font-medium uppercase tracking-[0.08em] text-brand-gray dark:text-muted-foreground">{item.label}</dt>
+                  <dd className="mt-1 min-w-0 break-words text-[15px] font-medium leading-relaxed text-brand-ink dark:text-foreground">
                     {accountLoading && hasResidentRecord === null && ["Barangay", "Birthday", "Age", "Sex", "Address"].includes(item.label)
                       ? "Loading…"
                       : item.value !== null && item.value !== undefined && String(item.value).trim()
@@ -334,7 +330,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
         {/* Profile Information */}
         <Card className="rounded-xl p-4 sm:p-6">
-          <h3 className="mb-4 text-base font-semibold text-brand-ink dark:text-foreground sm:mb-5">Profile information</h3>
+          <h3 className="mb-4 font-heading text-xl font-semibold text-brand-ink dark:text-foreground sm:mb-5">Profile information</h3>
 
           {showAccountError ? (
             <div className="flex flex-col items-start gap-3 rounded-btn border border-brand-danger/25 bg-brand-danger/5 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -436,7 +432,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
         {/* Security: Change Password */}
         <Card className="p-4 sm:p-6">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5 flex items-center gap-2">
+          <h3 className="mb-4 flex items-center gap-2 font-heading text-xl font-semibold text-brand-ink sm:mb-5">
             <Lock className="w-4 h-4 text-brand-blue" strokeWidth={1.8} /> Change Password
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
@@ -532,7 +528,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
         {/* Appearance */}
         <Card className="p-4 sm:p-6">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-1 flex items-center gap-2">
+          <h3 className="mb-1 flex items-center gap-2 font-heading text-xl font-semibold text-brand-ink">
             <Palette className="w-4 h-4 text-brand-blue" strokeWidth={1.8} /> Appearance
           </h3>
           <p className="text-xs text-brand-gray mb-4">
@@ -574,7 +570,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
         {/* Account Information */}
         <Card className="p-4 sm:p-6">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5 flex items-center gap-2">
+          <h3 className="mb-4 flex items-center gap-2 font-heading text-xl font-semibold text-brand-ink sm:mb-5">
             <ShieldCheck className="w-4 h-4 text-brand-blue" strokeWidth={1.8} /> Account Information
           </h3>
 
@@ -609,14 +605,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
                     value: isResident ? (account?.ref || dash) : (user?.referenceNumber || dash),
                   },
                 ];
-                if (isResident) {
-                  fields.push({
-                    label: "Verification Status",
-                    icon: ShieldCheck,
-                    badge: true,
-                    status: account?.status,
-                  });
-                } else {
+                if (!isResident) {
                   fields.push({
                     label: "Account Status",
                     icon: ShieldCheck,
@@ -636,8 +625,6 @@ export default function SettingsPage({ roleKey = "resident" }) {
                     </div>
                     {loading ? (
                       <p className="text-sm font-medium text-brand-gray">Loading…</p>
-                    ) : f.badge ? (
-                      f.status ? <VerificationBadge status={f.status} size="sm" /> : <p className="text-sm font-medium text-brand-ink">N/A</p>
                     ) : (
                       <p className="text-sm font-medium text-brand-ink break-words">{f.value}</p>
                     )}
@@ -650,7 +637,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
         {/* Login Sessions */}
         <Card className="p-4 sm:p-6">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5 flex items-center gap-2">
+          <h3 className="mb-4 flex items-center gap-2 font-heading text-xl font-semibold text-brand-ink sm:mb-5">
             <Monitor className="w-4 h-4 text-brand-blue" strokeWidth={1.8} /> Login Sessions
           </h3>
           {sessionLoading ? (

@@ -26,7 +26,9 @@ import { formatStatusLabel, getStatusColor, getRiskColor } from "@/lib/statusFor
 import TablePagination from "@/components/tables/TablePagination";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
 import { consultationAssessment, consultationFollowUp, consultationRiskLevel, consultationServiceName, consultationRiskReasons } from "@/features/consultations/lib/consultationRisk";
-import { validateConsultationDateTime, calculateConsultationBmi, assessConsultationRisk } from "../../../../../shared/consultationClinical.js";
+import { validateConsultationDateTime, validateConsultationVitals, calculateConsultationBmi, assessConsultationRisk, getManilaDateTime } from "../../../../../shared/consultationClinical.js";
+import SearchableSelect from "@/components/common/SearchableSelect";
+import { formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
 
 const inputCls = "w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue focus:border-2";
 const fieldNames = {
@@ -59,8 +61,8 @@ const compactRiskFindings = (assessment = {}) => {
   return findings;
 };
 
-function Modal({ title, onClose, busy = false, children }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4"><Card role="dialog" aria-label={title} aria-modal="true" className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[92vh]"><div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6"><h2 className="text-base font-semibold text-brand-ink sm:text-lg">{title}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="flex h-9 w-9 items-center justify-center rounded-btn text-brand-gray disabled:opacity-40"><X className="h-5 w-5" /></button></div><div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">{children}</div></Card></div>;
+function Modal({ title, onClose, busy = false, footer = null, children }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4"><Card role="dialog" aria-label={title} aria-modal="true" className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[92vh]"><div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6"><h2 className="min-w-0 break-words text-base font-semibold text-brand-ink sm:text-lg">{title}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray disabled:opacity-40"><X className="h-5 w-5" /></button></div><div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">{children}</div>{footer && <div className="shrink-0 border-t border-brand-border bg-white px-4 py-3 sm:px-6">{footer}</div>}</Card></div>;
 }
 
 export default function PhnHealthRecords() {
@@ -102,6 +104,16 @@ export default function PhnHealthRecords() {
   const [contextRetry, setContextRetry] = useState(0);
   const registry = resource.data?.residents || [];
   const residentById = useMemo(() => new Map(registry.map((resident) => [String(resident.id), resident])), [registry]);
+  const residentOptions = useMemo(() => registry.map((resident) => {
+    const recordNumber = resident.healthRecordNo || resident.healthRecordNumber || resident.health_record_no || "";
+    const label = [
+      resident.name || "Name not recorded",
+      resident.barangay || "Barangay not recorded",
+      recordNumber ? `Record ${recordNumber}` : "",
+      `Resident ID ${resident.id}`,
+    ].join(" · ");
+    return { value: String(resident.id), label, resident };
+  }).sort((a, b) => a.resident.name.localeCompare(b.resident.name)), [registry]);
   const records = useMemo(() => filterRowsByScope((resource.data?.consultations || []).map((record) => ({ ...record, barangay: record.resident?.barangay || "", consultationLocation: record.facilityName || "" })), user, coverage), [resource.data, user, coverage]);
   const patientsByVisit = useMemo(() => new Map((queue.patients || []).filter((patient) => patient.source !== "submitted").map((patient) => [String(patient.id), patient])), [queue.patients]);
   const selectedResident = residentById.get(String(form.residentId)) || original?.resident || null;
@@ -218,6 +230,7 @@ export default function PhnHealthRecords() {
     if (editor === "edit" && !online) { setFailure("Clinical edits require an online confirmed update. The saved record has not been changed."); return; }
     const payload = clinicalPayload(form, original);
     const validation = clinicalErrors(payload, { required: requireClinical, encounterDate: form.consultationDate, previousMedications: original?.medications || [] });
+    if (form.consultationDate && form.consultationDate > getManilaDateTime().date) validation.consultationDate = "Encounter date cannot be in the future.";
     if (!residentById.has(String(payload.residentId)) && payload.residentId !== String(original?.resident?.id || original?.residentId || "")) validation.residentId = "Select a resident from the authorized registry.";
     if (form.riskReview && !canReviewRisk) validation.riskReview = "Risk review requires current server-confirmed clinical authority for this resident and encounter date.";
     setErrors(validation);
@@ -289,7 +302,54 @@ export default function PhnHealthRecords() {
       throw error;
     }
   };
-  const field = (name, type = "text") => <label key={name} className="block text-xs font-medium text-brand-gray">{fieldNames[name]}{requireClinical && (vitalFields.includes(name) || name === "consultationDate" || name === "consultationTime") && " *"}<input type={type} step={type === "number" ? "any" : undefined} disabled={busy} aria-label={fieldNames[name]} aria-required={requireClinical && (vitalFields.includes(name) || name === "consultationDate" || name === "consultationTime")} aria-invalid={Boolean(errors[name])} aria-describedby={errors[name] ? `phn-${name}-error` : undefined} value={form[name]} onChange={(event) => setForm((current) => ({ ...current, [name]: event.target.value }))} className={`${inputCls} mt-1`} />{errors[name] && <span id={`phn-${name}-error`} role="alert" className="mt-1 block text-xs text-brand-danger">{errors[name]}</span>}</label>;
+  const updateField = (name, value) => {
+    const next = { ...form, [name]: value };
+    setForm(next);
+    setErrors((current) => {
+      const validation = validateConsultationVitals(next);
+      const dateValidation = validateConsultationDateTime(next);
+      const nextErrors = { ...current };
+      if (vitalFields.includes(name)) {
+        if (String(value ?? "").trim() || current[name]) nextErrors[name] = validation[name] || "";
+        if (["height", "weight"].includes(name) || current.bmi) nextErrors.bmi = validation.bmi || "";
+      }
+      if (name === "consultationDate" || name === "consultationTime") nextErrors[name] = dateValidation[name] || "";
+      if (name === "consultationDate" && next.consultationDate) {
+        const today = getManilaDateTime().date;
+        if (next.consultationDate > today) nextErrors.consultationDate = "Encounter date cannot be in the future.";
+      }
+      if (!nextErrors[name]) delete nextErrors[name];
+      if (nextErrors.bmi === "") delete nextErrors.bmi;
+      return nextErrors;
+    });
+  };
+  const field = (name, type = "text") => {
+    if (name === "bloodPressure") return <label key={name} className="block min-w-0 text-xs font-medium text-brand-gray">{fieldNames[name]}{requireClinical && " *"}
+      <input type="text" inputMode="numeric" maxLength={9} disabled={busy} aria-label={fieldNames[name]} aria-required={requireClinical} aria-invalid={Boolean(errors[name])} aria-describedby={errors[name] ? `phn-${name}-error` : undefined} value={form[name]} placeholder="120/80" onChange={(event) => {
+        const input = event.currentTarget;
+        if (/[^0-9/]/.test(input.value)) {
+          updateField(name, input.value.replace(/[^0-9/]/g, ""));
+          return;
+        }
+        const formatted = formatBloodPressureInput(input.value, input.selectionStart, input.selectionEnd, event.nativeEvent.inputType);
+        if (formatted) {
+          input.value = formatted.value;
+          input.setSelectionRange(formatted.caret, formatted.caret);
+        }
+        updateField(name, input.value);
+      }} className={`${inputCls} mt-1`} />{errors[name] && <span id={`phn-${name}-error`} role="alert" className="mt-1 block text-xs text-brand-danger">{errors[name]}</span>}</label>;
+    const numeric = ["temperature", "pulseRate", "respiratoryRate", "height", "weight", "oxygenSaturation"].includes(name);
+    const inputMode = name === "temperature" || name === "height" || name === "weight" || name === "oxygenSaturation" ? "decimal" : "numeric";
+    return <label key={name} className="block min-w-0 text-xs font-medium text-brand-gray">{fieldNames[name]}{requireClinical && (vitalFields.includes(name) || name === "consultationDate" || name === "consultationTime") && " *"}
+      <input type={numeric ? "text" : type} inputMode={numeric ? inputMode : undefined} step={type === "number" ? "any" : undefined} max={name === "consultationDate" ? getManilaDateTime().date : undefined} disabled={busy} aria-label={fieldNames[name]} aria-required={requireClinical && (vitalFields.includes(name) || name === "consultationDate" || name === "consultationTime")} aria-invalid={Boolean(errors[name])} aria-describedby={errors[name] ? `phn-${name}-error` : undefined} value={form[name]} onChange={(event) => {
+        let value = event.target.value;
+        if (numeric) {
+          if (["pulseRate", "respiratoryRate"].includes(name)) value = value.replace(/\D/g, "").slice(0, 3);
+          else value = value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1").replace(/^(-)/, "").slice(0, 12);
+        }
+        updateField(name, value);
+      }} className={`${inputCls} mt-1`} />{errors[name] && <span id={`phn-${name}-error`} role="alert" className="mt-1 block text-xs text-brand-danger">{errors[name]}</span>}</label>;
+  };
 
   return <>
     <PageHeader crumbs={["Clinical Care", "Health Records"]} title="Health Records" subtitle="Persisted consultations and clinical history within your authorized coverage." action={<button disabled={busy || resource.loading || Boolean(resource.error)} onClick={() => { setOriginal(null); setForm(consultationForm()); setContextState(null); setErrors({}); setFailure(""); setEditor("new"); }} className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm text-white disabled:opacity-50"><Plus className="h-4 w-4" /> New Clinical Record</button>} />
@@ -533,18 +593,45 @@ export default function PhnHealthRecords() {
           className="clinical-pagination mt-4"
         />
     </>}
-    {editor && <Modal title={editor === "edit" ? "Edit Persisted Consultation" : "New Clinical Consultation"} onClose={() => setEditor(null)} busy={busy}>
+    {editor && <Modal title={editor === "edit" ? "Edit Persisted Consultation" : "New Clinical Consultation"} onClose={() => setEditor(null)} busy={busy} footer={<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button disabled={busy} onClick={() => setEditor(null)} className="min-h-11 rounded-btn border border-brand-border px-4 py-2 text-sm sm:min-h-10">Cancel</button><button disabled={busy || (editor === "edit" && !online)} onClick={save} className="min-h-11 rounded-btn bg-brand-blue px-5 py-2 text-sm text-white disabled:opacity-50 sm:min-h-10">{busy ? "Saving..." : "Save Clinical Record"}</button></div>}>
       {failure && <p role="alert" className="mb-4 text-sm text-brand-danger">{failure}</p>}
-      <label className="mb-4 block text-sm font-medium">Resident Registry Record<select aria-label="Resident Registry Record" disabled={editor === "edit" || busy} value={form.residentId} onChange={(event) => setForm((current) => ({ ...current, residentId: event.target.value, clinicalContext: { pregnancyStatus: "unknown", existingConditions: [] }, clinicalIndicators: { dangerSignsReviewed: false }, maternal: null }))} className={`${inputCls} mt-1`}><option value="">Select an authorized resident...</option>{registry.map((resident) => <option key={resident.id} value={resident.id}>{resident.name || "Name not recorded"} · {resident.barangay || "Barangay not recorded"} · {String(resident.id).slice(-8)}</option>)}{original && form.residentId && !residentById.has(form.residentId) && <option value={form.residentId}>{original.resident?.name || "Saved resident record"} · Saved resident ID: {form.residentId}</option>}</select>{errors.residentId && <span role="alert" className="text-xs text-brand-danger">{errors.residentId}</span>}</label>
-      {selectedResident && <p className="mb-4 rounded-btn bg-brand-bg p-3 text-xs text-brand-gray">Resident ID: {selectedResident.id} · Age: {selectedResident.age ?? "Not recorded"} · Sex: {selectedResident.gender || selectedResident.sex || "Not recorded"} · Barangay: {selectedResident.barangay || "Not recorded"}. Demographics are maintained in the resident registry.</p>}
+      <section aria-labelledby="phn-resident-section" className="mb-5">
+        <h3 id="phn-resident-section" className="mb-2 text-sm font-semibold">Resident Information</h3>
+        <SearchableSelect
+          label="Resident Registry Record"
+          ariaLabel="Resident Registry Record"
+          required
+          disabled={editor === "edit" || busy}
+          value={form.residentId}
+          onChange={(residentId) => {
+            setForm((current) => ({ ...current, residentId, clinicalContext: { pregnancyStatus: "unknown", existingConditions: [] }, clinicalIndicators: { dangerSignsReviewed: false }, maternal: null }));
+            setErrors((current) => ({ ...current, residentId: "" }));
+          }}
+          options={[
+            ...(original && form.residentId && !residentById.has(String(form.residentId)) ? [{ value: String(form.residentId), label: `${original.resident?.name || "Saved resident record"} · Saved resident ID ${form.residentId}` }] : []),
+            ...residentOptions,
+          ]}
+          placeholder="Search name, resident ID, health record number, or barangay"
+          emptyText="No authorized resident matches this search."
+          error={errors.residentId || ""}
+          maxResults={8}
+          portalDropdown
+        />
+      </section>
+      {selectedResident && <p className="mb-4 break-words rounded-btn bg-brand-bg p-3 text-xs text-brand-gray">Resident ID: {selectedResident.id} · Age: {selectedResident.age ?? "Not recorded"} · Sex: {selectedResident.gender || selectedResident.sex || "Not recorded"} · Barangay: {selectedResident.barangay || "Not recorded"}.</p>}
       {original && <p className="mb-4 text-xs text-brand-gray">Recorded service: {consultationServiceName(original) || "Not recorded"}</p>}
-      <div className="mb-5 grid gap-4 sm:grid-cols-2">{field("consultationDate", "date")}{field("consultationTime", "time")}</div>
-      <h3 className="mb-2 text-sm font-semibold">Recorded Vitals</h3>
-      <p className="mb-3 text-xs text-brand-gray">All 8 vital fields, including calculated BMI, are required for a new record or clinical correction. Metadata-only edits retain partial historical measurements.</p>
-      <div className="mb-5 grid gap-3 sm:grid-cols-3">
+      <section aria-labelledby="phn-encounter-section" className="mb-5">
+        <h3 id="phn-encounter-section" className="mb-2 text-sm font-semibold">Encounter Information</h3>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{field("consultationDate", "date")}{field("consultationTime", "time")}</div>
+      </section>
+      <section aria-labelledby="phn-vitals-section" className="mb-5">
+      <h3 id="phn-vitals-section" className="mb-2 text-sm font-semibold">Recorded Vital Signs</h3>
+      <p className="mb-3 text-xs text-brand-gray">All required vital fields must contain a plausible clinical measurement.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {vitalFields.map((name) => field(name, name === "bloodPressure" ? "text" : "number"))}
         <label className="block text-xs font-medium text-brand-gray">{fieldNames.bmi}{requireClinical && " *"}<input aria-label="BMI" aria-required={requireClinical} aria-invalid={Boolean(errors.bmi)} readOnly value={bmi === null ? "" : bmi.toFixed(1)} className={`${inputCls} mt-1 bg-brand-bg`} /><span className="mt-1 block text-xs">Calculated from measured height and weight.</span>{errors.bmi && <span role="alert" className="mt-1 block text-xs text-brand-danger">{errors.bmi}</span>}</label>
       </div>
+      </section>
       <div className="mb-5 grid gap-4 sm:grid-cols-2">{textFields.map((name) => <label key={name} className="text-xs font-medium text-brand-gray">{fieldNames[name]}{requireClinical && ["chiefComplaint", "findings"].includes(name) && " *"}<textarea aria-label={fieldNames[name]} aria-required={requireClinical && ["chiefComplaint", "findings"].includes(name)} aria-invalid={Boolean(errors[name])} disabled={busy} rows={3} value={form[name]} onChange={(event) => setForm((current) => ({ ...current, [name]: event.target.value }))} className={`${inputCls} mt-1 resize-y`} />{errors[name] && <span role="alert" className="text-xs text-brand-danger">{errors[name]}</span>}</label>)}</div>
       <section aria-label="Automatic risk preview" className="mb-5 rounded-btn border border-brand-border p-4">
         <h3 className="text-sm font-semibold">Automatic Risk Assessment</h3>
@@ -564,10 +651,18 @@ export default function PhnHealthRecords() {
         </div>}
       </fieldset>}
       {errors.riskReview && <p role="alert" className="mb-4 text-xs text-brand-danger">{errors.riskReview}</p>}
-      <h3 className="mb-3 text-sm font-semibold">Structured Prescriptions</h3>
-      <MedicineSelector value={form.medications} onChange={(medications) => setForm((current) => ({ ...current, medications }))} errors={errors} disabled={busy} />
+      <section aria-labelledby="phn-treatment-section" className="mb-5">
+        <h3 id="phn-treatment-section" className="mb-3 text-sm font-semibold">Treatment and Medication</h3>
+        <MedicineSelector value={form.medications} onChange={(medications) => {
+          setForm((current) => ({ ...current, medications }));
+          setErrors((current) => {
+            const next = { ...current };
+            for (const key of Object.keys(next)) if (key === "medications" || key.startsWith("medications[")) delete next[key];
+            return next;
+          });
+        }} errors={errors} disabled={busy} />
+      </section>
       <div className="mt-5 grid gap-4 sm:grid-cols-3">{["followUpRequired", "referralRequired"].map((name) => <label key={name} className="text-xs font-medium text-brand-gray">{name === "followUpRequired" ? "Follow-up Required" : "Referral Required"}<select aria-label={name === "followUpRequired" ? "Follow-up Required" : "Referral Required"} disabled={busy} value={form[name]} onChange={(event) => setForm((current) => ({ ...current, [name]: event.target.value }))} className={`${inputCls} mt-1`}><option>No</option><option>Yes</option></select></label>)}{field("nextVisitDate", "date")}</div>
-      <div className="sticky bottom-0 -mx-4 mt-5 flex justify-end gap-3 border-t border-brand-border bg-white px-4 py-3 sm:-mx-6 sm:px-6"><button disabled={busy} onClick={() => setEditor(null)} className="rounded-btn border border-brand-border px-4 py-2 text-sm">Cancel</button><button disabled={busy || (editor === "edit" && !online)} onClick={save} className="rounded-btn bg-brand-blue px-5 py-2 text-sm text-white disabled:opacity-50">{busy ? "Saving..." : "Save Clinical Record"}</button></div>
     </Modal>}
     {viewing && <Modal title="Persisted Clinical Record" onClose={() => setViewing(null)}>
       {(() => {

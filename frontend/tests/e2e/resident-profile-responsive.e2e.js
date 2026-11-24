@@ -17,6 +17,7 @@ const consultationNote = 'Follow up after the community health assessment and re
 const recordData = {
   resident: {
     name: residentName,
+    healthRecordNo: 'RHU-000123',
     barangay: 'San Jose Riverside Extension Barangay',
     birthDate: '1994-03-12',
     age: 32,
@@ -44,7 +45,7 @@ const recordData = {
 
 const modules = {
   '@/features/health-records/components/LabResultsPanel': 'export default function LabResultsPanel() { return null; }',
-  '@/context/AuthContext': `export const useAuth = () => ({ user: { id: 'synthetic-resident', name: ${JSON.stringify(residentName)}, email: 'resident@example.test', role: 'resident' }, refreshProfile: async () => {}, logout: async () => {} });`,
+  '@/context/AuthContext': `export const useAuth = () => ({ user: { id: 'synthetic-resident', name: ${JSON.stringify(residentName)}, email: 'resident@example.test', contact: '09171234567', role: 'resident' }, refreshProfile: async () => {}, logout: async () => {} });`,
   '@/context/ThemeContext': `export const useTheme = () => ({ theme: 'light', setTheme: () => {} });`,
   '@/lib/brand': `export const ROLES = { resident: { name: 'Resident' }, 'resident-limited': { name: 'Resident' } };`,
   '@/lib/barangayScope': `export const getAssignedBarangay = () => '';`,
@@ -57,10 +58,14 @@ const modules = {
       myHealthRecords: async (params) => { window.healthRecordParams = params; return ${JSON.stringify(recordData)}; },
     };
     export const visitPlansApi = { directory: async () => ({ facilities: [{ services: [{ id: 'service-1', name: 'Community Health Assessment', category: 'Community Health', active: true }] }] }) };
-    export const authApi = { updateMe: async () => ({ user: {} }) };
+    export const referralsApi = { get: async () => ({}) };
+    export const authApi = { updateMe: async (payload) => { window.profileSavePayload = payload; return { user: payload }; } };
     export const registrationApi = { registerResident: async () => ({}) };
-    export const api = { get: async () => ({ transfer: null }) };`,
-  '@/features/health-records/lib/healthRecordPdf': `export const downloadHealthRecordPdf = async () => {};`,
+    export const api = { get: async (path) => path.endsWith('/context') ? { history: [
+      { id: 'transfer-review', status: 'under_review', fromBarangay: 'San Antonio', toBarangay: 'San Jose Riverside Extension Barangay', submittedAt: '2026-01-12T03:00:00Z' },
+      { id: 'transfer-pending', status: 'pending', fromBarangay: 'San Isidro', toBarangay: 'San Jose', submittedAt: '2026-01-11T03:00:00Z' },
+    ] } : { transfer: null } };`,
+  '@/features/health-records/lib/healthRecordPdf': `export const downloadHealthRecordPdf = async () => {}; export const medicalHistoryForRecord = (record) => record;`,
   '@/features/verification/components/VerificationBadge': `import React from 'react'; export default function VerificationBadge({ status }) { return <span>{status}</span>; }`,
   '@/features/registration/components/UploadComponent': `import React from 'react'; export default function UploadComponent({ label }) { return <div className="rounded border p-3">{label}</div>; }`,
   '@/features/settings/components/OfficialLogosSection': `import React from 'react'; export default function OfficialLogosSection() { return null; }`,
@@ -119,7 +124,7 @@ async function mount(page, screen, verificationStatus = 'approved') {
         barangay: 'San Jose Riverside Extension Barangay', birthDate: '1994-03-12', age: 32,
         sex: 'Female', address, contactNumber: '09171234567',
         municipality: 'Pili, Camarines Sur', registeredDate: '2026-01-10', ref: 'RES-2026-0001',
-        submittedAt: '2026-01-10', rejectionReason,
+        submittedAt: '2026-01-10', submittedByCurrentUser: true, rejectionReason,
       },
     };
     window.mountResidentPage(screen);
@@ -136,6 +141,10 @@ for (const viewport of viewports) {
   test(`resident profile form and details remain usable at ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mount(page, 'profile');
+    await expect(page.getByRole('heading', { name: 'Submitted Requests' })).toBeVisible();
+    await expect(page.getByText('Approved', { exact: true })).toBeVisible();
+    await expect(page.getByText('Under Review', { exact: true })).toBeVisible();
+    await expect(page.getByText('Verification status', { exact: false })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Resident details' })).toBeVisible();
     await expect(page.locator('dd').filter({ hasText: address })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -148,7 +157,7 @@ for (const viewport of viewports) {
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
     await contactInput.fill('09175551234');
     await page.getByRole('button', { name: 'Save Changes' }).click();
-    await expect.poll(() => page.evaluate(() => window.profileSavePayload)).toEqual({ cellphoneNo: '09175551234' });
+    await expect.poll(() => page.evaluate(() => window.profileSavePayload)).toEqual({ contact: '09175551234' });
     await expect(page.getByText('Profile updated successfully.')).toBeVisible();
 
     await page.getByRole('button', { name: 'Change Password', exact: true }).click();
@@ -162,7 +171,7 @@ for (const viewport of viewports) {
     await expect(page.getByRole('heading', { name: 'My Health Record' })).toBeVisible();
     await expect(page.getByText(residentName, { exact: true })).toBeVisible();
     const summary = page.locator('.ui-card').first().locator('div.grid').first();
-    const expectedColumns = viewport.width < 640 ? 2 : viewport.width < 1280 ? 3 : 6;
+    const expectedColumns = viewport.width < 640 ? 2 : viewport.width < 1024 ? 3 : viewport.width < 1280 ? 4 : 7;
     expect(await summary.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(expectedColumns);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 

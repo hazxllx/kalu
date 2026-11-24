@@ -33,7 +33,7 @@ async function compile(relativePath, imports, globals = {}) {
 const latest = { id: 'latest', date: '2026-11-20', vitals: { bloodPressure: '120/80' } };
 const older = { id: 'older', date: '2026-10-01', vitals: { bloodPressure: '110/70' } };
 const fullRecord = {
-  resident: { name: 'Test Resident', sex: 'Female' }, consultations: [latest, older],
+  resident: { name: 'Test Resident', healthRecordNo: 'RHU-000123', sex: 'Female' }, consultations: [latest, older],
   vaccinations: [{ id: 'inside', date: '2026-10-01' }, { id: 'outside', date: '2026-11-20' }],
 };
 
@@ -47,6 +47,16 @@ async function healthPage(t, respond = async () => fullRecord) {
     '@/components/common/Card': { Card: Container },
     '@/components/tables/TablePagination': { default: Empty },
     '@/components/common/DateRangeFilter': { default: Range, matchesDateRange: (value, from, to) => (!from || value >= from) && (!to || value <= to) },
+    '@/components/common/UniversalDetailsModal': {
+      default: ({ open, record, actions, onClose }) => open ? React.createElement('div', null,
+        record.description,
+        record.information?.map((item) => React.createElement('p', { key: item.label }, `${item.label}: ${item.value}`)),
+        record.sections?.map((section) => React.createElement('section', { key: section.title },
+          React.createElement('h3', null, section.title),
+          section.content)),
+        actions,
+        React.createElement('button', { type: 'button', onClick: onClose }, 'Close')) : null,
+    },
     '@/services/api': {
       residentsApi: { myHealthRecords: (params) => { calls.push(params); return respond(params); } },
       visitPlansApi: { directory: async () => ({ facilities: [] }) },
@@ -147,6 +157,16 @@ test('service details open per card, preserve registration, and show only suppli
     '@/components/common/Skeleton': { Skeleton: Empty },
     '@/components/tables/TablePagination': { default: Empty },
     '@/components/common/DateRangeFilter': { default: Range },
+    '@/components/common/UniversalDetailsModal': {
+      default: ({ open, record, actions, onClose }) => open ? React.createElement('div', null,
+        record.description,
+        record.information?.map((item) => React.createElement('p', { key: item.label }, `${item.label}: ${item.value}`)),
+        record.sections?.map((section) => React.createElement('section', { key: section.title },
+          React.createElement('h3', null, section.title),
+          section.content)),
+        actions,
+        React.createElement('button', { type: 'button', onClick: onClose }, 'Close')) : null,
+    },
     '@/context/AuthContext': { useAuth: () => ({ user: {} }) },
     '@/services/api': { visitPlansApi: { directory: async () => ({ facilities: [{ type: 'BHC', name: 'Test Center', services: [
       { id: 'a', name: 'Service A', description: 'First line\nSecond line\nThird line\nFourth line', facilityName: 'Test Center', visitPolicy: 'walk_in', availability: { open: true }, weekdays: [1], windowStart: '08:00', windowEnd: '10:00' },

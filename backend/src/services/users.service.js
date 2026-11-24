@@ -498,6 +498,8 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
   const fields = {};
   const errors = [];
 
+  let nextRole = existing.role;
+
   if (patch.name !== undefined || patch.fullName !== undefined) {
     const name = String(patch.fullName ?? patch.name ?? '').trim();
     if (!name || name.length > 120) errors.push('Name must be between 1 and 120 characters.');
@@ -507,7 +509,6 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
   if (patch.position !== undefined) fields.position = normalizeOptionalText(patch.position);
   if (patch.licenseNo !== undefined) fields.license_no = normalizeOptionalText(patch.licenseNo);
 
-  let nextRole = existing.role;
   if (patch.role !== undefined && patch.role !== null && String(patch.role).trim() !== existing.role) {
     const role = String(patch.role).trim();
     if (!ASSIGNABLE_ROLES.includes(role)) {
@@ -516,6 +517,12 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
       nextRole = role;
       fields.role = role;
     }
+  }
+
+  if (patch.contact !== undefined
+      && ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(nextRole)
+      && !isStrictMobile(normalizeOptionalText(patch.contact))) {
+    errors.push('Enter an 11-digit mobile number starting with 09.');
   }
 
   let nextStatus = existing.status;

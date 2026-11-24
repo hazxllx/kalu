@@ -77,6 +77,7 @@ export const mapVisitToPatient = (visit) => {
   const completed = status === CHECKUP_STATUS.COMPLETED;
   const clinicalDetails = {
     assessment: visit.findings || phn.assessment || "",
+    diagnosis: visit.consultationDetails?.diagnosis || visit.diagnosis || "",
     healthConcern: phn.assessment || "",
     healthServiceName: visit.healthServiceName || "",
     clinicalNotes: phn.notes || "",

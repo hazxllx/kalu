@@ -20,6 +20,17 @@ test("shared consultation records retain the selected health service in details"
   assert.equal(patient.checkup.healthServiceName, "Maternal Care");
 });
 
+test("PHN consultation display preserves the recorded diagnosis", () => {
+  const patient = mapVisitToPatient({
+    id: "visit-diagnosis",
+    status: "completed",
+    resident: { firstName: "A", lastName: "Resident" },
+    consultationDetails: { diagnosis: "Acute bronchitis" },
+  });
+
+  assert.equal(patient.checkup.diagnosis, "Acute bronchitis");
+});
+
 test("legacy consultation records without a health service map to an empty association", () => {
   const patient = mapVisitToPatient({
     id: "visit-legacy",

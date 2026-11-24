@@ -278,7 +278,7 @@ export default function PhnCheckups() {
   ];
 
   const selectCls =
-    "bg-white border border-brand-border rounded-btn px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue";
+    "w-full min-w-0 border border-brand-border rounded-btn bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue lg:w-auto";
 
   return (
     <>
@@ -315,8 +315,8 @@ export default function PhnCheckups() {
 
         {/* Search + filters toolbar */}
         <Card className="p-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1 min-w-0 lg:max-w-md">
+          <div className="grid gap-2 md:grid-cols-2 lg:flex lg:items-center">
+            <div className="flex min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 md:col-span-2 lg:flex-1 lg:col-span-1">
               <Search className="w-4 h-4 shrink-0 text-brand-gray" />
               <input
                 value={searchQuery}
@@ -326,7 +326,7 @@ export default function PhnCheckups() {
                 className="bg-transparent text-sm outline-none w-full placeholder:text-brand-gray/70"
               />
             </div>
-            <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:col-span-2 lg:ml-auto lg:flex lg:flex-wrap lg:items-center">
               {showBarangayFilter && (
                 <select
                   value={barangayFilter}
@@ -371,17 +371,26 @@ export default function PhnCheckups() {
 
         {/* Check-ups table */}
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="hidden overflow-hidden md:block">
+            <table className="w-full table-fixed">
+              <colgroup>
+                <col className="w-[20%]" />
+                <col className="w-[12%]" />
+                <col className="w-[20%]" />
+                <col className="w-[10%]" />
+                <col className="w-[16%]" />
+                <col className="w-[12%]" />
+                <col className="w-[10%]" />
+              </colgroup>
               <thead className="bg-brand-bg border-b border-brand-border">
                 <tr>
-                  <th className="text-left text-[11px] font-semibold text-brand-gray uppercase tracking-wide px-4 py-2.5">Patient</th>
-                  <th className="text-left text-[11px] font-semibold text-brand-gray uppercase tracking-wide px-4 py-2.5">Barangay</th>
-                  <th className="text-left text-[11px] font-semibold text-brand-gray uppercase tracking-wide px-4 py-2.5">Reason for Visit</th>
-                  <th className="text-left text-[11px] font-semibold text-brand-gray uppercase tracking-wide px-4 py-2.5">Risk</th>
-                  <th className="text-left text-[11px] font-semibold text-brand-gray uppercase tracking-wide px-4 py-2.5">Status</th>
-                  <th className="text-left text-[11px] font-semibold text-brand-gray uppercase tracking-wide px-4 py-2.5">Scheduled</th>
-                  <th className="text-right text-[11px] font-semibold text-brand-gray uppercase tracking-wide px-4 py-2.5">Action</th>
+                  <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-gray lg:px-3">Patient</th>
+                  <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-gray lg:px-3">Barangay</th>
+                  <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-gray lg:px-3">Reason</th>
+                  <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-gray lg:px-3">Risk</th>
+                  <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-gray lg:px-3">Status</th>
+                  <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-gray lg:px-3">Scheduled</th>
+                  <th className="px-2 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray lg:px-3">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -392,13 +401,13 @@ export default function PhnCheckups() {
                   const reason = p.reason || p.triage?.chiefComplaint || "—";
                   return (
                     <tr key={p.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50 transition-colors">
-                      <td className="px-4 py-2.5">
+                      <td className="px-2 py-2.5 lg:px-3">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 shrink-0 rounded-full bg-brand-blue text-white flex items-center justify-center text-[11px] font-semibold">
                             {initialsOf(p.patient)}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-brand-ink truncate max-w-[180px]" title={p.patient}>
+                            <p className="break-words text-sm font-medium text-brand-ink" title={p.patient}>
                               {p.patient}
                             </p>
                             <p className="text-xs text-brand-gray">
@@ -408,38 +417,38 @@ export default function PhnCheckups() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${p.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
+                      <td className="px-2 py-2.5 lg:px-3">
+                        <span className={`inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${p.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
                           {scopeLabel(p, user)}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
-                        <span className="block text-sm text-brand-ink truncate max-w-[220px]" title={reason}>
+                      <td className="px-2 py-2.5 lg:px-3">
+                        <span className="block break-words text-sm text-brand-ink" title={reason}>
                           {reason}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-2 py-2.5 lg:px-3">
                         <span title={risk.reason}>
                           <RiskBadge level={risk.level} />
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${CHECKUP_STATUS_TONES[p.status] || EMPTY_STATE[p.status] || "bg-slate-100 text-slate-600"}`}>
+                      <td className="px-2 py-2.5 lg:px-3">
+                        <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight ${CHECKUP_STATUS_TONES[p.status] || EMPTY_STATE[p.status] || "bg-slate-100 text-slate-600"}`}>
                           <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
                           {p.status}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-2 py-2.5 lg:px-3">
                         {schedule ? (
                           <div className="leading-tight">
-                            <p className="text-sm text-brand-ink whitespace-nowrap">{schedule.date}</p>
-                            <p className="text-xs text-brand-gray whitespace-nowrap">{schedule.time}</p>
+                            <p className="break-words text-sm text-brand-ink">{schedule.date}</p>
+                            <p className="break-words text-xs text-brand-gray">{schedule.time}</p>
                           </div>
                         ) : (
                           <span className="text-sm text-brand-gray">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-right">
+                      <td className="px-2 py-2.5 text-right lg:px-3">
                         <button
                           onClick={() => handleAction(p)}
                           aria-label={meta.label}
@@ -487,6 +496,43 @@ export default function PhnCheckups() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="divide-y divide-brand-border md:hidden">
+            {paginated.map((p) => {
+              const risk = riskOfPatient(p);
+              const meta = actionMeta(p);
+              const schedule = formatScheduled(p.visitDate || p.triage?.date);
+              const reason = p.reason || p.triage?.chiefComplaint || "—";
+              return (
+                <article key={p.id} className="p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-brand-ink">{p.patient}</p>
+                      <p className="mt-0.5 text-xs text-brand-gray">{p.age ? `${p.age} yrs` : "—"}{p.sex ? ` · ${p.sex}` : ""}</p>
+                    </div>
+                    <button
+                      onClick={() => handleAction(p)}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-btn border border-brand-border px-2.5 py-1.5 text-xs font-medium text-brand-blue"
+                    >
+                      <meta.Glyph className="h-3.5 w-3.5" />
+                      {meta.short}
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${p.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>{scopeLabel(p, user)}</span>
+                    <RiskBadge level={risk.level} />
+                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${CHECKUP_STATUS_TONES[p.status] || "bg-slate-100 text-slate-600"}`}>{p.status}</span>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                    <div className="col-span-2"><dt className="text-brand-gray">Reason for check-up</dt><dd className="mt-0.5 break-words font-medium text-brand-ink">{reason}</dd></div>
+                    <div className="col-span-2"><dt className="text-brand-gray">Scheduled</dt><dd className="mt-0.5 font-medium text-brand-ink">{schedule ? `${schedule.date} · ${schedule.time || "Time not recorded"}` : "—"}</dd></div>
+                  </dl>
+                </article>
+              );
+            })}
+            {loading && <div className="px-4 py-10 text-center text-sm text-brand-gray">Loading PHN check-ups...</div>}
+            {!loading && error && <div className="px-4 py-8 text-center text-sm text-brand-danger">Could not load PHN check-ups.</div>}
+            {!loading && !error && filtered.length === 0 && <div className="px-4 py-10 text-center text-sm text-brand-gray">{workflowPatients.length === 0 ? "No check-ups have been sent to the PHN queue yet." : "No check-ups match the selected filters."}</div>}
           </div>
 
           {/* Pagination */}
