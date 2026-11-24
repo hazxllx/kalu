@@ -155,7 +155,9 @@ export function enrichMonitoringCases(items, { residents = [], referrals = [], f
   return items.map((item) => {
     const record = sources.get(item.key) || {};
     const person = people.get(item.residentId || record.resident_id || record.resident?.id) || record.resident || {};
-    const risk = item.category === "Consultation" ? consultationRiskLevel(record) : canonicalRiskLevel(person.riskLevel);
+    const risk = item.category === "Consultation"
+      ? consultationRiskLevel(record) || canonicalRiskLevel(person.riskLevel)
+      : canonicalRiskLevel(person.riskLevel);
     const purok = person.purok || person.household?.purok || record.purok || "";
     const zone = person.zone ?? record.resident?.zone;
     const area = purok ? (/^purok\b/i.test(String(purok)) ? String(purok) : `Purok ${purok}`)

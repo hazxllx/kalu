@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 
-import { supabase, isSupabaseConfigured, supabaseConfigurationError } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { authApi } from '@/services/api';
 import { authFailureMessage, isAuthNetworkFailure } from '../../../shared/authConnectivity.js';
 import { createAuthOwnerLifecycle } from '@/services/auth/authOwnerLifecycle';

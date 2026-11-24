@@ -66,8 +66,8 @@ export const referralDateErrors = (
     const isValidDate = DATE_ONLY_PATTERN.test(referralDate)
       && !Number.isNaN(date.getTime())
       && date.toISOString().slice(0, 10) === referralDate;
-    if (isValidDate && referralDate < today) {
-      errors.referralDate = "Referral date cannot be earlier than today.";
+    if (isValidDate && referralDate > today) {
+      errors.referralDate = "Referral date cannot be later than today.";
     } else if (!isValidDate) {
       errors.referralDate = "Enter a valid referral date.";
     }

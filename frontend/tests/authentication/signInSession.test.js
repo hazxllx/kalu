@@ -83,8 +83,8 @@ const mountAuth = async ({ initial = null, profile = null, passwordGrant = null,
   globalThis.__signInSessionTest = { supabase: sdk, authApi: api };
   let source = await readFile(authUrl, 'utf8');
   source = source
-    .replace(/import \{ supabase, isSupabaseConfigured, supabaseConfigurationError \} from '[^']+';/,
-      'const { supabase } = globalThis.__signInSessionTest; const isSupabaseConfigured = true; const supabaseConfigurationError = null;')
+    .replace(/import\s*\{\s*supabase\s*,\s*isSupabaseConfigured\s*\}\s*from\s*['"][^'"]+['"];?/,
+      'const { supabase } = globalThis.__signInSessionTest; const isSupabaseConfigured = true;')
     .replace(/import \{ authApi \} from '[^']+';/, 'const { authApi } = globalThis.__signInSessionTest;')
     .replace(/from (['"])(@\/[^'"]+|\.{1,2}\/[^'"]+)\1/g, (_match, _quote, path) => {
       const resolved = path.startsWith('@/') ? new URL(`${path.slice(2)}.js`, sourceRoot) : new URL(path, authUrl);

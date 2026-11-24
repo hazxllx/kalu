@@ -121,6 +121,15 @@ const StubErrorState = ({ title, message, onRetry }) => React.createElement(
 );
 const StubTclEmptyState = ({ title, description, action }) => React.createElement('div', { 'data-empty': true }, title, description, action);
 const StubTclPageHeader = ({ title, subtitle }) => React.createElement('header', null, React.createElement('h1', null, title), subtitle);
+const StubDateRangeFilter = () => null;
+const StubSearchableSelect = () => null;
+const StubScheduleRequestsPanel = () => null;
+const matchesDateRange = (value, from, to) => {
+  const date = String(value || '').slice(0, 10);
+  if (from && (!date || date < from)) return false;
+  if (to && (!date || date > to)) return false;
+  return true;
+};
 const StubTclToolbar = ({ searchValue, onSearch, onFilter, filterValue, filterOptions = [] }) => React.createElement(
   'div', { 'data-toolbar': true },
   React.createElement('input', { 'aria-label': 'Search Records', value: searchValue || '', onChange: (e) => onSearch?.(e.target.value) }),
@@ -228,6 +237,10 @@ async function compileComponent(relPath, extraDeps = {}) {
     PostpartumFollowUpForm: () => null,
     ProgramFormModal: () => null,
     ReferralHistory: ({ history = [] }) => React.createElement('div', null, `History:${history.length}`),
+    DateRangeFilter: StubDateRangeFilter,
+    matchesDateRange,
+    SearchableSelect: StubSearchableSelect,
+    ScheduleRequestsPanel: StubScheduleRequestsPanel,
     useM1OfficialPrint: () => ({ startPrint: async () => {}, portal: null, brandingError: null }),
     useMaternalRecordPrint: () => ({ startPrint: async () => {}, portal: null }),
     useHouseholdWorkers: () => ({ rows: [], loading: false, error: null, refresh: () => {} }),
@@ -408,7 +421,7 @@ test('API client -> API modules -> clinicalOfflineService -> AES-GCM IndexedDB i
 
 test('TCLS.jsx: online cache -> offline render + indicator + search/filter + barangay scope + empty cache', async () => {
   let online = true;
-  let currentUser = { id: OWNER_A, role: 'health_supervisor', assignedBarangay: 'San Jose' };
+  let currentUser = { id: OWNER_A, role: 'health_supervisor', municipalityId: 'municipality-pili', barangayId: 'barangay-san-jose', assignedBarangay: 'San Jose' };
   const serverTcls = [
     { id: 't1', resident_id: 'r1', program: 'Prenatal and Postpartum', status: 'Active', priority: 'High', resident: { id: 'r1', first_name: 'Ana', last_name: 'Reyes', barangay: 'San Jose' } },
     { id: 't2', resident_id: 'r2', program: 'Oral Health', status: 'Active', priority: 'Medium', resident: { id: 'r2', first_name: 'Ben', last_name: 'Cruz', barangay: 'San Jose' } },
@@ -466,7 +479,7 @@ test('TCLS.jsx: online cache -> offline render + indicator + search/filter + bar
     act(() => renderer.unmount());
 
     // 4. Account switch to OWNER_B -> isolated empty offline state
-    currentUser = { id: OWNER_B, role: 'health_supervisor', assignedBarangay: 'San Jose' };
+    currentUser = { id: OWNER_B, role: 'health_supervisor', municipalityId: 'municipality-pili', barangayId: 'barangay-san-jose', assignedBarangay: 'San Jose' };
     await act(async () => { renderer = create(React.createElement(TCLS)); });
     await flush();
     text = JSON.stringify(renderer.toJSON());
@@ -485,7 +498,7 @@ test('TBRecords.jsx: online cache -> offline view, search, status filter & indic
     { id: 'tb2', resident_id: 'r2', program: 'TB Prevention (TPT)', status: 'Completed', priority: 'Low', resident: { id: 'r2', first_name: 'Elena', last_name: 'Mendoza', barangay: 'San Jose' } },
   ];
   const { mod, cleanup } = await compileComponent('features/health-records/pages/TBRecords.jsx', {
-    useAuth: () => ({ user: { id: OWNER_A, role: 'health_supervisor', assignedBarangay: 'San Jose' } }),
+    useAuth: () => ({ user: { id: OWNER_A, role: 'health_supervisor', municipalityId: 'municipality-pili', barangayId: 'barangay-san-jose', assignedBarangay: 'San Jose' } }),
     useSyncStatus: () => ({ online, lastSyncedAt: 1700000000000 }),
     DateRangeFilter: () => null,
     matchesDateRange: () => true,
@@ -755,6 +768,7 @@ test('HealthReferrals.jsx & IncomingReferrals.jsx: separated referral stores, se
         return { record: id === 'ref-1' ? { ...outgoingRow, history: [{ id: 'h1' }] } : { ...incomingRow, history: [{ id: 'h2' }] } };
       },
     },
+    residentsApi: { directoryFilters: async () => ({ rows: [] }) },
     api: { get: async () => { if (!online) throw networkFailure(); return { rows: [] }; } },
   };
 
@@ -813,7 +827,7 @@ test('M1SectionDetail.jsx, M1Fhsis.jsx & TclWorkspace.jsx: offline report viewin
   const reportObj = { byCode: Object.fromEntries(secB.map((r) => [r.code, r])) };
 
   const sectionMod = await compileComponent('features/health-records/pages/M1SectionDetail.jsx', {
-    useAuth: () => ({ user: { id: OWNER_A, role: 'health_supervisor', assignedBarangay: 'San Jose' } }),
+    useAuth: () => ({ user: { id: OWNER_A, role: 'health_supervisor', municipalityId: 'municipality-pili', barangayId: 'barangay-san-jose', assignedBarangay: 'San Jose' } }),
     useSyncStatus: () => ({ online, lastSyncedAt: 1700000000000 }),
     m1Api: {
       report: async () => { if (!online) throw networkFailure(); return reportObj; },
@@ -894,7 +908,7 @@ test('Permission expiration & 403 revocation fail closed and never serve cached 
 
   // Server returns 403 while online -> UI must show error and NOT display cached record
   const { mod, cleanup } = await compileComponent('features/health-records/pages/TCLS.jsx', {
-    useAuth: () => ({ user: { id: OWNER_A, role: 'health_supervisor', assignedBarangay: 'San Jose' } }),
+    useAuth: () => ({ user: { id: OWNER_A, role: 'health_supervisor', municipalityId: 'municipality-pili', barangayId: 'barangay-san-jose', assignedBarangay: 'San Jose' } }),
     useSyncStatus: () => ({ online: true, lastSyncedAt: 1700000000000 }),
     tclApi: { list: async () => { throw Object.assign(new Error('Permission revoked'), { status: 403 }); } },
     loadResidentDirectory: async () => [],

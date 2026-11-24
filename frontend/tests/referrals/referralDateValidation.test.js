@@ -34,7 +34,7 @@ test("a future time today and future date are valid and convert using +08:00", (
   assert.equal(referralDateTimeMinimum(new Date('2026-10-20T02:00:59.000Z')), '2026-10-20T10:01');
 });
 
-test("unchanged historical schedules remain editable but changed past schedules do not", () => {
+test("an unchanged historical schedule remains unchanged while past referral dates and edited past schedules are rejected", () => {
   const now = new Date('2026-10-20T02:00:00.000Z');
   const historical = '2026-10-19T10:00';
   assert.deepEqual(referralDateErrors(

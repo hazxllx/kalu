@@ -6,11 +6,8 @@ import KpiHorizontal from "@/components/common/KpiHorizontal";
 import {
   Search,
   X,
-  FileText,
   FileSpreadsheet,
   Building2,
-  ClipboardCheck,
-  Clock,
   Layers,
   ChevronRight,
   ChevronDown,

@@ -50,9 +50,13 @@ async function healthPage(t, respond = async () => fullRecord) {
     '@/services/api': {
       residentsApi: { myHealthRecords: (params) => { calls.push(params); return respond(params); } },
       visitPlansApi: { directory: async () => ({ facilities: [] }) },
+      referralsApi: { get: async () => ({ record: {} }) },
     },
+    '@/context/AuthContext': { useAuth: () => ({ user: { id: 'resident-1', role: 'resident' } }) },
+    '@/features/referrals/lib/referralPdf': { downloadReferralPdf: async () => {} },
     '@/features/health-records/lib/healthRecordPdf': { medicalHistoryForRecord, downloadHealthRecordPdf: async (data) => { exports.push(data); } },
     '@/features/consultations/lib/consultationRisk': consultationRisk,
+    '@/features/consultations/utils/bpClassification': { bloodPressureBadgeClassName: () => '' },
     '@/components/common/RiskBadge': { default: ({ level, mediumLabel }) => React.createElement('span', null, level === 'Moderate' ? mediumLabel : level || 'Unassessed') },
     '@/features/health-records/lib/pregnancyVisibility': { shouldShowPregnancyStatus: () => true },
     '@/features/health-records/components/LabResultsPanel': { default: Empty },
@@ -131,8 +135,12 @@ test('late filtered response cannot replace reset history', async (t) => {
   assert.match(text(renderer), /2 matching consultations/);
 });
 
-test('service details expand per card, preserve registration, and show only supplied fields', async (t) => {
+test('service details open per card, preserve registration, and show only supplied fields', async (t) => {
   const Page = await compile('../../src/features/health-services/pages/ResidentHealthServices.jsx', {
+    '@radix-ui/react-dialog': {
+      Root: Container, Portal: Container, Overlay: Empty, Content: Container,
+      Title: Container, Description: Empty, Close: Container,
+    },
     '@/components/common/PageHeader': { default: Header },
     '@/components/common/Card': { Card: Container },
     '@/components/common/ErrorState': { default: Empty },
@@ -151,19 +159,17 @@ test('service details expand per card, preserve registration, and show only supp
   await act(async () => { renderer = create(React.createElement(Page)); });
   t.after(() => act(() => renderer.unmount()));
   const cards = renderer.root.findAllByType('article');
-  const toggles = () => renderer.root.findAllByType('button').filter((node) => node.props['aria-controls']);
-  assert.deepEqual(toggles().map((node) => node.props['aria-expanded']), [false, false]);
-  assert.ok(cards[0].findAllByType('p').some((node) => node.props.className?.includes('line-clamp-3')));
+  const detailButtons = () => renderer.root.findAllByType('button').filter((node) => node.children.join('').trim() === 'View details');
+  assert.equal(detailButtons().length, 2);
+  assert.equal(cards[0].findAllByType('h3').length, 1);
   assert.doesNotMatch(cards[0].props.className, /h-full/);
-  await act(async () => toggles()[0].props.onClick());
-  assert.deepEqual(toggles().map((node) => node.props['aria-expanded']), [true, false]);
-  assert.equal(cards[0].findByProps({ id: toggles()[0].props['aria-controls'] }).props.hidden, false);
-  assert.match(text(renderer), /Days: /);
-  assert.match(text(renderer), /Facility: /);
+  await act(async () => detailButtons()[0].props.onClick());
+  assert.match(text(renderer), /Recurring days/);
+  assert.match(text(renderer), /Barangay or facility/);
   assert.doesNotMatch(text(renderer), /Requirements|Eligibility|Schedule to be announced/);
   assert.ok(button(renderer, 'Register'));
-  await act(async () => button(renderer, 'Show less').props.onClick());
-  assert.deepEqual(toggles().map((node) => node.props['aria-expanded']), [false, false]);
+  await act(async () => button(renderer, 'Close').props.onClick());
+  assert.equal(renderer.root.findAllByType('article').length, 2);
 });
 
 test('dashboard snapshot retains latest values and recent activity without chart presentation', async (t) => {

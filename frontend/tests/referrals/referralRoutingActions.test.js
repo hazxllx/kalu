@@ -84,7 +84,7 @@ test('page wiring preserves the source ID, history and assigned-only decisions w
   assert.match(tracking, /recipient_personnel_id: form\.recipientPersonnelId/);
   assert.match(tracking, /recipient_facility_id: form\.recipientFacilityId/);
   assert.match(tracking, /expected_version: editing\.version/);
-  assert.match(tracking, /Assigned Inbox/);
+  assert.doesNotMatch(tracking, /Assigned Inbox/);
   assert.match(tracking, /<ReferralHistory history=\{detail\.history\}/);
   assert.doesNotMatch(tracking, /referralsApi\.remove|Referral deleted|setDeleteTarget|name\.toLowerCase\(\).*draft\.resident/);
   assert.match(tracking, /limit: 100, offset/);

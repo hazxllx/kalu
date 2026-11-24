@@ -1335,7 +1335,7 @@ export const supabaseRepository = {
         .not('scheduled_date', 'is', null);
       throwOnError(followUpError, 'Could not load household follow-up schedules');
       for (const followUp of followUps || []) {
-        const status = String(followUp.status || '').trim().toLower()
+        const status = String(followUp.status || '').trim().toLowerCase()
           .replace(/[_-]+/g, ' ');
         if (['completed', 'cancelled', 'missed'].includes(status)) continue;
         const list = followUpsByResident.get(followUp.resident_id) || [];
@@ -1361,7 +1361,7 @@ export const supabaseRepository = {
         const memberRows = Array.isArray(row.members) ? row.members : [];
         const visitRows = (row.visits || [])
           .filter((visit) => {
-            const status = String(visit.status || '').trim().toLower();
+            const status = String(visit.status || '').trim().toLowerCase();
             return !['cancelled', 'pending', 'incomplete', 'incomplete visit'].includes(status);
           })
           .map((visit) => visit.visit_date)

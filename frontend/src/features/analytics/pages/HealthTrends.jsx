@@ -139,7 +139,7 @@ export default function HealthTrends() {
         ...row,
         color: conditionPalette[index % conditionPalette.length]
       })),
-      riskDistribution: normalizeRiskDistribution(muniEW.riskDistribution).map((row) => ({
+      riskDistribution: normalizeRiskDistribution(muniEW.reportingRiskDistribution ?? muniEW.riskDistribution).map((row) => ({
         ...row,
         color: RISK_PRESENTATION[row.name].color
       }))
@@ -426,7 +426,7 @@ export default function HealthTrends() {
   const disease = (Array.isArray(ew.diseaseDistribution) ? ew.diseaseDistribution : [])
     .filter((x) => (x.value || 0) > 0)
     .map((x, i) => ({ ...x, color: CONDITION_PALETTE[i % CONDITION_PALETTE.length] }));
-  const risk = normalizeRiskDistribution(ew.riskDistribution)
+  const risk = normalizeRiskDistribution(ew.reportingRiskDistribution ?? ew.riskDistribution)
     .map((x) => ({ ...x, color: RISK_PRESENTATION[x.name].color }));
   const mapBarangays = Array.isArray(muniMap?.barangays) ? muniMap.barangays : [];
 
@@ -437,7 +437,7 @@ export default function HealthTrends() {
     { ...SUMMARY_ICONS[0], label: "Consultations in Period", value: metricValue(sm.consultationsThisMonth), sub: "recorded in selected period" },
     { ...SUMMARY_ICONS[1], label: "Referrals in Period", value: metricValue(sm.referralsThisMonth), sub: "created in selected period" },
     { ...SUMMARY_ICONS[2], label: "Top Condition", value: sm.topCondition || "No recorded condition", sub: `${sm.topConditionCases ?? 0} case${(sm.topConditionCases ?? 0) === 1 ? "" : "s"}` },
-    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: metricValue(sm.highRiskResidents), sub: "latest recorded assessment per resident" },
+    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: metricValue(sm.reportingHighRiskResidents ?? sm.highRiskResidents), sub: ew.reportingRiskDistribution ? "recorded risk in selected period" : "latest recorded assessment per resident" },
   ];
 
   const barangayStatus = (b) => {

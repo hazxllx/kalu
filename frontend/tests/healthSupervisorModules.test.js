@@ -17,6 +17,7 @@ async function mountResidents(context) {
   const Panel = ({ children, ...props }) => React.createElement('div', props, children);
   const Empty = () => null;
   const deps = {
+    React,
     useAuth: () => ({ user: context.user }),
     usePermissions: () => ({ can: (permission) => context.permissions.has(permission), matrixLoadState: { status: 'ready' } }),
     useSearchParams: () => [context.params, (params) => { context.params = params; }],
@@ -42,15 +43,17 @@ async function mountResidents(context) {
     isStrictMobile: () => true,
     getLinkedGuardianOptions: () => [],
     listResidentsOffline: async () => ({ rows: [], warning: null }),
-    residentsApi: { get: (...args) => context.get(...args) },
+    residentsApi: { get: (...args) => context.get(...args), directoryFilters: async () => ({ barangays: [] }) },
     createResidentOffline: Empty,
     updateResidentOffline: Empty,
     Plus: Empty, Search: Empty, X: Empty, ChevronDown: Empty, Eye: Empty, Pencil: Empty, CheckCircle2: Empty, Users: Empty,
   };
   const globalName = `__residentModuleTest${serial++}`;
   globalThis[globalName] = deps;
-  const injected = residentsSource.replace(/^import\s+([\s\S]*?)\s+from\s+(["'])([^"']+)\2;?/gm, (statement, bindings, _quote, path) => {
-    if (path === 'react') return statement.replace('"react"', JSON.stringify(import.meta.resolve('react')));
+  const withReact = residentsSource.replace(/import React,\s*\{([^}]+)\}\s*from\s*["']react["'];?/, (_statement, bindings) =>
+    `const React = globalThis.${globalName}.React; const { ${bindings} } = globalThis.${globalName}.React;`);
+  const injected = withReact.replace(/^import\s+([\s\S]*?)\s+from\s+(["'])([^"']+)\2;?/gm, (statement, bindings, _quote, path) => {
+    if (path === 'react') return `const React = globalThis.${globalName}.React; const { useCallback, useEffect, useId, useMemo, useRef, useState } = globalThis.${globalName}.React;`;
     return bindings.trim().startsWith('{')
       ? `const ${bindings} = globalThis.${globalName};`
       : `const ${bindings.trim()} = globalThis.${globalName}.${bindings.trim()};`;
@@ -184,8 +187,8 @@ test('HS charts and form failures use authorized sources and explicit unavailabl
   assert.match(detailModal, /detailContent\.history\.map/);
   assert.match(servicesSource, /Promise\.allSettled/);
   assert.match(servicesSource, /referenceState\.errors\.join/);
-  assert.match(servicesSource, /loading \|\| error \? "Unavailable"/);
-  assert.match(trendsSource, /supervisor \? "supervisor-input/);
+  assert.match(servicesSource, /loading \|\| error \? "—"/);
+  assert.match(trendsSource, /className=\{supervisor \? "supervisor-module"/);
   assert.match(trendsSource, /isAnimationActive=\{!supervisor\}/);
   assert.doesNotMatch(trendsSource, /assessed > 0[^\n]+: '0%'/);
 });

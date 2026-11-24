@@ -483,7 +483,7 @@ test('P0-6: completePhnHealthRecordCheckup propagates server failures without si
 
 test('P0-6: PhnHealthRecords passes onComplete (never nonexistent onSaved) to PhnCheckupWorkbench', () => {
   const src = fs.readFileSync(
-    path.resolve('frontend/src/features/health-records/pages/PhnHealthRecords.jsx'),
+    path.resolve('src/features/health-records/pages/PhnHealthRecords.jsx'),
     'utf8',
   );
   assert.doesNotMatch(src, /<PhnCheckupWorkbench[\s\S]*?onSaved=/);

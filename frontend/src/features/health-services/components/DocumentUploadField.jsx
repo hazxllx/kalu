@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { Upload, X, FileText, Image as ImageIcon, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Upload, X, FileText, Image as ImageIcon, AlertCircle } from "lucide-react";
 
 /**
  * Document upload field component for health service attachments.

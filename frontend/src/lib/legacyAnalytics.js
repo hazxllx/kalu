@@ -85,15 +85,23 @@ export const lastActivityPeriod = (months = 12, now = new Date()) => {
 export const healthTrendScope = (data, months = 12) => {
   if (!data?.summary || !Array.isArray(data.consultationTrends)) return null;
   const consultationTrends = data.consultationTrends.slice(-months);
+  const hasReportingRisk = Array.isArray(data.reportingRiskDistribution);
+  const riskDistribution = hasReportingRisk ? data.reportingRiskDistribution : data.riskDistribution;
+  const reportingHighRisk = Array.isArray(riskDistribution)
+    ? riskDistribution.find((row) => ['high', 'high risk'].includes(String(row?.name || '').trim().toLowerCase()))?.value
+    : null;
   return {
     summary: {
       consultationsThisMonth: { value: metricValue(data.summary.consultationsThisMonth), change: 'Selected reporting period', up: null },
       referralsThisMonth: { value: metricValue(data.summary.referralsThisMonth), change: 'Selected reporting period', up: null },
       topCondition: { name: data.summary.topCondition || 'No recorded condition', cases: `${metricValue(data.summary.topConditionCases)} recorded cases` },
-      highRiskResidents: { value: metricValue(data.summary.highRiskResidents), change: 'Latest recorded assessment per resident', up: null },
+      highRiskResidents: {
+        value: metricValue(hasReportingRisk ? (reportingHighRisk ?? 0) : data.summary.highRiskResidents),
+        change: hasReportingRisk ? 'Recorded risk in reporting period' : 'Latest recorded assessment per resident', up: null,
+      },
     },
     consultationTrends,
-    riskDistribution: data.riskDistribution,
+    riskDistribution,
     barangayOverview: {
       name: data.scope?.barangay || data.barangayOverview?.name || 'Authorized scope',
       residents: `${metricValue(data.summary.residents)} registered residents`,

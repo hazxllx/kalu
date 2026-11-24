@@ -1031,7 +1031,7 @@ export default function TreatmentConsultation() {
         <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
           {filteredResidents.map((resident) => {
             const active = selectedResident?.id === resident.id;
-            const initials = resident.name.split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpper();
+            const initials = resident.name.split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
             const selectResident = () => {
               if (busy || reviewLocalId || editingId) return;
               if (selectedResident?.id !== resident.id) {

@@ -113,6 +113,10 @@ test("new invitations are explicit and cannot duplicate an in-progress or uncert
   assert.equal(failedActions.includes("retry_email"), true);
   assert.equal(personnelActions(approved({ setupRequired: false }), admin).includes("invite"), false);
   assert.equal(personnelActions(approved({ approvalStatus: "pending" }), admin).includes("invite"), false);
+  const delegate = { isAdmin: false, isDelegate: true, canResetAccess: true };
+  assert.equal(personnelActions(approved({ notification: { status: "sending" } }), delegate).includes("invite"), false);
+  assert.equal(personnelActions(approved({ notification: { status: "delivery_unknown" } }), delegate).includes("invite"), false);
+  assert.equal(personnelActions(approved({ notification: { status: "failed" } }), delegate).includes("invite"), true);
 });
 
 test("reject and suspend require reasons and approval can withhold activation", () => {

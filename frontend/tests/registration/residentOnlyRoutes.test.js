@@ -70,36 +70,40 @@ test("personnel management is inside the admin guard and general user management
   assert.doesNotMatch(nav.slice(0, nav.indexOf("admin: [")), /\/app\/admin\/personnel/);
 });
 
-test("admin sidebar keeps six direct links in four visual sections", () => {
+test("admin sidebar keeps the current navigation grouped by its six visual sections", () => {
   const adminNav = source("lib/navConfig.js").split("admin: [")[1].split("export const profilePathForRole")[0];
-  for (const group of ["Overview", "Administration", "Configuration", "Monitoring"]) {
+  for (const group of ["Overview", "Administration", "Health Configuration", "Communication", "System", "Monitoring"]) {
     assert.match(adminNav, new RegExp(`group: "${group}"`));
   }
   assert.match(adminNav, /label: "Dashboard",[\s\S]*?group: "Overview"/);
   assert.match(adminNav, /label: "Users & Personnel",[\s\S]*?group: "Administration"/);
   assert.match(adminNav, /label: "Barangays & Access",[\s\S]*?group: "Administration"/);
-  assert.match(adminNav, /label: "Health & System Settings",[\s\S]*?group: "Configuration"/);
+  assert.match(adminNav, /label: "Risk & Early Intervention",[\s\S]*?group: "Health Configuration"/);
+  assert.match(adminNav, /label: "Advisory Management",[\s\S]*?group: "Communication"/);
+  assert.match(adminNav, /label: "System Settings",[\s\S]*?group: "System"/);
   assert.match(adminNav, /label: "Audit Trail",[\s\S]*?group: "Monitoring"/);
   assert.match(adminNav, /label: "System Logs",[\s\S]*?group: "Monitoring"/);
   assert.doesNotMatch(adminNav, /\bchildren:/);
 });
 
-test("legacy PHN and Health Supervisor review routes remain intact", () => {
-  assert.match(routes, /path="account-approvals"\s+element=\{<StaffAccountApprovals \/>\}/);
-  assert.match(routes, /to="\/app\/health_supervisor\/verifications\?tab=accounts"/);
-  const legacy = source("features/accounts/pages/StaffAccountApprovals.jsx");
-  assert.match(legacy, /health_supervisor:\s*\[/);
-  assert.match(legacy, /roles: \["bhw"\]/);
-  assert.match(legacy, /phn:\s*\[/);
-  assert.match(legacy, /roles: \["health_supervisor"\]/);
-  assert.match(legacy, /roles: \["rhu_personnel"\]/);
-  assert.doesNotMatch(legacy, /admin:\s*\[/);
+test("legacy PHN and Health Supervisor account routes lead to personnel management only", () => {
+  assert.match(routes, /path="account-approvals"\s+element=\{<Navigate to="\/app\/phn\/verifications\?tab=personnel" replace \/>\}/);
+  assert.match(routes, /path="account-approvals"\s+element=\{<Navigate to="\/app\/health_supervisor\/verifications\?tab=personnel" replace \/>\}/);
+  const verification = source("features/verification/pages/VerificationsApprovals.jsx");
+  const tabs = verification.slice(verification.indexOf("const TABS = ["), verification.indexOf("];", verification.indexOf("const TABS = [")));
+  assert.match(verification, /id: "personnel", label: "Health Personnel"/);
+  assert.match(verification, /user\?\.role !== "phn" \|\| tab\.id === "personnel"/);
+  assert.match(verification, /roles: \["phn", "health_supervisor"\]/);
+  for (const tabId of ["resident", "household", "transfer"]) {
+    const tab = tabs.match(new RegExp(`\\{ id: "${tabId}"[^}]*\\}`))?.[0] || "";
+    assert.doesNotMatch(tab, /roles:/, `${tabId} review is not exposed through personnel-only account routes`);
+  }
 });
 
 test("personnel deletion is hidden while general deletion and identity safeguards remain", () => {
   assert.match(management, /canDelete = !personnelOnly && isAdmin && can\("accounts.delete"\)/);
   assert.match(management, /typed\.trim\(\)\.toLowerCase\(\) === String\(target.email/);
-  assert.match(management, /canManageRoles=\{canManageRoles && modalTarget.id !== currentUser\?\.id\}/);
+  assert.match(management, /canManageRoles=\{isDelegate \? Boolean\(modalTarget\.isNew\) : canManageRoles && modalTarget\.id !== currentUser\?\.id\}/);
   assert.match(management, /initial\?\.roleId === "resident" \|\| initial\?\.roleId === "resident-limited"/);
   assert.match(management, /setDeleteError\(error\?\.message/);
 });
@@ -109,7 +113,7 @@ test("new personnel creation uses fixed location and generated password without 
   assert.doesNotMatch(form, /Initial status|account-status|status: form.status/);
   assert.doesNotMatch(form, /approvalStatus: form\.approvalStatus|activate: canDeactivate && form\.activate/);
   assert.match(form, /Create Account/);
-  assert.match(form, /value="Pili"/);
+  assert.match(form, /value=\{options\.municipalities\.find\(\(item\) => item\.id === selectedMunicipalityId\)\?\.name \|\| \(fixedMunicipalityId \? "Assigned municipality" : "Pili"\)\}/);
   assert.match(form, /maxLength=\{11\}/);
   assert.match(form, /operationId: operation.current.id/);
   assert.doesNotMatch(form, /type="password"|password:\s*form/);

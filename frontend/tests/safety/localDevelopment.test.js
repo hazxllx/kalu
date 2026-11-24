@@ -105,7 +105,9 @@ test('CSP has exact local application origins and only the intentional public ma
   assert.match(policy, /https:\/\/tiles\.openfreemap\.org/);
   assert.match(policy, /frame-src 'self' blob: http:\/\/localhost:5173 http:\/\/localhost:5000 http:\/\/127\.0\.0\.1:54321/);
   assert.match(policy, /object-src 'none'/);
-  assert.doesNotMatch(policy, /\*|supabase\.co|fonts\.google|spline/);
+  assert.doesNotMatch(policy, /\*|supabase\.co|spline/);
+  assert.match(policy, /style-src[^;]*https:\/\/fonts\.googleapis\.com/);
+  assert.match(policy, /font-src[^;]*https:\/\/fonts\.gstatic\.com/);
   assert.doesNotThrow(() => validateLocalEnvironment({ ...local, VITE_MAP_STYLE_URL: 'http://localhost:5173/maps/style.json' }));
   assert.throws(() => validateLocalEnvironment({ ...local, VITE_MAP_STYLE_URL: 'https://production.example.test/style.json' }));
 });

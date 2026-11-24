@@ -390,7 +390,8 @@ export default function HouseholdRiskOverview() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <div className="hidden overflow-x-auto sm:block">
               <table className="w-full min-w-[980px]">
                 <thead>
                   <tr className="border-b border-brand-border bg-brand-bg dark:bg-hover">
@@ -448,28 +449,52 @@ export default function HouseholdRiskOverview() {
               </table>
             </div>
             <div className="grid gap-2 sm:hidden">
-              {paginatedData.map((h) => {
+              {visiblePriorityList.map((h) => {
                 const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
+                const indicators = (h.environmentalRisk?.factors || []).join(", ");
                 return (
                   <article key={h.id} className="rounded-btn border border-brand-border p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-brand-ink">{h.head} Household</p>
+                        <p className="truncate text-sm font-semibold text-brand-ink">{h.head || "Unnamed"} Household</p>
                         <p className="mt-0.5 font-mono text-xs text-brand-gray">{h.id}</p>
                         <p className="mt-1 text-xs text-brand-gray">{h.barangay || "—"}</p>
                       </div>
-                      <Link to={householdDetailPath(h.id)} className="shrink-0 text-xs font-semibold text-blue-600">View</Link>
                     </div>
-                    <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-brand-border pt-3">
-                      <div><dt className="text-[11px] text-brand-gray">Risk Level</dt><dd className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tone.chip}`}>{clusterLabel(h.risk?.level)}</dd></div>
-                      <div><dt className="text-[11px] text-brand-gray">Indicators</dt><dd className="mt-1 text-sm font-semibold tabular-nums text-brand-ink">{h.indicatorCount}</dd></div>
-                      <div><dt className="text-[11px] text-brand-gray">Last Visit</dt><dd className="mt-1 text-sm text-brand-ink">{h.lastHouseholdVisit ? formatDate(h.lastHouseholdVisit) : "—"}</dd></div>
-                      <div><dt className="text-[11px] text-brand-gray">Follow-up</dt><dd className="mt-1 text-sm text-brand-ink">{h.nextScheduledFollowUp ? formatDate(h.nextScheduledFollowUp) : "—"}</dd></div>
+                    <dl className="mt-3 grid grid-cols-1 gap-y-2 border-t border-brand-border pt-3">
+                      <div>
+                        <dt className="text-[11px] font-medium text-brand-gray">Cluster assignment</dt>
+                        <dd className="mt-1">
+                          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${tone.chip}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                            {clusterLabel(h.risk?.level)}
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[11px] font-medium text-brand-gray">Environmental indicators</dt>
+                        <dd className="mt-0.5 break-words text-sm text-brand-ink">{indicators || "No environmental indicators recorded"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-[11px] font-medium text-brand-gray">Workflow status</dt>
+                        <dd className="mt-0.5 break-words text-sm text-brand-ink">{h.workflowStatus || "—"}</dd>
+                      </div>
                     </dl>
+                    <div className="mt-3 flex items-center justify-end gap-3 border-t border-brand-border pt-3">
+                      <Link to={householdDetailPath(h.id)} className="text-sm font-medium text-blue-600 hover:text-blue-700">View</Link>
+                      <button
+                        type="button"
+                        onClick={() => setFollowUpFor(h.id)}
+                        className="rounded-lg bg-blue-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-800"
+                      >
+                        Follow-up
+                      </button>
+                    </div>
                   </article>
                 );
               })}
             </div>
+            </>
           )}
         </div>
 
@@ -660,6 +685,47 @@ export default function HouseholdRiskOverview() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          <div className="grid gap-3 sm:hidden">
+            {paginatedData.map((h) => {
+              const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
+              return (
+                <article key={h.id} className="rounded-btn border border-brand-border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-brand-ink">{h.head || "Unnamed"} Household</p>
+                      <p className="mt-0.5 break-all font-mono text-xs text-brand-gray">{h.id}</p>
+                    </div>
+                    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${tone.chip}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                      {clusterLabel(h.risk?.level)}
+                    </span>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-brand-border pt-3">
+                    <div className="min-w-0">
+                      <dt className="text-[11px] font-medium text-brand-gray">Barangay</dt>
+                      <dd className="mt-0.5 break-words text-sm text-brand-ink">{h.barangay || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] font-medium text-brand-gray">Indicators</dt>
+                      <dd className="mt-0.5 text-sm font-semibold tabular-nums text-brand-ink">{h.indicatorCount}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] font-medium text-brand-gray">Last visit</dt>
+                      <dd className="mt-0.5 text-sm text-brand-ink">{h.lastHouseholdVisit ? formatDate(h.lastHouseholdVisit) : "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] font-medium text-brand-gray">Scheduled follow-up</dt>
+                      <dd className="mt-0.5 text-sm text-brand-ink">{h.nextScheduledFollowUp ? formatDate(h.nextScheduledFollowUp) : "—"}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-3 flex justify-end border-t border-brand-border pt-3">
+                    <Link to={householdDetailPath(h.id)} className="text-sm font-medium text-blue-600 hover:text-blue-700">View</Link>
+                  </div>
+                </article>
+              );
+            })}
           </div>
 
           {filtered.length === 0 && !noData && (

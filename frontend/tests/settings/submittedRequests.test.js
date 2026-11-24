@@ -22,6 +22,8 @@ async function mount(t, { get = async () => ({ history: [request] }), query = ''
   const module = { exports: {} };
   new Function('require', 'module', 'exports', code)((id) => {
     if (id === '@/services/api') return { api: { get: async (path) => { calls.push(path); return get(path); } } };
+    if (id === '@/services/api/verificationsApi') return { fetchMyVerification: async () => ({ request: null }) };
+    if (id === '@/context/AuthContext') return { useAuth: () => ({ user: { id: 'resident-1', role: 'resident' } }) };
     if (id === '@/components/common/Card') return { Card: ({ children, ...props }) => React.createElement('div', props, children) };
     return require(id);
   }, module, module.exports);
@@ -41,7 +43,7 @@ test('submitted history loads real outcomes and requests historical signed detai
     : { transfer: { ...request, documents: [{ id: 'proof', fileName: 'original-address.pdf', readOnly: true, url: 'https://storage.example.test/signed' }] } } });
   assert.deepEqual(page.calls, ['/transfer-requests/context', '/transfer-requests/me/historic-approved']);
   assert.match(page.text(), /Pending review/);
-  assert.match(page.text(), /Residency transfer: Approved/);
+  assert.match(page.text(), /Residency transfer · Approved/);
   assert.match(page.text(), /San Isidro to San Antonio/);
   assert.match(page.text(), /Sep 10, 2026/);
   assert.match(page.text(), /original-address.pdf/);
@@ -61,13 +63,13 @@ test('history distinguishes loading, empty, errors and retry without inventing r
   } });
   assert.match(page.text(), /Loading submitted requests/);
   await act(async () => { pending.resolve({ history: [] }); });
-  assert.match(page.text(), /No submitted transfer requests yet/);
+  assert.match(page.text(), /You have no submitted requests yet/);
   fail = true;
   await page.click('Refresh requests');
   assert.match(page.text(), /History unavailable/);
   fail = false;
   await page.click('Refresh requests');
-  assert.match(page.text(), /No submitted transfer requests yet/);
+  assert.match(page.text(), /You have no submitted requests yet/);
 });
 
 test('request selection ignores a stale response after closing details', async (t) => {

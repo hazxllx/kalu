@@ -45,9 +45,9 @@ test('maternal and senior monthly trends use recorded resident counts and stay v
   assert.equal(view.seniorTrend[0].count, 3);
 });
 
-test('immunization, minor and TCL charts use the latest month counts, never fabricated coverage/compliance rates', () => {
+test('period immunization counts aggregate while minor and TCL charts use their recorded latest-month counts', () => {
   const data = fixture();
-  assert.equal(optionalSeries(data, 'vaccinationCoverage')[0].value, 4000);
+  assert.equal(optionalSeries(data, 'vaccinationCoverage')[0].value, 7000);
   assert.equal(optionalSeries(data, 'vaccinationCoverage')[0].denominator, null);
   assert.equal(optionalSeries(data, 'childHealthCoverage')[0].value, 7);
   assert.equal(optionalSeries(data, 'programParticipation')[0].value, 6);
