@@ -189,7 +189,7 @@ function ColumnFilter({ type = "list", options = [], value, onChange, placeholde
 const detailCell = (label, value) => (
   <div className="min-w-0 [overflow-wrap:anywhere]">
     <p className="text-[11px] uppercase tracking-wide text-brand-gray">{label}</p>
-    <p className="mt-0.5 text-sm font-medium text-brand-ink">{value || "—"}</p>
+    <p className="mt-0.5 text-sm font-medium text-brand-ink">{value === null || value === undefined || value === "" ? "—" : value}</p>
   </div>
 );
 
@@ -927,7 +927,7 @@ export default function Households() {
                     </p>
                     <p className="flex items-center gap-2 text-brand-gray">
                       <Wallet className="h-4 w-4 text-brand-blue" />{" "}
-                      {h.monthlyIncome ? `₱${Number(h.monthlyIncome).toLocaleString()}/mo` : "—"}
+                      {h.monthlyIncome !== null && h.monthlyIncome !== undefined && h.monthlyIncome !== "" ? `₱${Number(h.monthlyIncome).toLocaleString()}/mo` : "—"}
                     </p>
                     <p className="flex items-center gap-2 text-brand-gray">
                       <Droplet className="h-4 w-4 text-brand-blue" /> {WATER_SOURCE_LABELS[h.waterSource] || "—"}
@@ -1001,13 +1001,22 @@ export default function Households() {
       {/* Household detail modal — info + member management */}
       {detailId && (
         <HouseholdDialog label="Household details" onClose={closeModal}>
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-2 sm:px-6">
-              <h2 className="text-base font-semibold text-brand-ink">Household details</h2>
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-brand-border bg-white px-4 py-3 dark:bg-card sm:px-6">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-base font-semibold text-brand-ink">Household details</h2>
+                {detail && <p className="mt-0.5 break-all text-xs text-brand-gray">{detail.id}</p>}
+              </div>
+              {detail && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <HHBadge risk value={detail.riskLevel} />
+                  <HHBadge value={detail.hhStatus} />
+                </div>
+              )}
               <button type="button" onClick={closeModal} className="grid h-11 w-11 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close household details">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="min-h-0 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere] sm:p-6">
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere] sm:p-6">
               {detailLoading && <SkeletonList rows={5} />}
               {detailError && (
                 <ErrorState
@@ -1027,8 +1036,6 @@ export default function Households() {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-col sm:items-end">
-                      <HHBadge risk value={detail.riskLevel} />
-                      <HHBadge value={detail.hhStatus} />
                       {canAny(["households.create", "households.verify"]) && !detail.localId && (
                         <button
                           type="button"
@@ -1054,10 +1061,10 @@ export default function Households() {
                     <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">
                       Household Information
                     </p>
-                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
                       {detailCell("Members", detail.members?.length ?? 0)}
                       {detailCell("Families", detail.families)}
-                      {detailCell("Monthly Income", detail.monthlyIncome ? `₱${Number(detail.monthlyIncome).toLocaleString()}` : "—")}
+                      {detailCell("Monthly Income", detail.monthlyIncome !== null && detail.monthlyIncome !== undefined && detail.monthlyIncome !== "" ? `₱${Number(detail.monthlyIncome).toLocaleString()}` : "—")}
                       {detailCell("Water Source", WATER_SOURCE_LABELS[detail.waterSource] || "—")}
                       {detailCell("Toilet", TOILET_LABELS[detail.toiletType] || "—")}
                       {detailCell("Sanitation Access", detail.sanitationAccess)}

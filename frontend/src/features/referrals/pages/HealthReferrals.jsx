@@ -73,15 +73,18 @@ const PRIORITY_COLORS = {
   Low: "bg-brand-green/10 text-brand-green",
 };
 
-const referralVitalsOf = (vitals = {}) => ({
-  bp: String(vitals.bp ?? vitals.bloodPressure ?? ""),
-  temperature: String(vitals.temperature ?? ""),
-  hr: String(vitals.hr ?? vitals.pulseRate ?? ""),
-  rr: String(vitals.rr ?? vitals.respiratoryRate ?? ""),
-  heightCm: String(vitals.heightCm ?? vitals.height_cm ?? vitals.height ?? ""),
-  weightKg: String(vitals.weightKg ?? vitals.weight_kg ?? vitals.weight ?? ""),
-  o2sat: String(vitals.o2sat ?? vitals.oxygenSaturation ?? ""),
-});
+const referralVitalsOf = (vitals = {}) => {
+  const source = vitals && typeof vitals === "object" ? vitals : {};
+  return {
+    bp: String(source.bp ?? source.bloodPressure ?? ""),
+    temperature: String(source.temperature ?? ""),
+    hr: String(source.hr ?? source.pulseRate ?? ""),
+    rr: String(source.rr ?? source.respiratoryRate ?? ""),
+    heightCm: String(source.heightCm ?? source.height_cm ?? source.height ?? ""),
+    weightKg: String(source.weightKg ?? source.weight_kg ?? source.weight ?? ""),
+    o2sat: String(source.o2sat ?? source.oxygenSaturation ?? ""),
+  };
+};
 
 const bmiFromVitals = ({ heightCm, weightKg }) => {
   const height = Number.parseFloat(heightCm);
@@ -119,7 +122,7 @@ const formatClock = (value) => {
 };
 
 const ageFrom = (birthDate) => {
-  if (!birthDate) return undefined;
+  if (typeof birthDate !== "string" || !birthDate) return undefined;
   const d = new Date(birthDate);
   if (Number.isNaN(d.getTime())) return undefined;
   const now = new Date();
@@ -127,6 +130,34 @@ const ageFrom = (birthDate) => {
   const m = now.getMonth() - d.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
   return age;
+};
+
+const residentAgeOf = (resident) => {
+  const calculated = ageFrom(resident?.birthDate);
+  if (calculated !== undefined) return calculated;
+  const savedAge = resident?.age;
+  return (typeof savedAge === "number" || typeof savedAge === "string") && String(savedAge).trim() ? savedAge : "—";
+};
+
+const residentNameOf = (resident) => {
+  const name = [resident?.firstName, resident?.middleName, resident?.lastName, resident?.suffix]
+    .filter((part) => typeof part === "string" && part.trim())
+    .join(" ");
+  return name || (typeof resident?.name === "string" && resident.name.trim()) || "—";
+};
+
+const residentAddressOf = (resident) => {
+  const currentAddress = typeof resident?.currentAddress === "string" ? resident.currentAddress.trim() : "";
+  const permanentAddress = typeof resident?.permanentAddress === "string" ? resident.permanentAddress.trim() : "";
+  const address = currentAddress || permanentAddress;
+  const zoneValue = resident?.zone;
+  const zone = typeof zoneValue === "number" || typeof zoneValue === "string" ? String(zoneValue).trim() : "";
+  const savedZone = address.match(/\bzone\s*(\d+)\b/i)?.[1];
+  const additions = [];
+  if (zone && (!savedZone || Number(savedZone) !== Number(zone))) additions.push(`Zone ${zone}`);
+  const barangay = typeof resident?.barangay === "string" ? resident.barangay.trim() : "";
+  if (barangay && !address.toLowerCase().includes(barangay.toLowerCase())) additions.push(barangay);
+  return [address, ...additions].filter(Boolean).join(", ") || "—";
 };
 
 /** persisted health_referrals row (snake_case) → view model. */
@@ -197,6 +228,16 @@ const inputCls = (error) =>
     error ? "border-brand-danger" : "border-brand-border"
   }`;
 
+const formText = (value) => String(value ?? "");
+
+const isReferralRoute = (route) =>
+  route !== null
+  && typeof route === "object"
+  && !Array.isArray(route)
+  && ["id", "name", "role", "facility_id", "facility_name"].every((key) =>
+    typeof route[key] === "string" && route[key].trim().length > 0)
+  && (route.station === null || route.station === undefined || typeof route.station === "string");
+
 const EMPTY_FORM = () => ({
   referralDate: todayIso(),
   scheduledAt: "",
@@ -244,6 +285,35 @@ const draftNotesOf = (d) =>
   ]
     .filter(Boolean)
     .join("\n");
+
+class ReferralModalErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Referral form failed to render.", error, info);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+        <Card className="w-full max-w-md">
+          <div className="p-6 text-center" role="alert">
+            <h3 className="text-lg font-semibold text-brand-ink">Referral form unavailable</h3>
+            <p className="mt-2 text-sm text-brand-gray">The referral form encountered an unexpected error. Close it to return to the Referrals page.</p>
+            <button type="button" onClick={this.props.onClose} className="mt-5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+              Close referral form
+            </button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+}
 
 function ReferralFormModal({ initial, draft, resident, residents, barangays = [], saving, onClose, onSave, onSelectResident, onRegisterGuest, ownerId, assignedBarangay, referringFacilityFallback, referringPersonnelName }) {
   const isEdit = Boolean(initial);
@@ -313,6 +383,32 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
   const [guestError, setGuestError] = useState("");
   const [guestSaving, setGuestSaving] = useState(false);
   const residentId = initial?.residentId || resident?.id;
+  const [residentProfile, setResidentProfile] = useState(null);
+  const [residentProfileLoading, setResidentProfileLoading] = useState(false);
+  const [residentProfileError, setResidentProfileError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setResidentProfile(null);
+    setResidentProfileError("");
+    if (!residentId) {
+      setResidentProfileLoading(false);
+      return () => { active = false; };
+    }
+    setResidentProfileLoading(true);
+    residentsApi.get(residentId, { ownerId, cache: "no-store" }).then((response) => {
+      const profile = response?.resident || response?.data?.resident || response;
+      if (!profile?.id || String(profile.id) !== String(residentId)) {
+        throw new Error("The selected resident profile could not be verified.");
+      }
+      if (active) setResidentProfile(profile);
+    }).catch((error) => {
+      if (active) setResidentProfileError(error?.message || "Unable to load the selected resident's current registration information.");
+    }).finally(() => {
+      if (active) setResidentProfileLoading(false);
+    });
+    return () => { active = false; };
+  }, [residentId, ownerId]);
+  const patientProfile = String(residentProfile?.id || "") === String(residentId || "") ? residentProfile : null;
   useEffect(() => {
     let active = true;
     setRoutes([]);
@@ -321,7 +417,16 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
     if (!residentId) { setRoutesLoading(false); return () => { active = false; }; }
     referralsApi.recipients({ residentId }, { ownerId }).then((response) => {
       if (active) {
-        setRoutes(response?.rows || []);
+        if (!Array.isArray(response?.rows)) {
+          throw new Error("The authorized recipient service returned an invalid response.");
+        }
+        if (response.rows.some((route) => !isReferralRoute(route))) {
+          throw new Error("The authorized recipient list contains incomplete assignments. Retry to reload it.");
+        }
+        if (response.referringFacility !== null && response.referringFacility !== undefined && typeof response.referringFacility !== "string") {
+          throw new Error("The referring facility information is invalid. Retry to reload it.");
+        }
+        setRoutes(response.rows);
         if (!initial && response?.referringFacility) {
           setForm((prior) => ({ ...prior, referringFacility: response.referringFacility }));
         }
@@ -336,22 +441,37 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
     const clock = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(clock);
   }, []);
+  const facilities = [...new Map(routes.map((route) => [route.facility_id, route.facility_name])).entries()];
+  const roles = [...new Set(routes.filter((route) => route.facility_id === form.recipientFacilityId).map((route) => route.role))];
   const buildErrors = (now = new Date()) => ({
     ...(!routingOnly ? referralDateErrors(form, {
       now,
       originalScheduledAt: isEdit ? toLocalDateTimeInput(initial.scheduledAt) : null,
     }) : {}),
     ...(!isEdit && !resident ? { resident: "Please select a resident." } : {}),
-    ...(!form.reason.trim() ? { reason: "Referral reason is required." } : {}),
-    ...(isEdit && !routingOnly && form.scheduledAt !== toLocalDateTimeInput(initial.scheduledAt) && !form.scheduleChangeReason.trim()
+    ...(!formText(form.reason).trim() ? { reason: "Referral reason is required." } : {}),
+    ...(isEdit && !routingOnly && form.scheduledAt !== toLocalDateTimeInput(initial.scheduledAt) && !formText(form.scheduleChangeReason).trim()
       ? { scheduleChangeReason: "A reason is required when directly changing the schedule." }
       : {}),
-    ...(!form.externalReceivingEnabled && !selectedReferralRoute(routes, form) ? { recipient: "Select a current receiving facility, role and recipient." } : {}),
-    ...(form.externalReceivingEnabled && !form.externalReceivingFacility.trim() ? { externalReceivingFacility: "Enter the outside facility name." } : {}),
-    ...(form.externalReceivingEnabled && !form.externalReceivingRole.trim() ? { externalReceivingRole: "Enter the outside receiving role." } : {}),
-    ...(form.externalReceivingEnabled && !form.externalRecipientName.trim() ? { externalRecipientName: "Enter the outside recipient's name." } : {}),
-    ...(form.externalReceivingEnabled && !form.externalRecipientPosition.trim() ? { externalRecipientPosition: "Enter the outside recipient's position." } : {}),
-    ...(form.laboratoryTestRequired && !form.laboratoryTest.trim()
+    ...(!form.externalReceivingEnabled && !facilities.some(([id]) => id === form.recipientFacilityId)
+      ? { recipientFacility: "Select a receiving facility." }
+      : {}),
+    ...(!form.externalReceivingEnabled
+      && facilities.some(([id]) => id === form.recipientFacilityId)
+      && !roles.includes(form.recipientRole)
+      ? { recipientRole: "Select a receiving role for this facility." }
+      : {}),
+    ...(!form.externalReceivingEnabled
+      && facilities.some(([id]) => id === form.recipientFacilityId)
+      && roles.includes(form.recipientRole)
+      && !selectedReferralRoute(routes, form)
+      ? { recipient: "Select an authorized recipient for this facility and role." }
+      : {}),
+    ...(form.externalReceivingEnabled && !formText(form.externalReceivingFacility).trim() ? { externalReceivingFacility: "Enter the outside facility name." } : {}),
+    ...(form.externalReceivingEnabled && !formText(form.externalReceivingRole).trim() ? { externalReceivingRole: "Enter the outside receiving role." } : {}),
+    ...(form.externalReceivingEnabled && !formText(form.externalRecipientName).trim() ? { externalRecipientName: "Enter the outside recipient's name." } : {}),
+    ...(form.externalReceivingEnabled && !formText(form.externalRecipientPosition).trim() ? { externalRecipientPosition: "Enter the outside recipient's position." } : {}),
+    ...(form.laboratoryTestRequired && !formText(form.laboratoryTest).trim()
       ? { laboratoryTest: "Laboratory test details are required when laboratory test is marked as required." }
       : {}),
     ...(!routingOnly && !consultationLinked ? Object.fromEntries(
@@ -367,8 +487,6 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
     ) : {}),
   });
   const liveErrors = buildErrors(now);
-  const facilities = [...new Map(routes.map((route) => [route.facility_id, route.facility_name])).entries()];
-  const roles = [...new Set(routes.filter((route) => route.facility_id === form.recipientFacilityId).map((route) => route.role))];
   const availableRecipientRoutes = routes.filter((route) =>
     (!form.recipientFacilityId || route.facility_id === form.recipientFacilityId)
     && (!form.recipientRole || route.role === form.recipientRole)
@@ -379,7 +497,11 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
     route.facility_name,
     referralRoleLabel(route.role),
   ].filter(Boolean).join(" · ");
-  const knownBarangays = [...new Set([...barangays, ...residents.map((entry) => entry.barangay)].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const knownBarangays = [...new Set([
+    ...(Array.isArray(barangays) ? barangays : []),
+    ...(Array.isArray(residents) ? residents.map((entry) => entry?.barangay) : []),
+  ].filter((name) => typeof name === "string" && name.trim()).map((name) => name.trim()))]
+    .sort((a, b) => a.localeCompare(b));
   const registerGuest = async () => {
     setGuestError("");
     if (!guest.firstName.trim() || !guest.lastName.trim() || !guest.birthDate || !guest.sex || !guest.currentAddress.trim() || !guest.barangay.trim()) {
@@ -397,7 +519,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
     }
   };
   const set = (key) => (value) => {
-    setForm((p) => ({ ...p, [key]: value }));
+    setForm((p) => ({ ...p, [key]: value ?? (typeof p[key] === "boolean" ? false : "") }));
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
   };
 
@@ -408,10 +530,10 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
-          <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4">
+      <Card className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6 sm:py-4">
             <div>
               <h3 className="text-lg font-semibold text-brand-ink">{routingOnly ? "Reassign Referral" : isEdit ? "Edit Referral" : "New Referral"}</h3>
               <p className="mt-0.5 text-sm text-brand-gray">{routingOnly ? "The new recipient must accept again. Clinical details and history are retained." : "Assign an authorized KALUSAGAP recipient for tracking, and optionally add an outside facility or contact."}</p>
@@ -419,7 +541,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
             {isEdit ? (
               <section className="rounded-btn border border-brand-border p-4">
                 <h4 className="text-sm font-semibold text-brand-ink">Select Patient</h4>
@@ -439,7 +561,10 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                   <button type="button" disabled={Boolean(draft?.treatmentVisitId)} title={draft?.treatmentVisitId ? "This referral is linked to the selected resident's treatment record." : undefined} onClick={() => { setPatientMode("guest"); setGuestError(""); onSelectResident(null); }} className={`rounded-btn border px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50 ${patientMode === "guest" ? "border-brand-blue bg-brand-blue/5 text-brand-blue" : "border-brand-border text-brand-gray"}`}>Add patient without account</button>
                 </div>
                 {patientMode === "existing" ? <div className="mt-2">
-                  <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
+                  <ResidentSearchSelect residents={residents} value={resident} onChange={(value) => {
+                    onSelectResident(value);
+                    if (value) setErrors((prior) => ({ ...prior, resident: "" }));
+                  }} />
                   {resident && <p className="mt-1 text-xs text-brand-gray">{resident.accountStatus === "none" ? "Patient record · No KALUSAGAP login account" : "Linked to a KALUSAGAP resident account"}</p>}
                 </div> : <div className="mt-3 space-y-3 rounded-btn border border-brand-border p-3">
                   <p className="text-xs text-brand-gray">This creates a patient record only. No email, password, or login account is created. Existing matching records are rejected to prevent duplicates.</p>
@@ -456,7 +581,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                   {guestError && <p role="alert" className="text-xs text-brand-danger">{guestError}</p>}
                   <button type="button" disabled={guestSaving} onClick={registerGuest} className="rounded-btn bg-brand-blue px-3 py-2 text-sm font-medium text-white disabled:opacity-60">{guestSaving ? "Saving patient..." : "Save patient and continue"}</button>
                 </div>}
-                {liveErrors.resident && <p className="mt-1 text-xs text-brand-danger">{liveErrors.resident}</p>}
+                {errors.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
                 </div>
               </section>
             )}
@@ -479,31 +604,56 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
               {routesLoading ? <p className="text-sm text-brand-gray">Loading authorized recipients...</p> : routesError ? (
                 <div role="alert" className="text-sm text-brand-danger">{routesError} <button type="button" onClick={() => setRouteRetry((value) => value + 1)} className="underline">Retry</button></div>
               ) : routes.length === 0 && residentId ? <p className="text-sm text-brand-gray">No active authorized recipient is configured for this resident. Facility and personnel assignments must be completed first.</p> : null}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="text-sm font-medium text-brand-ink">Receiving Facility <span className="text-brand-danger">*</span></label>
-                <select disabled={routesLoading || !residentId || routes.length === 0} value={form.recipientFacilityId} onChange={(event) => {
+                <label htmlFor="referral-receiving-facility" className="block text-sm font-medium text-brand-ink">Receiving Facility <span className="text-brand-danger">*</span></label>
+                <select id="referral-receiving-facility" aria-invalid={Boolean(errors.recipientFacility)} aria-describedby={errors.recipientFacility ? "referral-receiving-facility-error" : undefined} disabled={routesLoading || !residentId || routes.length === 0} value={form.recipientFacilityId} onChange={(event) => {
                   const id = event.target.value;
-                  setForm((prior) => ({ ...prior, recipientFacilityId: id, destinationFacility: facilities.find(([key]) => key === id)?.[1] || "", recipientRole: "", recipientPersonnelId: "", recipientStation: "" }));
-                }} className={`${inputCls(liveErrors.recipient)} cursor-pointer`}>
+                  setForm((prior) => {
+                    const role = routes.some((route) => route.facility_id === id && route.role === prior.recipientRole) ? prior.recipientRole : "";
+                    const recipient = routes.find((route) => route.id === prior.recipientPersonnelId && route.facility_id === id && route.role === role);
+                    return {
+                      ...prior,
+                      recipientFacilityId: id,
+                      destinationFacility: facilities.find(([key]) => key === id)?.[1] || "",
+                      recipientRole: role,
+                      recipientPersonnelId: recipient?.id || "",
+                      recipientStation: recipient?.station || "",
+                    };
+                  });
+                  setErrors((prior) => ({ ...prior, recipientFacility: "", recipientRole: "", recipient: "" }));
+                }} className={`${inputCls(errors.recipientFacility)} cursor-pointer`}>
                   <option value="">Select receiving facility</option>
                   {facilities.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                 </select>
+                {errors.recipientFacility && <p id="referral-receiving-facility-error" className="mt-1 text-xs text-brand-danger">{errors.recipientFacility}</p>}
               </div>
               <div>
-                <label className="text-sm font-medium text-brand-ink">Receiving Role <span className="text-brand-danger">*</span></label>
-                <select disabled={!form.recipientFacilityId || routesLoading} value={form.recipientRole} onChange={(event) => { setForm((prior) => ({ ...prior, recipientRole: event.target.value, recipientPersonnelId: "", recipientStation: "" })); }} className={`${inputCls()} cursor-pointer`}>
+                <label htmlFor="referral-receiving-role" className="block text-sm font-medium text-brand-ink">Receiving Role <span className="text-brand-danger">*</span></label>
+                <select id="referral-receiving-role" aria-invalid={Boolean(errors.recipientRole)} aria-describedby={errors.recipientRole ? "referral-receiving-role-error" : undefined} disabled={!form.recipientFacilityId || routesLoading} value={form.recipientRole} onChange={(event) => {
+                  const role = event.target.value;
+                  setForm((prior) => {
+                    const recipient = routes.find((route) => route.id === prior.recipientPersonnelId && route.facility_id === prior.recipientFacilityId && route.role === role);
+                    return { ...prior, recipientRole: role, recipientPersonnelId: recipient?.id || "", recipientStation: recipient?.station || "" };
+                  });
+                  setErrors((prior) => ({ ...prior, recipientRole: "", recipient: "" }));
+                }} className={`${inputCls(errors.recipientRole)} cursor-pointer`}>
                   <option value="">Select role</option>
                   {roles.map((role) => <option key={role} value={role}>{referralRoleLabel(role)}</option>)}
                 </select>
+                {errors.recipientRole && <p id="referral-receiving-role-error" className="mt-1 text-xs text-brand-danger">{errors.recipientRole}</p>}
+              </div>
               </div>
               <div>
-                <label className="text-sm font-medium text-brand-ink">Assigned Recipient <span className="text-brand-danger">*</span></label>
+                <label htmlFor="referral-assigned-recipient" className="block text-sm font-medium text-brand-ink">Assigned Recipient <span className="text-brand-danger">*</span></label>
+                <div className="mt-1.5">
                 <SearchableSelect
                   id="referral-assigned-recipient"
                   ariaLabel="Assigned recipient"
                   value={chosenRoute ? referralRouteKey(chosenRoute) : ""}
                   onChange={(value) => {
                     const route = routes.find((entry) => referralRouteKey(entry) === value);
+                    if (route) setErrors((prior) => ({ ...prior, recipient: "" }));
                     setForm((prior) => ({
                       ...prior,
                       recipientFacilityId: route?.facility_id || prior.recipientFacilityId,
@@ -516,21 +666,30 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                   options={availableRecipientRoutes.map((route) => ({ value: referralRouteKey(route), label: recipientLabel(route) }))}
                   placeholder={routesLoading ? "Loading recipients..." : !residentId ? "Select a patient first" : "Search authorized recipient"}
                   emptyText={routesLoading ? "Loading authorized recipients..." : "No authorized recipient matches this facility and role."}
-                  error={liveErrors.recipient}
+                  error={errors.recipient}
                   disabled={!residentId || routesLoading || routes.length === 0 || !form.recipientFacilityId || !form.recipientRole}
                   maxResults={6}
                   portalDropdown
-                  compact
                 />
-                {liveErrors.recipient && <p className="mt-1 text-xs text-brand-danger">{liveErrors.recipient}</p>}
                 {!routesLoading && residentId && routes.length === 0 && !routesError && <p className="mt-1 text-xs text-brand-gray">No active recipients are configured for this patient. Ask an administrator to verify staff, facility, and station assignments.</p>}
-                {routes.length > 0 && !chosenRoute && <p className="mt-1 text-xs text-brand-gray">Choose a suggestion to assign the correct facility, role, and station.</p>}
+                {routes.length > 0 && !chosenRoute && !errors.recipient && <p className="mt-1 text-xs text-brand-gray">Choose a suggestion to assign the correct facility, role, and station.</p>}
+                </div>
               </div>
               </>}
               <fieldset disabled={routingOnly} className="rounded-btn border border-brand-border bg-brand-bg/40 p-3 disabled:opacity-70">
                 <label className="flex cursor-pointer items-start gap-2 text-sm font-medium text-brand-ink">
                   <input type="checkbox" checked={form.externalReceivingEnabled} onChange={(event) => {
                     const enabled = event.target.checked;
+                    setErrors((prior) => ({
+                      ...prior,
+                      recipientFacility: "",
+                      recipientRole: "",
+                      recipient: "",
+                      externalReceivingFacility: "",
+                      externalReceivingRole: "",
+                      externalRecipientName: "",
+                      externalRecipientPosition: "",
+                    }));
                     setForm((prior) => ({ ...prior, externalReceivingEnabled: enabled,
                       ...(enabled ? { destinationFacility: "", recipientPersonnelId: "", recipientFacilityId: "", recipientRole: "", recipientStation: "" }
                         : { externalReceivingFacility: "", externalReceivingAddress: "", externalReceivingRole: "", externalRecipientName: "", externalRecipientPosition: "" }) }));
@@ -539,11 +698,11 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                 </label>
                 <p className="ml-6 mt-1 text-xs text-brand-gray">Use this for a hospital, clinic, or recipient without a KALUSAGAP account. No in-app assignee is required; the sender will update referral progress manually.</p>
                 {form.externalReceivingEnabled && <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label className="text-sm font-medium text-brand-ink">Other facility <span className="text-brand-danger">*</span><input type="text" value={form.externalReceivingFacility} onChange={(event) => set("externalReceivingFacility")(event.target.value)} placeholder="Hospital or clinic name" className={inputCls(liveErrors.externalReceivingFacility)} />{liveErrors.externalReceivingFacility && <span className="mt-1 block text-xs text-brand-danger">{liveErrors.externalReceivingFacility}</span>}</label>
+                  <label className="text-sm font-medium text-brand-ink">Other facility <span className="text-brand-danger">*</span><input type="text" value={form.externalReceivingFacility} onChange={(event) => set("externalReceivingFacility")(event.target.value)} placeholder="Hospital or clinic name" className={inputCls(errors.externalReceivingFacility)} />{errors.externalReceivingFacility && <span className="mt-1 block text-xs text-brand-danger">{errors.externalReceivingFacility}</span>}</label>
                   <label className="text-sm font-medium text-brand-ink">Facility address<input type="text" value={form.externalReceivingAddress} onChange={(event) => set("externalReceivingAddress")(event.target.value)} placeholder="Street, barangay, municipality" className={inputCls()} /></label>
-                  <label className="text-sm font-medium text-brand-ink">Other receiving role <span className="text-brand-danger">*</span><input type="text" value={form.externalReceivingRole} onChange={(event) => set("externalReceivingRole")(event.target.value)} placeholder="e.g. Cardiologist" className={inputCls(liveErrors.externalReceivingRole)} />{liveErrors.externalReceivingRole && <span className="mt-1 block text-xs text-brand-danger">{liveErrors.externalReceivingRole}</span>}</label>
-                  <label className="text-sm font-medium text-brand-ink">Outside recipient's position <span className="text-brand-danger">*</span><input type="text" value={form.externalRecipientPosition} onChange={(event) => set("externalRecipientPosition")(event.target.value)} placeholder="e.g. Attending physician" className={inputCls(liveErrors.externalRecipientPosition)} />{liveErrors.externalRecipientPosition && <span className="mt-1 block text-xs text-brand-danger">{liveErrors.externalRecipientPosition}</span>}</label>
-                  <label className="text-sm font-medium text-brand-ink sm:col-span-2">Outside recipient's full name <span className="text-brand-danger">*</span><input type="text" value={form.externalRecipientName} onChange={(event) => set("externalRecipientName")(event.target.value)} placeholder="Full name of the external contact" className={inputCls(liveErrors.externalRecipientName)} />{liveErrors.externalRecipientName && <span className="mt-1 block text-xs text-brand-danger">{liveErrors.externalRecipientName}</span>}</label>
+                  <label className="text-sm font-medium text-brand-ink">Other receiving role <span className="text-brand-danger">*</span><input type="text" value={form.externalReceivingRole} onChange={(event) => set("externalReceivingRole")(event.target.value)} placeholder="e.g. Cardiologist" className={inputCls(errors.externalReceivingRole)} />{errors.externalReceivingRole && <span className="mt-1 block text-xs text-brand-danger">{errors.externalReceivingRole}</span>}</label>
+                  <label className="text-sm font-medium text-brand-ink">Outside recipient's position <span className="text-brand-danger">*</span><input type="text" value={form.externalRecipientPosition} onChange={(event) => set("externalRecipientPosition")(event.target.value)} placeholder="e.g. Attending physician" className={inputCls(errors.externalRecipientPosition)} />{errors.externalRecipientPosition && <span className="mt-1 block text-xs text-brand-danger">{errors.externalRecipientPosition}</span>}</label>
+                  <label className="text-sm font-medium text-brand-ink sm:col-span-2">Outside recipient's full name <span className="text-brand-danger">*</span><input type="text" value={form.externalRecipientName} onChange={(event) => set("externalRecipientName")(event.target.value)} placeholder="Full name of the external contact" className={inputCls(errors.externalRecipientName)} />{errors.externalRecipientName && <span className="mt-1 block text-xs text-brand-danger">{errors.externalRecipientName}</span>}</label>
                 </div>}
               </fieldset>
             </section>
@@ -551,13 +710,15 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             <section className="rounded-btn border border-brand-border p-4">
               <h4 className="text-sm font-semibold text-brand-ink">Patient Information</h4>
               <p className="mt-1 text-xs text-brand-gray">Details are drawn from the selected resident profile.</p>
+              {residentProfileLoading && <p role="status" className="mt-2 text-xs text-brand-gray">Loading the latest registration information...</p>}
+              {residentProfileError && <p role="alert" className="mt-2 text-xs text-brand-danger">{residentProfileError}</p>}
               <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                <div className="col-span-2"><p className="text-[11px] uppercase text-brand-gray">Patient name</p><p className="mt-0.5 font-medium text-brand-ink">{resident?.name || initial?.residentName || "—"}</p></div>
-                <div><p className="text-[11px] uppercase text-brand-gray">Age</p><p className="mt-0.5 font-medium text-brand-ink">{resident?.age ?? initial?.age ?? "—"}</p></div>
-                <div><p className="text-[11px] uppercase text-brand-gray">Sex</p><p className="mt-0.5 font-medium text-brand-ink">{resident?.gender || initial?.sex || "—"}</p></div>
-                <div><p className="text-[11px] uppercase text-brand-gray">Date of birth</p><p className="mt-0.5 font-medium text-brand-ink">{resident?.birthDate || initial?.birthDate || "—"}</p></div>
-                <div className="col-span-2"><p className="text-[11px] uppercase text-brand-gray">Address</p><p className="mt-0.5 break-words font-medium text-brand-ink">{resident?.address || initial?.address || resident?.barangay || initial?.barangay || "—"}</p></div>
-                <div className="col-span-2"><p className="text-[11px] uppercase text-brand-gray">Contact number</p><p className="mt-0.5 font-medium text-brand-ink">{resident?.cellphoneNo || initial?.contactNumber || "—"}</p></div>
+                <div className="col-span-2"><p className="text-[11px] uppercase text-brand-gray">Patient name</p><p className="mt-0.5 font-medium text-brand-ink">{patientProfile ? residentNameOf(patientProfile) : "—"}</p></div>
+                <div><p className="text-[11px] uppercase text-brand-gray">Age</p><p className="mt-0.5 font-medium text-brand-ink">{patientProfile ? residentAgeOf(patientProfile) : "—"}</p></div>
+                <div><p className="text-[11px] uppercase text-brand-gray">Sex</p><p className="mt-0.5 font-medium text-brand-ink">{typeof patientProfile?.sex === "string" && patientProfile.sex.trim() ? patientProfile.sex : "—"}</p></div>
+                <div><p className="text-[11px] uppercase text-brand-gray">Date of birth</p><p className="mt-0.5 font-medium text-brand-ink">{typeof patientProfile?.birthDate === "string" && patientProfile.birthDate.trim() ? patientProfile.birthDate : "—"}</p></div>
+                <div className="col-span-2"><p className="text-[11px] uppercase text-brand-gray">Complete address</p><p className="mt-0.5 break-words font-medium text-brand-ink">{patientProfile ? residentAddressOf(patientProfile) : "—"}</p></div>
+                <div className="col-span-2"><p className="text-[11px] uppercase text-brand-gray">Contact number</p><p className="mt-0.5 font-medium text-brand-ink">{typeof patientProfile?.cellphoneNo === "string" && patientProfile.cellphoneNo.trim() ? patientProfile.cellphoneNo : "—"}</p></div>
               </div>
             </section>
 
@@ -570,8 +731,8 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="text-sm font-medium text-brand-ink">Referral Date</label>
-                <input type="date" min={todayIso()} value={form.referralDate} onChange={(e) => set("referralDate")(e.target.value)} className={inputCls(liveErrors.referralDate)} />
-                {liveErrors.referralDate && <p className="mt-1 text-xs text-brand-danger">{liveErrors.referralDate}</p>}
+                <input type="date" min={todayIso()} value={form.referralDate} onChange={(e) => set("referralDate")(e.target.value)} className={inputCls(errors.referralDate)} />
+                {errors.referralDate && <p className="mt-1 text-xs text-brand-danger">{errors.referralDate}</p>}
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Referral Time</label>
@@ -579,14 +740,14 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Scheduled Date &amp; Time</label>
-                <input type="datetime-local" min={form.referralDate ? `${form.referralDate}T00:00` : referralDateTimeMinimum()} value={form.scheduledAt} onChange={(e) => set("scheduledAt")(e.target.value)} className={inputCls(liveErrors.scheduledAt)} />
+                <input type="datetime-local" min={form.referralDate ? `${form.referralDate}T00:00` : referralDateTimeMinimum()} value={form.scheduledAt} onChange={(e) => set("scheduledAt")(e.target.value)} className={inputCls(errors.scheduledAt)} />
                 <p className="mt-1 text-xs text-brand-gray">Enter a future schedule in Philippine time.</p>
-                {liveErrors.scheduledAt && <p className="mt-1 text-xs text-brand-danger">{liveErrors.scheduledAt}</p>}
+                {errors.scheduledAt && <p className="mt-1 text-xs text-brand-danger">{errors.scheduledAt}</p>}
               </div>
               {isEdit && !routingOnly && form.scheduledAt !== toLocalDateTimeInput(initial.scheduledAt) && <div className="sm:col-span-2">
                 <label className="text-sm font-medium text-brand-ink">Reason for direct schedule change <span className="text-brand-danger">*</span></label>
-                <textarea rows={2} value={form.scheduleChangeReason} onChange={(e) => set("scheduleChangeReason")(e.target.value)} placeholder="Explain why this appointment needs to change" className={inputCls(liveErrors.scheduleChangeReason)} />
-                {liveErrors.scheduleChangeReason && <p className="mt-1 text-xs text-brand-danger">{liveErrors.scheduleChangeReason}</p>}
+                <textarea rows={2} value={form.scheduleChangeReason} onChange={(e) => set("scheduleChangeReason")(e.target.value)} placeholder="Explain why this appointment needs to change" className={inputCls(errors.scheduleChangeReason)} />
+                {errors.scheduleChangeReason && <p className="mt-1 text-xs text-brand-danger">{errors.scheduleChangeReason}</p>}
               </div>}
               <div>
                 <label className="text-sm font-medium text-brand-ink">Priority</label>
@@ -612,8 +773,8 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             </div>
             <div>
               <label className="text-sm font-medium text-brand-ink">Referral Reason <span className="text-brand-danger">*</span></label>
-              <input type="text" value={form.reason} onChange={(e) => set("reason")(e.target.value)} placeholder="Enter reason..." className={inputCls(liveErrors.reason)} />
-              {liveErrors.reason && <p className="mt-1 text-xs text-brand-danger">{liveErrors.reason}</p>}
+              <input type="text" value={form.reason} onChange={(e) => set("reason")(e.target.value)} placeholder="Enter reason..." className={inputCls(errors.reason)} />
+              {errors.reason && <p className="mt-1 text-xs text-brand-danger">{errors.reason}</p>}
             </div>
 
             <div>
@@ -640,8 +801,8 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                 <>
                   <div className="mb-3">
                     <label className="text-sm font-medium text-brand-ink">Laboratory Test <span className="text-brand-danger">*</span></label>
-                    <input type="text" value={form.laboratoryTest} onChange={(e) => set("laboratoryTest")(e.target.value)} placeholder="e.g. Complete Blood Count, Urinalysis, FBS" className={inputCls(liveErrors.laboratoryTest)} />
-                    {liveErrors.laboratoryTest && <p className="mt-1 text-xs text-brand-danger">{liveErrors.laboratoryTest}</p>}
+                    <input type="text" value={form.laboratoryTest} onChange={(e) => set("laboratoryTest")(e.target.value)} placeholder="e.g. Complete Blood Count, Urinalysis, FBS" className={inputCls(errors.laboratoryTest)} />
+                    {errors.laboratoryTest && <p className="mt-1 text-xs text-brand-danger">{errors.laboratoryTest}</p>}
                   </div>
                   <div>
                     <label className="text-sm font-medium text-brand-ink">Additional Instructions</label>
@@ -730,10 +891,10 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             </fieldset>
           </div>
 
-          <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
+          <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border px-4 py-3 sm:px-6 sm:py-4">
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
             <button
-              disabled={saving || (!form.externalReceivingEnabled && (routesLoading || Boolean(routesError))) || Object.values(liveErrors).some(Boolean)}
+              disabled={saving || (!form.externalReceivingEnabled && (routesLoading || Boolean(routesError)))}
               onClick={() => { if (validate()) onSave(form); }}
               className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
@@ -858,6 +1019,13 @@ export default function HealthReferrals() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
+  const closeReferralForm = () => {
+    setFormOpen(false);
+    setEditing(null);
+    setSelectedResident(null);
+    setDraft(null);
+  };
+
   const load = useCallback(async () => {
     const requestId = ++loadRequest.current;
     setLoading(true);
@@ -927,17 +1095,22 @@ export default function HealthReferrals() {
             : null
         : null;
       if (rows) {
+        const validRows = rows.filter((row) =>
+          row && typeof row === "object" && !Array.isArray(row) && typeof row.id === "string" && row.id.trim());
+        if (validRows.length !== rows.length) {
+          setResidentLoadError("Some resident records could not be displayed because their registration data was incomplete.");
+        }
         setResidents(
-          rows
+          validRows
             .map((r) => ({
               id: r.id,
-              name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
-              barangay: r.barangay || "",
+              name: [r.firstName, r.middleName, r.lastName, r.suffix].filter((part) => typeof part === "string" && part.trim()).join(" "),
+              barangay: typeof r.barangay === "string" ? r.barangay : "",
               age: ageFrom(r.birthDate),
-              gender: r.sex,
-              birthDate: r.birthDate || "",
-              address: r.currentAddress || r.permanentAddress || "",
-              cellphoneNo: r.cellphoneNo || "",
+              gender: typeof r.sex === "string" ? r.sex : "",
+              birthDate: typeof r.birthDate === "string" ? r.birthDate : "",
+              address: typeof r.currentAddress === "string" ? r.currentAddress : typeof r.permanentAddress === "string" ? r.permanentAddress : "",
+              cellphoneNo: typeof r.cellphoneNo === "string" ? r.cellphoneNo : "",
               accountStatus: r.accountStatus || (r.authUserId ? "linked" : "none"),
             }))
             .filter((r) => !assignedBarangay || r.barangay === assignedBarangay),
@@ -1137,27 +1310,27 @@ export default function HealthReferrals() {
   const toPayload = (form) => ({
     referral_date: form.referralDate || null,
     scheduled_at: form.scheduledAt ? localDateTimeToIso(form.scheduledAt) : null,
-    schedule_change_reason: form.scheduleChangeReason?.trim() || "",
-    destination_facility: form.externalReceivingEnabled ? form.externalReceivingFacility.trim() : form.destinationFacility.trim(),
-    destination_service: form.destinationService.trim(),
-    referral_category: form.referralCategory.trim(),
-    reason: form.reason.trim(),
+    schedule_change_reason: formText(form.scheduleChangeReason).trim(),
+    destination_facility: form.externalReceivingEnabled ? formText(form.externalReceivingFacility).trim() : formText(form.destinationFacility).trim(),
+    destination_service: formText(form.destinationService).trim(),
+    referral_category: formText(form.referralCategory).trim(),
+    reason: formText(form.reason).trim(),
     priority: form.priority,
-    referring_facility: form.referringFacility.trim(),
-    notes: form.notes,
+    referring_facility: formText(form.referringFacility).trim(),
+    notes: formText(form.notes),
     laboratory_test_required: Boolean(form.laboratoryTestRequired),
-    laboratory_test: form.laboratoryTest ? form.laboratoryTest.trim() : "",
-    additional_instructions: form.additionalInstructions ? form.additionalInstructions.trim() : "",
-    chief_complaints: form.chiefComplaints || "",
-    medical_history: form.medicalHistory || "",
-    physical_exam_findings: form.physicalExamFindings || "",
-    referral_vitals: Object.fromEntries(Object.entries(form.referralVitals).map(([key, value]) => [key, value.trim() || null])),
-    impression: form.impression || "",
-    external_receiving_facility: form.externalReceivingEnabled ? form.externalReceivingFacility.trim() : "",
-    external_receiving_address: form.externalReceivingEnabled ? form.externalReceivingAddress.trim() : "",
-    external_receiving_role: form.externalReceivingEnabled ? form.externalReceivingRole.trim() : "",
-    external_recipient_name: form.externalReceivingEnabled ? form.externalRecipientName.trim() : "",
-    external_recipient_position: form.externalReceivingEnabled ? form.externalRecipientPosition.trim() : "",
+    laboratory_test: formText(form.laboratoryTest).trim(),
+    additional_instructions: formText(form.additionalInstructions).trim(),
+    chief_complaints: formText(form.chiefComplaints),
+    medical_history: formText(form.medicalHistory),
+    physical_exam_findings: formText(form.physicalExamFindings),
+    referral_vitals: Object.fromEntries(Object.entries(referralVitalsOf(form.referralVitals)).map(([key, value]) => [key, formText(value).trim() || null])),
+    impression: formText(form.impression),
+    external_receiving_facility: form.externalReceivingEnabled ? formText(form.externalReceivingFacility).trim() : "",
+    external_receiving_address: form.externalReceivingEnabled ? formText(form.externalReceivingAddress).trim() : "",
+    external_receiving_role: form.externalReceivingEnabled ? formText(form.externalReceivingRole).trim() : "",
+    external_recipient_name: form.externalReceivingEnabled ? formText(form.externalRecipientName).trim() : "",
+    external_recipient_position: form.externalReceivingEnabled ? formText(form.externalRecipientPosition).trim() : "",
     treatment_visit_id: form.treatmentVisitId || null,
     recipient_personnel_id: form.externalReceivingEnabled ? null : form.recipientPersonnelId,
     recipient_facility_id: form.externalReceivingEnabled ? null : form.recipientFacilityId,
@@ -1664,9 +1837,10 @@ export default function HealthReferrals() {
             aria-modal="true"
             aria-labelledby="referral-detail-title"
             aria-describedby="referral-detail-description"
-            className={`flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden ${isHealthSupervisor ? "supervisor-modal" : ""}`}
+            className={`flex w-full flex-col overflow-hidden ${isHealthSupervisor ? "supervisor-modal" : ""}`}
+            style={{ maxWidth: "760px", maxHeight: "84vh" }}
           >
-            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-3 py-2.5 sm:px-4">
               <div className="min-w-0">
                 <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">Referral details</p>
                 <h3 id="referral-detail-title" className="mt-0.5 truncate text-base font-semibold text-brand-ink sm:text-lg">{detail.residentName || "Selected Referral"}</h3>
@@ -1686,7 +1860,7 @@ export default function HealthReferrals() {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
               {detailLoading && <p className="text-sm text-brand-gray">Loading current referral and history...</p>}
               {detailError && <div role="alert"><p className="text-sm text-brand-danger">{detailError}</p><button type="button" onClick={() => openDetail(detail)} className="mt-2 text-sm font-medium text-brand-blue hover:underline">Retry</button></div>}
               {!detailLoading && !detailError && <>
@@ -1780,24 +1954,26 @@ export default function HealthReferrals() {
 
       {/* Create / Edit modal */}
       {formOpen && canWrite && (
-        <ReferralFormModal
-          initial={editing}
-          draft={draft}
-          resident={targetResident}
-          residents={residents}
-          barangays={referralBarangays}
-          saving={saving}
-          ownerId={user?.id}
-          assignedBarangay={assignedBarangay}
-          referringFacilityFallback={isHealthSupervisor
-            ? `Barangay Health Station — ${assignedBarangay || user?.barangay || "your barangay"}`
-            : `RHU — ${user?.municipality || "your municipality"}`}
-          referringPersonnelName={user?.name}
-          onClose={() => { setFormOpen(false); setEditing(null); setSelectedResident(null); setDraft(null); }}
-          onSave={handleSave}
-          onSelectResident={setSelectedResident}
-          onRegisterGuest={registerReferralGuest}
-        />
+        <ReferralModalErrorBoundary onClose={closeReferralForm}>
+          <ReferralFormModal
+            initial={editing}
+            draft={draft}
+            resident={targetResident}
+            residents={residents}
+            barangays={referralBarangays}
+            saving={saving}
+            ownerId={user?.id}
+            assignedBarangay={assignedBarangay}
+            referringFacilityFallback={isHealthSupervisor
+              ? `Barangay Health Station — ${assignedBarangay || user?.barangay || "your barangay"}`
+              : `RHU — ${user?.municipality || "your municipality"}`}
+            referringPersonnelName={user?.name}
+            onClose={closeReferralForm}
+            onSave={handleSave}
+            onSelectResident={setSelectedResident}
+            onRegisterGuest={registerReferralGuest}
+          />
+        </ReferralModalErrorBoundary>
       )}
 
       {/* Update status modal */}

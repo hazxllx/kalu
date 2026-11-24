@@ -725,6 +725,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
   const isNew = !initial;
   const [form, setForm] = useState(() => ({
     name: initial?.name || "",
+    firstName: initial?.firstName || "",
     email: initial?.email || "",
     contact: initial?.contact || "",
     position: initial?.position || "",
@@ -796,6 +797,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     const coveragePatch = coverageAssignmentPatch(role, details, initial);
     const assignmentChanged = isNew || role !== initial.roleId || Object.keys(coveragePatch).length > 0;
     if (!form.name.trim() || form.name.trim().length > 120) next.name = "Enter a name of 1–120 characters.";
+    if (role === "bhw" && !form.firstName.trim() && (isNew || initial?.roleId !== "bhw")) next.firstName = "Enter the BHW's first name.";
     if (isNew && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) next.email = "Enter a valid email address.";
     if (personnel && !/^09\d{9}$/.test(form.contact)) next.contact = "Enter exactly 11 digits starting with 09.";
     if (isNew && personnel && !selectedMunicipalityId) next.municipalityId = "Your municipality assignment is unavailable.";
@@ -818,6 +820,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
         ...stationPatch,
         email: form.email.trim(),
         name: form.name.trim(),
+        ...(role === "bhw" ? { firstName: form.firstName.trim() } : {}),
         contact: form.contact.trim(),
         position: form.position.trim(),
         licenseNo: form.licenseNo.trim(),
@@ -852,6 +855,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
       contact: form.contact.trim(),
       position: form.position.trim(),
       licenseNo: form.licenseNo.trim(),
+      ...(role === "bhw" ? { firstName: form.firstName.trim() } : {}),
       ...stationPatch,
       ...coveragePatch,
     };
@@ -887,6 +891,9 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
             <Field label="Full name" htmlFor="account-name" required error={errors.name}>
               <input id="account-name" value={form.name} onChange={(event) => change("name", event.target.value)} className={inputCls(errors.name)} autoComplete="name" />
             </Field>
+            {role === "bhw" && <Field label="BHW first name" htmlFor="account-first-name" required={isNew || initial?.roleId !== "bhw"} error={errors.firstName}>
+              <input id="account-first-name" value={form.firstName} onChange={(event) => change("firstName", event.target.value)} maxLength={80} className={inputCls(errors.firstName)} autoComplete="given-name" />
+            </Field>}
             <Field label="Email" htmlFor="account-email" required={isNew} hint={isNew ? "Account notifications and password-setup invitations use this address." : "Managed by Supabase Auth; read-only here."} error={errors.email}>
               <input id="account-email" type="email" value={form.email} onChange={(event) => change("email", event.target.value)} disabled={!isNew} className={`${inputCls(errors.email)} disabled:cursor-not-allowed disabled:opacity-70`} autoComplete="email" />
             </Field>

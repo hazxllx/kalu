@@ -32,7 +32,6 @@ with reviewed_ids(id) as (
        or m.health_referral_id in (select id from target_health_referrals)
   union all select 'documents', count(*) from public.documents where resident_id in (select id from reviewed_ids)
   union all select 'resident_verification_logs', count(*) from public.resident_verification_logs where resident_id in (select id from reviewed_ids)
-  union all select 'identity_verifications', count(*) from public.identity_verifications where resident_id in (select id from reviewed_ids)
   union all select 'household_members', count(*) from public.household_members where resident_id in (select id from reviewed_ids)
   union all select 'transfer_requests', count(*) from public.transfer_requests
     where resident_id in (select id from reviewed_ids) or target_resident_id in (select id from reviewed_ids)

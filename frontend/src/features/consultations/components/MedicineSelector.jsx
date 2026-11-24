@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Plus, Trash2, Pill } from "lucide-react";
+import { Search, Plus, Trash2, Pill, ChevronDown, ChevronUp } from "lucide-react";
 import { medicinesApi } from "@/services/api";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { isDuplicateMedicine } from "../lib/consultationForm";
@@ -61,13 +61,21 @@ const SourceTag = ({ source }) => {
  *
  * @param {{value?: any[], onChange: (value: any[]) => void, errors?: Record<string, string>, disabled?: boolean}} props
  */
-export default function MedicineSelector({ value = [], onChange, errors = {}, disabled = false }) {
+export default function MedicineSelector({
+  value = [],
+  onChange,
+  errors = {},
+  disabled = false,
+  collapsible = false,
+}) {
   const medications = Array.isArray(value) ? value : [];
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [open, setOpen] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(!collapsible);
+  const [expandedMedicationIndices, setExpandedMedicationIndices] = useState(() => new Set());
   const wrapRef = useRef(null);
   const searchInputRef = useRef(null);
   const debounceRef = useRef(null);
@@ -105,6 +113,22 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  useEffect(() => {
+    if (collapsible && searchExpanded) searchInputRef.current?.focus();
+  }, [collapsible, searchExpanded]);
+
+  useEffect(() => {
+    if (!collapsible) return;
+    const invalidIndices = Object.keys(errors).reduce((indices, field) => {
+      const match = field.match(/^medications\[(\d+)\]/);
+      if (match) indices.push(Number(match[1]));
+      return indices;
+    }, []);
+    if (invalidIndices.length) {
+      setExpandedMedicationIndices((previous) => new Set([...previous, ...invalidIndices]));
+    }
+  }, [collapsible, errors]);
+
   const addMedication = (med) => {
     if (disabled) return;
     if (isDuplicateMedicine(medications, med)) {
@@ -116,6 +140,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
     setResults([]);
     setSearchError("");
     setOpen(false);
+    if (collapsible) setSearchExpanded(false);
   };
 
   const addFromCatalog = (m) =>
@@ -145,6 +170,11 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
   const removeAt = (index) => {
     if (disabled) return;
     onChange(medications.filter((_, i) => i !== index));
+    setExpandedMedicationIndices((previous) => new Set(
+      [...previous]
+        .filter((expandedIndex) => expandedIndex !== index)
+        .map((expandedIndex) => expandedIndex > index ? expandedIndex - 1 : expandedIndex)
+    ));
   };
 
   // Hide catalog results that are already added (same catalog id).
@@ -158,7 +188,7 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
   );
 
   return (
-    <div>
+    <div className={collapsible ? "rounded-btn border border-brand-border bg-white p-3 dark:border-border dark:bg-card" : ""}>
       {errors.medications && <p role="alert" className="mb-2 text-xs text-brand-danger">{errors.medications}</p>}
       {/* Added medicines */}
       {medications.length > 0 && (
@@ -166,38 +196,75 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
           {medications.map((m, i) => (
             <li
               key={`${m.medicineId || "custom"}-${i}`}
-              className="min-w-0 rounded-btn border border-brand-border bg-brand-bg/40 p-3 dark:border-border dark:bg-card/40"
+              className={`min-w-0 rounded-btn border border-brand-border bg-brand-bg/40 dark:border-border dark:bg-card/40 ${
+                collapsible && !expandedMedicationIndices.has(i) ? "px-3 py-2" : "p-3"
+              }`}
             >
-              <div className="flex items-start justify-between gap-3 border-b border-brand-border pb-2">
+              <div className={`flex items-center justify-between gap-3 ${
+                !collapsible || expandedMedicationIndices.has(i) ? "border-b border-brand-border pb-2" : ""
+              }`}>
                 <div className="flex min-w-0 items-center gap-2">
                   <Pill className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-                  <span className="min-w-0 break-words text-sm font-semibold text-brand-ink">
-                    {m.genericName || "(unnamed medicine)"}
-                    {m.brandName && (
-                      <span className="font-normal text-brand-gray"> ({m.brandName})</span>
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-brand-ink">
+                      {m.genericName || "(unnamed medicine)"}
+                      {m.brandName && (
+                        <span className="font-normal text-brand-gray"> ({m.brandName})</span>
+                      )}
+                    </p>
+                    {collapsible && !expandedMedicationIndices.has(i) && (m.strength || m.dosageForm) && (
+                      <p className="text-xs text-brand-gray">
+                        {[m.strength, m.dosageForm].filter(Boolean).join(" \u00b7 ")}
+                      </p>
                     )}
-                  </span>
-                  <SourceTag source={m.custom ? "custom" : m.source} />
+                  </div>
+                  {(!collapsible || expandedMedicationIndices.has(i)) && (
+                    <SourceTag source={m.custom ? "custom" : m.source} />
+                  )}
                 </div>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => removeAt(i)}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-brand-danger hover:text-brand-danger"
-                  aria-label={`Remove ${m.genericName || "medicine"}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  {collapsible && (
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      aria-expanded={expandedMedicationIndices.has(i)}
+                      aria-controls={`medicine-prescription-${i}`}
+                      onClick={() => setExpandedMedicationIndices((previous) => {
+                        const next = new Set(previous);
+                        if (next.has(i)) next.delete(i);
+                        else next.add(i);
+                        return next;
+                      })}
+                      className="flex h-8 w-8 items-center justify-center rounded-btn text-brand-blue transition-colors hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-60"
+                      aria-label={`${expandedMedicationIndices.has(i) ? "Hide" : "Show"} prescription details for ${m.genericName || "medicine"}`}
+                    >
+                      {expandedMedicationIndices.has(i)
+                        ? <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                        : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => removeAt(i)}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-brand-danger hover:text-brand-danger"
+                    aria-label={`Remove ${m.genericName || "medicine"}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
 
-              {!([m.dose, m.route, m.frequency, m.duration, m.quantity, m.instructions]
-                .some((field) => String(field ?? "").trim())) && (
-                <p className="mt-2 text-xs font-medium text-brand-amber" role="status">
-                  Prescription not yet provided
-                </p>
-              )}
+              {(!collapsible || expandedMedicationIndices.has(i)) && (
+                <div id={`medicine-prescription-${i}`}>
+                  {!([m.dose, m.route, m.frequency, m.duration, m.quantity, m.instructions]
+                    .some((field) => String(field ?? "").trim())) && (
+                    <p className="mt-2 text-xs font-medium text-brand-amber" role="status">
+                      Prescription not yet provided
+                    </p>
+                  )}
 
-              <div className="mt-3 grid min-w-0 grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="mt-3 grid min-w-0 grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                 {m.custom ? (
                   <>
                     <input
@@ -255,94 +322,129 @@ export default function MedicineSelector({ value = [], onChange, errors = {}, di
                   <input aria-label="Additional instructions" disabled={disabled} value={m.instructions} onChange={(e) => updateAt(i, { instructions: e.target.value })} placeholder="Medicine-specific instructions" className={`${inputCls} mt-1.5`} />
                 </label>
               </div>
-              {Object.entries(errors).filter(([field]) => field.startsWith(`medications[${i}]`) && !["route", "frequency"].includes(field.split(".").pop())).map(([field, message]) => (
-                <p key={field} className="mt-1 text-xs text-brand-danger" role="alert">{field.split(".").pop()}: {String(message)}</p>
-              ))}
+                {Object.entries(errors).filter(([field]) => field.startsWith(`medications[${i}]`) && !["route", "frequency"].includes(field.split(".").pop())).map(([field, message]) => (
+                  <p key={field} className="mt-1 text-xs text-brand-danger" role="alert">{field.split(".").pop()}: {String(message)}</p>
+                ))}
+                </div>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      {/* Search / add */}
-      <div ref={wrapRef} className="relative">
-        <div className="flex min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 focus-within:border-brand-blue dark:border-border dark:bg-card">
-          <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
-          <input
-            ref={searchInputRef}
-            value={query}
-            disabled={disabled}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setOpen(true);
-            }}
-            onFocus={() => setOpen(true)}
-            placeholder="Search medicine by generic or brand name (e.g. paracetamol or Biogesic)..."
-            aria-label="Search medicine by generic or brand name"
-            className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70 dark:text-foreground"
-          />
-        </div>
+      {collapsible && (
+        <button
+          type="button"
+          disabled={disabled}
+          aria-expanded={searchExpanded}
+          aria-controls="medicine-search-panel"
+          onClick={() => setSearchExpanded((expanded) => !expanded)}
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-blue px-3 py-1.5 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {searchExpanded ? "Close medicine search" : "Add Medicine"}
+        </button>
+      )}
 
-        {open && !disabled && (
-          <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-btn border border-brand-border bg-white shadow-float dark:border-border dark:bg-card">
-            <ul role="listbox" className="max-h-64 overflow-y-auto py-1">
-              {!query.trim() && <li className="px-3 py-2 text-sm text-brand-gray">Search by generic or brand name.</li>}
-              {loading && (
-                <li className="px-3 py-2 text-sm text-brand-gray">Searching...</li>
-              )}
-              {!loading &&
-                visibleResults.map((m) => (
-                  <li key={m.id} role="option" aria-selected="false">
+      {/* Search / add */}
+      <div
+        id={collapsible ? "medicine-search-panel" : undefined}
+        aria-hidden={collapsible && !searchExpanded}
+        className={collapsible
+          ? `transition-[margin,opacity] duration-200 ease-in-out ${searchExpanded ? "mt-3 opacity-100" : "mt-0 opacity-0 pointer-events-none"}`
+          : ""}
+      >
+        <div ref={wrapRef} className="relative">
+          <div className={collapsible
+            ? `overflow-hidden transition-[max-height] duration-200 ease-in-out ${searchExpanded ? "max-h-12" : "max-h-0"}`
+            : ""}
+          >
+            <div className="flex min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 focus-within:border-brand-blue dark:border-border dark:bg-card">
+              <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+              <input
+                ref={searchInputRef}
+                value={query}
+                disabled={disabled || (collapsible && !searchExpanded)}
+                tabIndex={collapsible && !searchExpanded ? -1 : undefined}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setOpen(true);
+                }}
+                onFocus={() => setOpen(true)}
+                placeholder="Search medicine by generic or brand name (e.g. paracetamol or Biogesic)..."
+                aria-label="Search medicine by generic or brand name"
+                className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70 dark:text-foreground"
+              />
+            </div>
+          </div>
+
+          {open && !disabled && (!collapsible || searchExpanded) && (
+            <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-btn border border-brand-border bg-white shadow-float dark:border-border dark:bg-card">
+              <ul role="listbox" className="max-h-64 overflow-y-auto py-1">
+                {!query.trim() && <li className="px-3 py-2 text-sm text-brand-gray">Search by generic or brand name.</li>}
+                {loading && (
+                  <li className="px-3 py-2 text-sm text-brand-gray">Searching...</li>
+                )}
+                {!loading &&
+                  visibleResults.map((m) => (
+                    <li key={m.id} role="option" aria-selected="false">
+                      <button
+                        type="button"
+                        tabIndex={collapsible && !searchExpanded ? -1 : undefined}
+                        onClick={() => addFromCatalog(m)}
+                        className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-brand-bg dark:hover:bg-muted/50"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-brand-ink dark:text-foreground">
+                            {m.brandName || m.genericName}
+                          </span>
+                          <span className="block truncate text-xs text-brand-gray">
+                            {[m.brandName ? m.genericName : null, m.strength, m.dosageForm, m.category]
+                              .filter(Boolean)
+                              .join(" \u00b7 ")}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                {!loading && !searchError && query.trim() && visibleResults.length === 0 && (
+                  <li className="px-3 py-2 text-sm text-brand-gray">
+                    No matching medicine in the catalog.
+                  </li>
+                )}
+                {searchError && <li className="px-3 py-2 text-sm text-brand-danger" role="alert">{searchError}</li>}
+                {!loading && query.trim() && !exactMatch && (
+                  <li className="border-t border-brand-border">
                     <button
                       type="button"
-                      onClick={() => addFromCatalog(m)}
-                      className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-brand-bg dark:hover:bg-muted/50"
+                      tabIndex={collapsible && !searchExpanded ? -1 : undefined}
+                      onClick={addCustom}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg"
                     >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-brand-ink dark:text-foreground">
-                          {m.brandName || m.genericName}
-                        </span>
-                        <span className="block truncate text-xs text-brand-gray">
-                          {[m.brandName ? m.genericName : null, m.strength, m.dosageForm, m.category]
-                            .filter(Boolean)
-                            .join(" \u00b7 ")}
-                        </span>
-                      </span>
+                      <Plus className="h-4 w-4" />
+                      Add custom medicine &ldquo;{query.trim()}&rdquo;
                     </button>
                   </li>
-                ))}
-              {!loading && !searchError && query.trim() && visibleResults.length === 0 && (
-                <li className="px-3 py-2 text-sm text-brand-gray">
-                  No matching medicine in the catalog.
-                </li>
-              )}
-              {searchError && <li className="px-3 py-2 text-sm text-brand-danger" role="alert">{searchError}</li>}
-              {!loading && query.trim() && !exactMatch && (
-                <li className="border-t border-brand-border">
-                  <button
-                    type="button"
-                    onClick={addCustom}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add custom medicine &ldquo;{query.trim()}&rdquo;
-                  </button>
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          setOpen(true);
-          searchInputRef.current?.focus();
-        }}
-        className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-blue px-3 py-1.5 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <Plus className="h-4 w-4" aria-hidden="true" /> Add Medicine
-      </button>
+
+      {!collapsible && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            setOpen(true);
+            searchInputRef.current?.focus();
+          }}
+          className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-blue px-3 py-1.5 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" /> Add Medicine
+        </button>
+      )}
       {!open && searchError && <p className="mt-1 text-xs text-brand-danger" role="alert">{searchError}</p>}
       {errors.medications && <p className="mt-1 text-xs text-brand-danger" role="alert">{errors.medications}</p>}
     </div>

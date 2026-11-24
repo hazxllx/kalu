@@ -1,5 +1,20 @@
 const HOUSEHOLD_PAGE_SIZE = 100;
 
+export function bhwDashboardGreeting(date = new Date()) {
+  const hour = Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    hour: "numeric",
+    hourCycle: "h23",
+  }).format(date));
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+export function bhwProfileFirstName(user) {
+  return typeof user?.firstName === "string" ? user.firstName.trim() : "";
+}
+
 export async function fetchBhwHouseholds(listHouseholds) {
   const firstPage = await listHouseholds({ limit: HOUSEHOLD_PAGE_SIZE, offset: 0 });
   if (

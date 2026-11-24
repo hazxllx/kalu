@@ -4,10 +4,7 @@ KALUSAGAP verifies resident registrations **manually**. A resident registers,
 the Health Supervisor of their barangay reviews the submission, and approves or
 rejects it. There is **no third-party KYC provider**.
 
-> The former Didit KYC integration has been removed. Its database objects
-> (`identity_verifications`, `didit_webhook_events`, and the `residents`
-> `identity_*` / `didit_session_id` columns) are left in place but are
-> deprecated and unused. No `DIDIT_*` environment variables are required.
+> Third-party identity/KYC integration is not part of KALUSAGAP.
 
 ## Workflow
 
@@ -100,7 +97,7 @@ supabase db push          # applies only pending migrations
 Or paste the migration file into the Supabase **SQL Editor**. Do not re-apply
 migrations that already ran.
 
-## Required environment variables after Didit removal
+## Required environment variables
 
 `backend/.env` (server only):
 
@@ -110,7 +107,6 @@ SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...   # never in a VITE_ variable
 ```
 
-No Didit variables exist or are needed.
 
 ## Local testing
 

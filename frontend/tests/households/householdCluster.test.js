@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   loadRiskClusters,
   mapServerRiskLevel,
+  normalizeHouseholdSnapshot,
   toRiskCluster,
 } from "../../src/features/households/lib/riskClusterAdapter.js";
 import { RISK_LEVELS } from "../../src/lib/householdRisk.js";
@@ -96,6 +97,22 @@ test("clearing an assignment overrides the stale household list value immediatel
   assert.equal(toRiskCluster(household).risk.level, RISK_LEVELS.PRIORITY);
   assert.equal(toRiskCluster(household, { riskClusterLevel: null }).risk.level, RISK_LEVELS.UNASSESSED);
   assert.equal(toRiskCluster(household, { riskClusterLevel: "invalid" }).risk.level, RISK_LEVELS.UNASSESSED);
+});
+
+test("household snapshots normalize snake_case while preserving false and zero values", () => {
+  const result = normalizeHouseholdSnapshot({
+    monthly_income: 0,
+    philhealth_member: false,
+    profile_snapshot: {
+      respondent_first: "Ana",
+      members: [{ is_pwd: false, age: 0 }],
+    },
+  });
+  assert.equal(result.monthlyIncome, 0);
+  assert.equal(result.philhealthMember, false);
+  assert.equal(result.profileSnapshot.respondentFirst, "Ana");
+  assert.equal(result.profileSnapshot.members[0].isPwd, false);
+  assert.equal(result.profileSnapshot.members[0].age, 0);
 });
 
 test("duplicate, missing or changing pages cannot masquerade as a complete cluster distribution", async () => {

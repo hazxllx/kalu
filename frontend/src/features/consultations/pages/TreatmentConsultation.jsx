@@ -1445,13 +1445,20 @@ export default function TreatmentConsultation() {
         </fieldset>
 
         {/* Buttons */}
-        <div>
+        <div className="mt-6 pb-2">
           {errors.submit && (
             <div className="mb-3 rounded-btn border border-brand-danger/30 bg-red-50/60 px-3 py-2" role="alert" aria-live="assertive">
               <p className="text-sm text-brand-danger">{errors.submit}</p>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={cancelForm}
+              disabled={busy}
+              className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <X className="w-4 h-4" /> Cancel
+            </button>
             {!reviewLocalId && <button
               onClick={handleSave}
               disabled={busy}
@@ -1463,13 +1470,6 @@ export default function TreatmentConsultation() {
                 ? (editingId ? "Updating Consultation..." : "Saving Consultation...")
                 : (editingId ? "Update Consultation" : "Save Consultation")}
             </button>}
-            <button
-              onClick={cancelForm}
-              disabled={busy}
-              className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <X className="w-4 h-4" /> Cancel
-            </button>
           </div>
         </div>
       </Card>

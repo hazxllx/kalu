@@ -20,9 +20,9 @@ export default function HouseholdDialog({ label, onClose, className = "max-w-2xl
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      className={`m-auto max-h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border-0 bg-transparent p-0 text-inherit backdrop:bg-black/50 ${className}`}
+      className={`m-auto max-h-[85vh] w-[calc(100vw-2rem)] overflow-hidden rounded-lg border-0 bg-transparent p-0 text-inherit backdrop:bg-black/50 ${className}`}
     >
-      <div className="flex max-h-[calc(100dvh-1.5rem)] min-w-0 flex-col overflow-hidden rounded-lg border border-brand-border bg-white dark:bg-card">
+      <div className="flex max-h-[85vh] min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-brand-border bg-white dark:bg-card">
         {children}
       </div>
     </dialog>

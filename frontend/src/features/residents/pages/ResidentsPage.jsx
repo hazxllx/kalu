@@ -197,7 +197,7 @@ const composeAddress = (f) =>
 /** @type {Record<string, string>} */
 const ACCOUNT_STATUS_LABELS = {
   active: "Active",
-  pending: "Pending Activation",
+  pending: "Pending",
   disabled: "Disabled",
   none: "No Account",
 };
@@ -1232,9 +1232,10 @@ export default function ResidentsPage() {
             aria-modal="true"
             aria-labelledby="add-resident-title"
             aria-describedby="add-resident-description"
-            className="flex min-h-0 max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-card bg-white shadow-xl sm:max-h-[calc(100dvh-2rem)] dark:bg-card"
+            className="flex min-h-0 max-h-[80dvh] w-full max-w-[900px] flex-col overflow-hidden rounded-card bg-white shadow-xl dark:bg-card"
+            style={{ maxWidth: "900px" }}
           >
-            <header className="relative isolate flex-shrink-0 overflow-hidden border-b border-brand-border bg-[#EFF6FF] px-5 py-4 dark:border-border dark:bg-[#14263A] sm:px-6">
+            <header className="relative isolate flex-shrink-0 overflow-hidden border-b border-brand-border bg-[#EFF6FF] px-4 py-3 dark:border-border dark:bg-[#14263A] sm:px-5">
               <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-44 w-44 rounded-full border-[22px] border-brand-blue/10 dark:border-blue-300/10" />
               <div className="relative z-10 flex items-start justify-between gap-4">
                 <div className="flex min-w-0 items-start gap-3">
@@ -1259,7 +1260,7 @@ export default function ResidentsPage() {
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-card">
-              <div className="grid grid-cols-1 gap-y-3 px-5 py-4 sm:px-6 sm:py-5">
+              <div className="grid grid-cols-1 gap-y-2 px-4 py-3 sm:px-5 sm:py-4">
                 {formError && (
                   <div role="alert" className="rounded-card border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300">
                     {formError}
@@ -1268,11 +1269,11 @@ export default function ResidentsPage() {
 
                 {/* Personal Information Section */}
                 <div>
-                  <div className="mb-3 flex items-center gap-2">
+                  <div className="mb-2 flex items-center gap-2">
                     <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Personal Information</h3>
                     <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                   </div>
-                  <div className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                     <Field label="First Name" value={form.firstName} onChange={set("firstName")} placeholder="e.g. Maria" error={errors.firstName} required />
                     <Field label="Middle Name" value={form.middleName} onChange={set("middleName")} placeholder="e.g. Santos" optional />
                     <Field label="Last Name" value={form.lastName} onChange={set("lastName")} placeholder="e.g. Dela Cruz" error={errors.lastName} required />
@@ -1305,11 +1306,11 @@ export default function ResidentsPage() {
 
                 {/* Contact and Address Section */}
                 <div>
-                  <div className="mb-3 flex items-center gap-2">
+                  <div className="mb-2 flex items-center gap-2">
                     <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Contact &amp; Address</h3>
                     <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                   </div>
-                  <div className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                     <Field label="Contact Number" value={form.contact} onChange={onContactChange} placeholder="e.g. 09171234567" error={errors.contact} optional maxLength={11} />
                     <div className="min-w-0">
                       {barangayAssignmentLocked ? (
@@ -1356,7 +1357,7 @@ export default function ResidentsPage() {
                 {/* A resident profile can be registered without portal access. */}
                 {showLoginAccountOption && (
                   <div>
-                    <div className="mb-3 flex items-center gap-2">
+                    <div className="mb-2 flex items-center gap-2">
                       <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Login Account</h3>
                       <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                     </div>
@@ -1422,7 +1423,7 @@ export default function ResidentsPage() {
               </div>
             </div>
 
-            <footer className="flex-shrink-0 border-t border-brand-border bg-white px-5 py-3.5 dark:border-border dark:bg-card sm:px-6">
+            <footer className="flex-shrink-0 border-t border-brand-border bg-white px-4 py-2.5 dark:border-border dark:bg-card sm:px-5">
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={closeAdd} disabled={submitting} className="rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:cursor-not-allowed disabled:opacity-60 dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">
                   Cancel
@@ -1442,27 +1443,27 @@ export default function ResidentsPage() {
       )}
       {/* View Resident Modal */}
       {showViewModal && selected && selectedOwner === user?.id && (!supervisor || (canViewProfile && assignedBarangay)) && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Resident Profile" className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
-            <div className="p-6">
-              <div className="flex items-start justify-between mb-5">
-                <div className="flex items-center gap-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-2 sm:p-4">
+          <Card role="dialog" aria-modal="true" aria-label="Resident Profile" className={`max-h-[80dvh] w-full max-w-[900px] overflow-y-auto overscroll-contain ${supervisor ? "supervisor-modal" : ""}`} style={{ maxWidth: "900px" }}>
+            <div className="p-3 sm:p-4">
+              <div className="sticky top-0 z-20 -mx-3 -mt-3 mb-3 flex items-start justify-between border-b border-brand-border bg-white px-3 py-3 sm:-mx-4 sm:-mt-4 sm:px-4 dark:border-border dark:bg-card">
+                <div className="flex min-w-0 items-center gap-3">
                   <div className="w-12 h-12 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-sm font-semibold">
                     {initialsOf(selected.name)}
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-brand-ink">{selected.name}</h3>
+                  <div className="min-w-0">
+                    <h3 className="break-words text-lg font-semibold text-brand-ink">{selected.name}</h3>
                     <p className="text-xs text-brand-gray">{selected.id}</p>
                   </div>
                 </div>
-                <button onClick={closeView} className="text-brand-gray hover:text-brand-ink" aria-label="Close resident profile">
+                <button type="button" onClick={closeView} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:hover:bg-hover" aria-label="Close resident profile">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
-                <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Demographics</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-border dark:bg-card">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Demographics</p>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {detailCell("Age", selected.age)}
                   {selected.age !== "" && Number(selected.age) < 18 && detailCell("Age Category", "Minor — under 18")}
                   {detailCell("Sex", selected.sex || selected.gender)}
@@ -1476,10 +1477,10 @@ export default function ResidentsPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
-                <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Record Information</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  <div>
+              <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-border dark:bg-card">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Record Information</p>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="min-w-0">
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Resident ID</p>
                     <p className="mt-0.5 text-sm font-medium text-brand-ink font-stat">{selected.id || "—"}</p>
                     <p className="mt-0.5 text-[11px] leading-snug text-brand-gray">
@@ -1511,9 +1512,9 @@ export default function ResidentsPage() {
                   Status (clinical review) and Account Linking (login) are kept
                   separate on purpose: linking a login never verifies a resident,
                   and verifying a resident never creates a login. */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-6">
-                <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Account Linking</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 dark:border-border dark:bg-card">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Account Linking</p>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Linking State</p>
                     <div className="mt-1"><LinkingStatePill resident={selected} /></div>
@@ -1523,7 +1524,7 @@ export default function ResidentsPage() {
                     <div className="mt-1"><AccountStatusPill status={selected.accountStatus} /></div>
                   </div>
                 </div>
-                <p className="mt-3 text-[11px] leading-snug text-brand-gray">
+                <p className="mt-2 text-[11px] leading-snug text-brand-gray">
                   {linkingStateOf(selected).key === "not_linked"
                     ? "No login account is linked to this record. The resident can self-register and link using their Resident ID, or you can invite a login below."
                     : linkingStateOf(selected).key === "linked"
@@ -1534,7 +1535,7 @@ export default function ResidentsPage() {
                 </p>
 
                 {canCreateLoginAccount && linkingStateOf(selected).key === "not_linked" && (
-                  <div className="mt-4 border-t border-brand-border pt-4">
+                  <div className="mt-3 border-t border-brand-border pt-3">
                     {!linkPanelOpen ? (
                       <button
                         type="button"
@@ -1580,7 +1581,7 @@ export default function ResidentsPage() {
                       </div>
                     )}
                     {canCreateLoginAccount && linkingStateOf(selected).key === "pending" && (
-                      <div className="mt-4 border-t border-brand-border pt-4">
+                      <div className="mt-3 border-t border-brand-border pt-3">
                         {linkError && <p className={errorClass}>{linkError}</p>}
                         <button
                           type="button"
@@ -1602,9 +1603,9 @@ export default function ResidentsPage() {
               {/* Risk Assessment — the authoritative, backend-computed result for
                   this resident. HEALTH DATA -> RISK CRITERIA -> RISK SCORE ->
                   RISK LEVEL. Only criteria that actually applied are listed. */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-6">
-                <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Risk Assessment</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 dark:border-border dark:bg-card">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Risk Assessment</p>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Current Risk</p>
                     <div className="mt-1"><RiskBadge level={selected.riskLevel} mediumLabel="Medium" /></div>

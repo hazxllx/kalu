@@ -777,7 +777,7 @@ const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
 // material (no password/token columns exist on it), but we still select an
 // explicit allow-list so the API can never leak columns added later.
 const PROFILE_ADMIN_COLUMNS =
-  'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
+  'id,email,full_name,first_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
 const PERSONNEL_ACCOUNT_COLUMNS =
   'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_assigned_by,temporary_password_assigned_at,temporary_password_expires_at,password_changed_at,suspended_at,suspension_reason,decision_reason,credential_valid_after,version';
 const PERSONNEL_NOTIFICATION_COLUMNS =
@@ -903,6 +903,7 @@ export const profileToAdminUser = (row) => {
   id: row.id,
   email: row.email,
   name: row.full_name || row.email,
+  firstName: row.first_name ?? row.firstName ?? '',
   role: row.role,
   status: row.status,
   municipalityId: row.municipality_id ?? null,
@@ -1395,7 +1396,7 @@ export const supabaseRepository = {
     for (let offset = 0; ; offset += pageSize) {
       const { data: page, error } = await supabase
         .from(TABLES.households)
-        .select('id, head_name, purok, street_address, created_at, household_visits(visit_number, visit_date)')
+        .select('id, head_name, purok, street_address, created_at, household_visits(visit_number, visit_date, visit_reason)')
         .eq('barangay_id', barangayId)
         .order('purok', { ascending: true })
         .range(offset, offset + pageSize - 1);
@@ -1416,6 +1417,7 @@ export const supabaseRepository = {
         // date as that first monitoring event.
         latestVisitNumber: visits[0]?.visit_number ?? (row.created_at ? 1 : null),
         latestVisitDate: visits[0]?.visit_date ?? row.created_at?.slice(0, 10) ?? null,
+        latestVisitReason: visits[0]?.visit_reason || (visits.length === 0 && row.created_at ? 'Initial Profiling' : null),
         isInitialProfileVisit: visits.length === 0 && Boolean(row.created_at),
       };
     });
@@ -2114,6 +2116,16 @@ export const supabaseRepository = {
       .select(PROFILE_ADMIN_BASE_SELECT)
       .maybeSingle();
     throwOnError(error, 'Could not update the user account');
+    return data ? profileToAdminUser(data) : null;
+  },
+
+  async updateBhwProfileFirstName({ id, actorId, firstName }) {
+    const { data, error } = await getServiceClient().rpc('update_bhw_profile_first_name', {
+      p_target_id: id,
+      p_actor_id: actorId,
+      p_first_name: firstName,
+    });
+    throwAccountError(error, 'Could not save the BHW profile first name.');
     return data ? profileToAdminUser(data) : null;
   },
 

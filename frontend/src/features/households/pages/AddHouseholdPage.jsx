@@ -1,14 +1,12 @@
-import React, { useEffect, useId, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
-  ChevronRight,
   Plus,
   Trash2,
   AlertTriangle,
   Info,
   CheckCircle2,
-  Home,
   ArrowLeft,
   Pencil,
   Search,
@@ -18,13 +16,13 @@ import {
 import HHBadge from "../components/HHBadge";
 import HouseholdDialog from "../components/HouseholdDialog";
 import { Card } from "@/components/common/Card";
+import PageHeader from "@/components/common/PageHeader";
 import { ButtonSelectGroup } from "@/components/system";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi } from "@/services/api";
 import { createHouseholdOffline } from "@/services/offline/householdOfflineService";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
-import HealthSupervisorPageHeader from "@/features/dashboards/components/HealthSupervisorPageHeader";
 import { maxLength, numeric, phone as validatePhone } from "@/utils/validation";
 import {
   HH_STATUSES,
@@ -522,7 +520,7 @@ function Section({ id, index, title, subtitle = "", open, onToggle, right = null
         </button>
         {right}
       </div>
-      {open && <div className="p-4 sm:p-5 md:p-6">{children}</div>}
+      {open && <div className="p-3 sm:p-4">{children}</div>}
     </Card>
   );
 }
@@ -532,7 +530,10 @@ const FIELD_SECTIONS = {
   head: "info",
   purok: "info",
   streetAddress: "info",
+  contact: "info",
   families: "details",
+  income: "details",
+  initialVisitDate: "visits",
   respLast: "respondent",
   respFirst: "respondent",
   respMaiden: "respondent",
@@ -588,12 +589,12 @@ export default function AddHouseholdPage() {
   const [openSections, setOpenSections] = useState({
     info: true,
     details: true,
-    respondent: true,
+    respondent: false,
     visits: false,
     philhealth: false,
-    water: true,
-    members: true,
-    risk: true,
+    water: false,
+    members: false,
+    risk: false,
   });
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [memberErrors, setMemberErrors] = useState([]);
@@ -635,6 +636,7 @@ export default function AddHouseholdPage() {
     segregation: "",
     members: [],
   }));
+  const initialFormSnapshot = useRef(JSON.stringify(form));
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -797,6 +799,16 @@ export default function AddHouseholdPage() {
     && normalizeHouseholdText(household.purok) === normalizeHouseholdText(form.purok)
     && normalizeHouseholdText(household.streetAddress) === normalizeHouseholdText(form.streetAddress)
   );
+  const confirmDiscardChanges = () => {
+    if (saving) return false;
+    const hasUnsavedChanges = JSON.stringify(form) !== initialFormSnapshot.current || memberModal.open;
+    return !hasUnsavedChanges || window.confirm("Leave without saving? Household information entered on this page will be lost.");
+  };
+  const handleBack = () => {
+    if (!confirmDiscardChanges()) return;
+    if (householdsPath) navigate(householdsPath);
+    else navigate(-1);
+  };
 
   const validate = () => {
     const next = {};
@@ -952,7 +964,7 @@ export default function AddHouseholdPage() {
     }
   };
 
-  const grid2 = "grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2";
+  const grid2 = "grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2";
 
   if (!canCreateHousehold) {
     return (
@@ -976,96 +988,63 @@ export default function AddHouseholdPage() {
 
   return (
     <>
-      {/* Page header */}
-      {user?.role === "health_supervisor" ? (
-        <HealthSupervisorPageHeader
-          eyebrow="Households"
-          title="Add Household"
-          subtitle="Register a new household and record its basic information."
-        />
-      ) : (
-      <div className="mb-6 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-card md:mb-8 md:px-6 md:py-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Desktop: breadcrumb */}
-          <nav
-            aria-label="Breadcrumb"
-            className="hidden min-w-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 md:flex"
-          >
-            {householdsPath && (
-              <Link
-                to={householdsPath}
-                className="inline-flex items-center transition-colors hover:text-brand-blue"
-              >
-                Household Profiling
-              </Link>
-            )}
-            <ChevronRight className="h-3 w-3 text-slate-400" aria-hidden="true" />
-            <span className="text-brand-blue">Add Household</span>
-          </nav>
-          {/* Mobile: compact back link */}
-          {householdsPath && (
-            <Link
-              to={householdsPath}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-brand-blue transition-colors hover:text-brand-dark md:hidden"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to Household Profiling
-            </Link>
-          )}
-          <span
-            className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium md:ml-0 ${
+      <PageHeader
+        eyebrow="HOUSEHOLD PROFILING"
+        title="Add New Household"
+        subtitle="Register a new household and record its basic information."
+        dense
+        meta={
+          <div className="flex flex-col items-end gap-2">
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
               isOffline
-                ? "border-amber-200 bg-amber-50 text-amber-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            {isOffline ? (
-              <>
-                <AlertTriangle className="h-3.5 w-3.5" /> Offline: saves will be queued for sync
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="h-3.5 w-3.5" /> Online: saves use the server
-              </>
-            )}
-          </span>
-        </div>
-        <div className="mt-2 flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-light">
-            <Home className="h-5 w-5 text-brand-blue" strokeWidth={1.8} />
+                ? "border-amber-200/40 bg-amber-100/10 text-amber-100"
+                : "border-emerald-200/40 bg-emerald-100/10 text-emerald-100"
+            }`}>
+              {isOffline ? (
+                <><AlertTriangle className="h-3.5 w-3.5" /> Offline: saves queued for sync</>
+              ) : (
+                <><CheckCircle2 className="h-3.5 w-3.5" /> Online: saves use the server</>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={handleBack}
+              disabled={saving}
+              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-btn border border-white/20 bg-white/10 px-3 text-xs font-medium text-white transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-60"
+              aria-label="Back to Household Profiling"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back
+            </button>
           </div>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
-              Add New Household
-            </h1>
-            <p className="mt-1 text-sm text-slate-600">
-              Register a new household and record its basic information.
-            </p>
-          </div>
-        </div>
-      </div>
-      )}
+        }
+      />
 
       {user?.role === "bhw" && householdsPath && (
-        <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-brand-blue/20 bg-brand-light/40 p-4">
+        <Card className="mb-3 flex flex-col gap-2 border-brand-blue/20 bg-brand-light/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-brand-ink">Returning to a household already on file?</p>
-            <p className="mt-1 text-xs text-brand-gray">Search the existing household and record the next visit there to keep one continuous profile.</p>
+            <p className="mt-0.5 text-xs text-brand-gray">Open its saved profile to record the next visit without creating a duplicate.</p>
           </div>
-          <Link to={householdsPath} className="rounded-btn border border-brand-blue/30 bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-light">Find existing household</Link>
+          <Link
+            to={householdsPath}
+            onClick={(event) => { if (!confirmDiscardChanges()) event.preventDefault(); }}
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-btn border border-brand-blue/30 bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-light sm:ml-auto"
+          >
+            Find Existing Household
+          </Link>
         </Card>
       )}
 
       {/* Server-side validation / duplicate errors */}
       {saveError && (
-        <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
+        <div role="alert" className="mb-3 flex items-start gap-2.5 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{saveError}</span>
         </div>
       )}
 
       {/* Form body — fills the content area; two columns on md+ */}
-      <div className="w-full space-y-5 pb-6">
+      <div className="w-full space-y-3 pb-6">
         {/* 1 — Household Information */}
           <Section
           id="info"
@@ -1177,7 +1156,13 @@ export default function AddHouseholdPage() {
                               <p className="truncate text-sm font-medium text-brand-ink">{household.headName} · {household.id}</p>
                               <p className="truncate text-xs text-brand-gray">{[household.purok, household.streetAddress].filter(Boolean).join(" · ")}</p>
                             </div>
-                            <Link to={`${householdsPath}/${household.id}`} className="shrink-0 text-xs font-semibold text-brand-blue hover:underline">Open existing profile</Link>
+                            <Link
+                              to={`${householdsPath}/${household.id}`}
+                              onClick={(event) => { if (!confirmDiscardChanges()) event.preventDefault(); }}
+                              className="shrink-0 text-xs font-semibold text-brand-blue hover:underline"
+                            >
+                              Open existing profile
+                            </Link>
                           </div>
                         ))}
                       </div>
@@ -1276,7 +1261,7 @@ export default function AddHouseholdPage() {
           open={openSections.respondent}
           onToggle={toggleSection}
         >
-          <div className="grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-3">
             <Field label="Last Name" required error={errors.respLast}>
               <input type="text" value={form.respLast} onChange={(e) => set("respLast", e.target.value)} placeholder="Dela Cruz" className={inputCls(errors.respLast)} />
             </Field>
@@ -1287,7 +1272,7 @@ export default function AddHouseholdPage() {
               <input type="text" value={form.respMaiden} onChange={(e) => set("respMaiden", e.target.value)} placeholder="Reyes" className={inputCls(errors.respMaiden)} />
             </Field>
           </div>
-          <div className="mt-5 grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2">
             <Field label="NHTS Household Status">
               <RadioRow name="nhts" value={form.nhts} onChange={(v) => set("nhts", v)} options={["NHTS-4Ps", "NHTS Non-4Ps", "Non-NHTS"]} />
             </Field>
@@ -1351,7 +1336,7 @@ export default function AddHouseholdPage() {
             <RadioRow name="phMember" value={form.phMember} onChange={(v) => set("phMember", v)} options={["No", "Yes"]} />
           </Field>
           {form.phMember === "Yes" && (
-            <div className="mt-5 grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2">
+            <div className="mt-4 grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2">
               <Field label="PhilHealth ID No.">
                 <input
                   type="text"
@@ -1807,13 +1792,7 @@ export default function AddHouseholdPage() {
               <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-brand-green" />
               The household id and risk classification are computed by the server on save.
             </p>
-            <div className="flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
-              <Link
-                to={householdsPath || "."}
-                className="inline-flex items-center justify-center rounded-btn border border-brand-border bg-white px-6 py-3 text-sm font-medium text-brand-ink transition-colors hover:bg-brand-bg sm:py-2.5"
-              >
-                Cancel
-              </Link>
+            <div className="flex items-stretch sm:items-center sm:justify-end">
               <button
                 onClick={handleSave}
                 disabled={saving || Boolean(duplicateHousehold)}

@@ -34,7 +34,7 @@ const sessionFor = (id = OWNER, token = 'synthetic-verified-session') => ({
   user: { id, email: `${id}@example.test`, is_anonymous: false, user_metadata: { role: 'admin', name: 'Synthetic account' } },
 });
 const profileFor = (id = OWNER) => ({
-  id, email: `${id}@example.test`, name: 'Server-confirmed account', role: 'bhw', status: 'active',
+  id, email: `${id}@example.test`, name: 'Server-confirmed account', firstName: 'Juan', role: 'bhw', status: 'active',
   municipalityId: MUNICIPALITY, municipality: 'Test Municipality', barangayId: BARANGAY,
   barangay: 'San Isidro', facilityId: null, rhuStations: [], contact: 'Not required in offline profile',
 });
@@ -213,6 +213,7 @@ test('browser reload restores real AuthProvider + PermissionsProvider from only 
   assert.equal(restored.auth.role, 'bhw');
   assert.equal(restored.auth.user.barangayId, BARANGAY);
   assert.equal(restored.auth.user.assignedBarangay, 'San Isidro');
+  assert.equal(restored.auth.user.firstName, 'Juan');
   assert.equal(restored.auth.profileSource, 'cache');
   assert.equal(restored.auth.isOfflineProfile, true);
   assert.match(restored.auth.authNotice, /previously server-verified.*cached permissions/i);

@@ -17,8 +17,6 @@
 --      rejection_reason, submitted_for_verification_at)
 --   3. adds the resident_verification_logs audit table
 --
--- It does NOT touch the Didit tables (identity_verifications /
--- didit_webhook_events). They are left in place but unused/deprecated.
 --
 -- Reversible: a rollback block is at the bottom of the file.
 -- =============================================================================

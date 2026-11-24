@@ -32,6 +32,25 @@ export const mapServerRiskLevel = (level) => {
 const environmentalLevel = (level) =>
   ["Low", "Moderate", "High"].includes(level) ? level : null;
 
+const toCamelCase = (key) => key.replace(/_([a-z0-9])/g, (_, character) => character.toUpperCase());
+
+export const normalizeHouseholdSnapshot = (value) => {
+  if (Array.isArray(value)) return value.map(normalizeHouseholdSnapshot);
+  if (!value || typeof value !== "object") return value;
+
+  const normalized = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    normalized[key] = normalizeHouseholdSnapshot(nestedValue);
+  }
+  for (const [key, nestedValue] of Object.entries(normalized)) {
+    const camelKey = toCamelCase(key);
+    if (camelKey !== key && !Object.hasOwn(normalized, camelKey)) {
+      normalized[camelKey] = nestedValue;
+    }
+  }
+  return normalized;
+};
+
 /** Whole days since an ISO date (yyyy-mm-dd), or null when unset/invalid. */
 export const daysSince = (iso) => {
   if (!iso) return null;
@@ -79,7 +98,7 @@ export const toRiskCluster = (household = {}, workflow = null) => {
 
   return {
     id: household.id,
-    assessmentProfile: household,
+    assessmentProfile: normalizeHouseholdSnapshot(household),
     assessmentRecords: Array.isArray(household.assessmentRecords) ? household.assessmentRecords : [],
     head: household.headName || "",
     surname: surnameFrom(household.headName),
@@ -168,4 +187,4 @@ export const loadRiskClusters = async ({
   return rows.map((row, index) => toRiskCluster(row, workflows[index]));
 };
 
-export default { mapServerRiskLevel, daysSince, toRiskCluster, loadRiskClusters };
+export default { mapServerRiskLevel, normalizeHouseholdSnapshot, daysSince, toRiskCluster, loadRiskClusters };

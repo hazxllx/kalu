@@ -46,7 +46,7 @@ const fieldsValidator = (body, { create = false } = {}) => {
   if (!create && (Object.hasOwn(input, 'temporaryPassword') || Object.hasOwn(input, 'mustChangePassword'))) {
     errors.temporaryPassword = 'Password assignment is available only during personnel account creation.';
   }
-  for (const field of ['email', 'name', 'fullName', 'contact', 'position', 'licenseNo', 'role', 'status', 'suspensionReason']) {
+  for (const field of ['email', 'name', 'fullName', 'firstName', 'contact', 'position', 'licenseNo', 'role', 'status', 'suspensionReason']) {
     if (input[field] !== undefined && typeof input[field] !== 'string') errors[field] = 'Use a text value.';
     else if (input[field] !== undefined && field !== 'suspensionReason' && hasControlChars(input[field])) errors[field] = 'Control characters are not allowed.';
   }

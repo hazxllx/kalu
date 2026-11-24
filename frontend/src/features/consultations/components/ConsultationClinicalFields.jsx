@@ -81,6 +81,7 @@ export default function ConsultationClinicalFields({
           onChange={onMedicationsChange}
           errors={errors}
           disabled={disabled}
+          collapsible
         />
       </section>
       <section className="mb-4" aria-label="Recommendations and instructions">

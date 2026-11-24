@@ -47,7 +47,6 @@ linked_counts as (
     where m.legacy_referral_id in (select id from candidate_legacy_referrals)
        or m.health_referral_id in (select id from candidate_health_referrals)
   union all select 'documents', count(*) from public.documents d join candidates c on c.id = d.resident_id
-  union all select 'identity_verifications', count(*) from public.identity_verifications i join candidates c on c.id = i.resident_id
   union all select 'resident_verification_logs', count(*) from public.resident_verification_logs l join candidates c on c.id = l.resident_id
   union all select 'household_members (link rows only)', count(*) from public.household_members hm join candidates c on c.id = hm.resident_id
   union all select 'transfer_requests (resident_id)', count(*) from public.transfer_requests tr join candidates c on c.id = tr.resident_id

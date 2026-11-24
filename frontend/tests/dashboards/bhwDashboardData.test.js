@@ -1,11 +1,42 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  bhwDashboardGreeting,
+  bhwProfileFirstName,
   fetchBhwHouseholds,
   householdRiskLevel,
   summarizeHouseholdConcerns,
 } from "../../src/features/dashboards/lib/bhwDashboardData.js";
+
+test("BHW greeting uses Philippine local time boundaries", () => {
+  for (const [timestamp, expected] of [
+    ["2026-11-24T20:59:00Z", "Good evening"],
+    ["2026-11-24T21:00:00Z", "Good morning"],
+    ["2026-11-24T03:59:00Z", "Good morning"],
+    ["2026-11-24T04:00:00Z", "Good afternoon"],
+    ["2026-11-24T09:59:00Z", "Good afternoon"],
+    ["2026-11-24T10:00:00Z", "Good evening"],
+  ]) {
+    assert.equal(bhwDashboardGreeting(new Date(timestamp)), expected);
+  }
+});
+
+test("BHW greeting reads only the dedicated profile first-name field", () => {
+  assert.equal(bhwProfileFirstName({ firstName: "  Juan  ", name: "San Isidro BHW" }), "Juan");
+  assert.equal(bhwProfileFirstName({ name: "Juan Dela Cruz", email: "juan@example.com" }), "");
+  assert.equal(bhwProfileFirstName({ firstName: " ", name: "Juan Dela Cruz" }), "");
+});
+
+test("BHW banner uses the greeting as its main heading and keeps the household description", async () => {
+  const source = await readFile(new URL("../../src/features/dashboards/pages/BHWDashboard.jsx", import.meta.url), "utf8");
+  const banner = source.match(/<PageHeader[\s\S]*?\/>/)?.[0] || "";
+  assert.match(banner, /title=\{`\$\{bhwDashboardGreeting\(localTime\)\}/);
+  assert.doesNotMatch(banner, /Household Profiling|eyebrow=/);
+  assert.match(banner, /Household conditions and risk classification across the barangay\./);
+  assert.match(source, /Add Household/);
+});
 
 test("fetches every household page for a complete barangay concern summary", async () => {
   const calls = [];

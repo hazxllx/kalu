@@ -230,9 +230,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         setReportsOwner(user?.id);
         setOutgoingLoadError("");
       })
-      .catch((error) => {
+      .catch(() => {
         if (requestId !== outgoingRequest.current) return;
-        setOutgoingLoadError(error?.message || "Could not load submitted reports.");
+        setOutgoingLoadError("We couldn't load your report records. Please try again.");
       })
       .finally(() => {
         if (requestId === outgoingRequest.current) setLoading(false);
@@ -275,7 +275,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       })
       .catch((err) => {
         if (!active) return;
-        setDetailError(err?.message || "Could not load the submitted report.");
+        setDetailError(err?.status === 404 ? "This report is unavailable." : "We couldn't load this report. Please try again.");
       })
       .finally(() => {
         if (active) setDetailLoading(false);

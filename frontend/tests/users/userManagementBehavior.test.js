@@ -20,7 +20,7 @@ const dropdown = {
   Item: ({ children, onSelect, disabled }) => React.createElement("button", { onClick: onSelect, disabled }, children),
 };
 const options = {
-  roles: [{ id: "phn", name: "Public Health Nurse" }],
+  roles: [{ id: "phn", name: "Public Health Nurse" }, { id: "bhw", name: "Barangay Health Worker" }],
   municipalities: [{ id: "pili", name: "Pili" }], barangays: [], facilities: [], rhuStations: [],
 };
 const resident = { id: "resident-1", name: "Directory Resident", email: "resident@example.test", role: "resident", status: "active" };
@@ -36,7 +36,7 @@ const deferred = () => {
   return { promise, resolve };
 };
 
-async function mount({ account = resident, accounts = [account], get = async () => ({ user: account }), history = async () => ({ audit: [], notifications: [] }), created = personnel } = {}) {
+async function mount({ account = resident, accounts = [account], get = async () => ({ user: account }), history = async () => ({ audit: [], notifications: [] }), created = personnel, roleOptions = options } = {}) {
   const calls = { get: [], history: [], create: [], list: 0, summary: 0 };
   const creationStarted = deferred();
   const toasts = [];
@@ -47,7 +47,7 @@ async function mount({ account = resident, accounts = [account], get = async () 
     clearTimeout: (id) => timers.delete(id),
   };
   const usersApi = {
-    options: async () => options,
+    options: async () => roleOptions,
     summary: async () => { calls.summary += 1; return { total: 1 }; },
     list: async () => { calls.list += 1; return { rows: accounts, total: accounts.length }; },
     get: async (id) => { calls.get.push(id); return get(id); },
@@ -237,6 +237,27 @@ for (const [status, expected] of [["failed", /email definitively failed before a
     } finally { page.close(); }
   });
 }
+
+test("BHW account creation requires and submits the separately recorded first name", async () => {
+  const page = await mount({
+    roleOptions: {
+      ...options,
+      barangays: [{ id: "barangay-1", name: "San Isidro", municipalityId: "pili" }],
+    },
+  });
+  try {
+    await page.click("Create Account");
+    await page.change("account-role", "bhw");
+    await page.change("account-name", "Juan Dela Cruz");
+    await page.change("account-first-name", "Juan");
+    await page.change("account-email", "juan.bhw@example.test");
+    await page.change("account-contact", "09123456789");
+    await page.change("account-barangay", "barangay-1");
+    await page.submit();
+    assert.equal(page.calls.create.length, 1);
+    assert.equal(page.calls.create[0][0].firstName, "Juan");
+  } finally { page.close(); }
+});
 
 // Toast descriptions are React elements captured before the toast provider renders them.
 function createToastTree(element) {

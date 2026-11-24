@@ -240,9 +240,9 @@ const toHistoryEntry = (row) => ({
   at: row.created_at || '',
 });
 
-const SENDER_EMBED = 'sender:profiles!created_by(full_name, email, role)';
-const REVIEWER_EMBED = 'reviewer:profiles!reviewed_by(full_name, email, role)';
-const RECEIVER_EMBED = 'receiver:profiles!received_by(full_name, email, role)';
+const SENDER_EMBED = 'sender:profiles!reports_created_by_fkey(full_name, email, role)';
+const REVIEWER_EMBED = 'reviewer:profiles!reports_reviewed_by_fkey(full_name, email, role)';
+const RECEIVER_EMBED = 'receiver:profiles!reports_received_by_fkey(full_name, email, role)';
 const BARANGAY_EMBED = 'barangay:barangays(name)';
 const EMBEDS = `${SENDER_EMBED}, ${REVIEWER_EMBED}, ${RECEIVER_EMBED}, ${BARANGAY_EMBED}`;
 // Scalar columns common to every query. `content` is intentionally excluded
@@ -348,7 +348,7 @@ export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   if (!data || !canReadReport(user, data)) throw ApiError.notFound('Report not found.');
   const { data: history, error: historyError } = await supabase
     .from(HISTORY_TABLE)
-    .select('id, action, previous_status, new_status, explanation, created_at, actor:profiles!actor_id(full_name, email, role)')
+    .select('id, action, previous_status, new_status, explanation, created_at, actor:profiles!report_status_history_actor_id_fkey(full_name, email, role)')
     .eq('report_id', id)
     .order('created_at', { ascending: true });
   throwOnError(historyError, 'Could not load report history');

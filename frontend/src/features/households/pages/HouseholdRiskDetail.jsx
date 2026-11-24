@@ -7,10 +7,11 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { householdsApi } from "@/services/api/householdsApi";
 import { householdRiskApi } from "@/services/api/householdRiskApi";
-import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
+import { toRiskCluster, daysSince, normalizeHouseholdSnapshot } from "../lib/riskClusterAdapter";
 import {
   RISK_LEVELS, RISK_LEVEL_LABELS,
 } from "@/lib/householdRisk";
+import { WATER_SOURCE_LABELS, TOILET_LABELS } from "../lib/householdOptions";
 import {
   Home, PhoneCall, UserPlus, ArrowUpRight, RefreshCw, ChevronRight, Users, MapPin, FileText, Activity, CalendarDays, Plus,
 } from "lucide-react";
@@ -58,7 +59,7 @@ function InfoCell({ icon: Icon, label, value }) {
         {Icon && <Icon className="h-3.5 w-3.5 text-brand-gray" strokeWidth={1.8} />}
         <p className="text-[11px] text-brand-gray uppercase tracking-wide">{label}</p>
       </div>
-      <p className="mt-1 text-sm font-medium text-brand-ink">{value || "—"}</p>
+      <p className="mt-1 break-words text-sm font-medium text-brand-ink">{value === null || value === undefined || value === "" ? "—" : value}</p>
     </div>
   );
 }
@@ -67,7 +68,10 @@ const assessmentValue = (value) => {
   if (value === true) return "Yes";
   if (value === false) return "No";
   if (Array.isArray(value)) return value.length ? value.join(", ") : "Not recorded";
-  if (value === null || value === undefined || value === "") return "Not recorded";
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return "Not recorded";
+  if (typeof value === "string" && ["true", "false"].includes(value.trim().toLowerCase())) {
+    return value.trim().toLowerCase() === "true" ? "Yes" : "No";
+  }
   return String(value);
 };
 
@@ -111,7 +115,7 @@ const environmentalFieldLabels = {
 
 function AssessmentDetails({ household, visits, assessmentRecords }) {
   const latestVisit = visits?.[0] || null;
-  const snapshot = latestVisit?.profileSnapshot || household?.assessmentProfile || household || null;
+  const snapshot = normalizeHouseholdSnapshot(household?.assessmentProfile || latestVisit?.profileSnapshot || household || null);
   const memberRows = Array.isArray(snapshot?.members)
     ? snapshot.members
     : (Array.isArray(household?.assessmentProfile?.members) ? household.assessmentProfile.members : []);
@@ -138,13 +142,13 @@ function AssessmentDetails({ household, visits, assessmentRecords }) {
   ];
 
   const environmentFields = [
-    ["Water source", snapshot?.waterSource],
+    ["Water source", WATER_SOURCE_LABELS[snapshot?.waterSource] || snapshot?.waterSource],
     ["Water source type", snapshot?.waterType],
     ["Distance to water source", snapshot?.waterDistance],
     ["Water availability", snapshot?.waterAvailability],
     ["Water treatment practiced", snapshot?.waterTreated],
     ["Treatment methods", snapshot?.treatmentMethods],
-    ["Toilet facility", snapshot?.toiletType],
+    ["Toilet facility", TOILET_LABELS[snapshot?.toiletType] || snapshot?.toiletType],
     ["Sanitation facility access", snapshot?.sanitationAccess],
     ["Waste disposal", snapshot?.wasteDisposal],
     ["Waste segregation practiced", snapshot?.wasteSegregation],
@@ -415,6 +419,9 @@ export default function HouseholdRiskDetail() {
   const h = household;
   const tone = levelTone[h.risk.level] || levelTone[RISK_LEVELS.UNASSESSED];
   const riskLabel = RISK_LEVEL_LABELS[h.risk.level] || RISK_LEVEL_LABELS[RISK_LEVELS.UNASSESSED];
+  const clusterAssignmentLabel = h.risk.level === RISK_LEVELS.UNASSESSED
+    ? "Unassigned"
+    : riskLabel;
 
   const saveClusterLevel = async (level) => {
     setSavingClusterLevel(true);
@@ -468,7 +475,7 @@ export default function HouseholdRiskDetail() {
         {/* Household information */}
         <Card className="p-5">
           <h3 className="mb-4 text-sm font-semibold text-brand-ink">Household Information</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <InfoCell icon={Home} label="Household ID" value={h.id} />
             <InfoCell icon={MapPin} label="Barangay" value={h.barangay} />
             <InfoCell icon={MapPin} label="Purok" value={h.purok || "—"} />
@@ -589,15 +596,15 @@ export default function HouseholdRiskDetail() {
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h3 className="text-sm font-semibold text-brand-ink">Risk &amp; Early Intervention</h3>
             <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${tone.chip}`}>
-              <span className={`h-2 w-2 rounded-full ${tone.dot}`} /> {riskLabel}
+              <span className={`h-2 w-2 rounded-full ${tone.dot}`} /> {clusterAssignmentLabel}
             </span>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <InfoCell icon={Activity} label="Cluster Assignment" value={riskLabel} />
+            <InfoCell icon={Activity} label="Cluster Assignment" value={clusterAssignmentLabel} />
             <InfoCell icon={FileText} label="Environmental Risk" value={h.environmentalRisk.level || "Unassessed"} />
             <InfoCell icon={Activity} label="Environmental Score" value={h.environmentalRisk.score ?? "—"} />
-            <InfoCell icon={Home} label="Last Household Visit" value={daysSince(visits[0]?.visitDate || h.lastHouseholdVisit) === null ? "—" : `${daysSince(visits[0]?.visitDate || h.lastHouseholdVisit)} days ago`} />
+            <InfoCell icon={Home} label="Last Household Visit" value={daysSince(h.lastHouseholdVisit || visits[0]?.visitDate) === null ? "—" : `${daysSince(h.lastHouseholdVisit || visits[0]?.visitDate)} days ago`} />
           </div>
 
           {canEditWorkflow && (

@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, RotateCcw } from 'lucide-react';
 import { Card } from '@/components/common/Card';
 import { useAuth } from '@/context/AuthContext';
 import { usePermissions } from '@/context/PermissionsContext';
-import HealthSupervisorPageHeader from '@/features/dashboards/components/HealthSupervisorPageHeader';
+import PageHeader from '@/components/common/PageHeader';
 import { householdsApi } from '@/services/api/householdsApi';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
 import { getHouseholdOffline, updateHouseholdOffline } from '@/services/offline/householdOfflineService';
@@ -62,6 +62,7 @@ const MEMBER_FIELDS = [
   ['fpMethod', 'Family planning method', 'select', FP_METHODS], ['quarterStatus', 'Quarter status', 'select', QUARTER_STATUSES],
 ];
 const MEMBER_SECTION = 'Household Members';
+const VISIT_REASONS = ['Follow-up', 'Updating Household Information', 'Verification', 'Monitoring', 'Other'];
 const LEGACY_FIELDS = [
   ['headName', 'Household head', 'text'], ['purok', 'Purok / zone', 'text'],
   ['streetAddress', 'Street address / sitio', 'text'], ['contact', 'Contact number', 'tel'],
@@ -82,8 +83,9 @@ const ageFromBirthday = (value) => {
 
 function Field({ label, type = 'text', value, options = [], onChange }) {
   if (type === 'boolean') {
+    const checked = value === true || ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase());
     return <label className="flex items-center gap-2 rounded-lg border border-brand-border px-3 py-2.5 text-sm text-brand-ink">
-      <input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 accent-brand-blue" />
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 accent-brand-blue" />
       {label}
     </label>;
   }
@@ -134,6 +136,9 @@ export default function EditHouseholdPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [visitDate, setVisitDate] = useState(todayLocal());
+  const [visitReason, setVisitReason] = useState('Follow-up');
+  const [recordingVisit, setRecordingVisit] = useState(false);
+  const visitRequestId = useRef(newVisitRequestId());
 
   useEffect(() => {
     let active = true;
@@ -282,11 +287,15 @@ export default function EditHouseholdPage() {
   };
 
   const recordVisit = async () => {
+    if (recordingVisit) return;
     setError(''); setNotice('');
+    setRecordingVisit(true);
     try {
-      await householdsApi.createVisit(householdId, { visitDate, requestId: newVisitRequestId(), visitReason: 'Follow-up', updatedSections: [] });
+      await householdsApi.createVisit(householdId, { visitDate, requestId: visitRequestId.current, visitReason, updatedSections: [] });
+      visitRequestId.current = newVisitRequestId();
       setNotice('Visit recorded.');
     } catch (visitError) { setError(visitError?.message || 'Could not record this visit.'); }
+    finally { setRecordingVisit(false); }
   };
 
   const saveLegacy = async (event) => {
@@ -306,13 +315,9 @@ export default function EditHouseholdPage() {
   if (loading) return <Card className="p-6 text-sm text-brand-gray">Loading household…</Card>;
   if (!form) return <Card className="space-y-4 p-6"><p role="alert" className="text-sm text-red-700">{error || 'Household not found.'}</p><button type="button" onClick={() => navigate(householdsPath)} className="text-sm text-brand-blue">Back to households</button></Card>;
 
-  if (user?.role !== 'bhw') return <div className="mx-auto max-w-3xl space-y-5">
+  if (user?.role !== 'bhw') return <div className="mx-auto max-w-5xl space-y-5 [overflow-wrap:anywhere]">
     <button type="button" onClick={() => navigate(householdsPath)} className="inline-flex items-center gap-2 text-sm font-medium text-brand-blue hover:underline"><ArrowLeft className="h-4 w-4" /> Back to households</button>
-    {user?.role === 'health_supervisor' ? (
-      <HealthSupervisorPageHeader eyebrow="Households" title="Edit Household" subtitle={`Household ${householdId} · ${syncStatus.online ? 'Changes are checked by the server.' : 'Working offline'}`} />
-    ) : (
-    <div><h1 className="text-2xl font-semibold text-brand-ink">Edit Household</h1><p className="mt-1 text-sm text-brand-gray">{householdId} · {syncStatus.online ? 'Changes are checked by the server.' : 'Working offline'}</p></div>
-    )}
+    <PageHeader eyebrow="HOUSEHOLD PROFILING" title="Household Profile" subtitle="Review and update the household's registered information." meta={<span className="text-xs text-white/75">Household {householdId}</span>} />
     <Card className="p-5 sm:p-7"><form onSubmit={saveLegacy} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">{LEGACY_FIELDS.map(([field, label, type]) => <Field key={field} label={label} type={type} value={form[field] ?? ''} onChange={(value) => updateField(field, value)} />)}</div>
       <p className="text-xs text-brand-gray">Household members, verification, approval, status, scope, and audit fields are not changed by this editor.</p>
@@ -321,19 +326,26 @@ export default function EditHouseholdPage() {
     </form></Card>
   </div>;
 
-  return <div className="mx-auto max-w-4xl space-y-5 [overflow-wrap:anywhere] [&_input]:max-w-full [&_select]:max-w-full">
+  return <div className="mx-auto max-w-5xl space-y-5 [overflow-wrap:anywhere] [&_input]:max-w-full [&_select]:max-w-full">
     <button type="button" onClick={() => navigate(householdsPath)} className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-brand-blue hover:underline"><ArrowLeft className="h-4 w-4" /> Back to households</button>
-    <header><h1 className="text-2xl font-semibold text-brand-ink">Household Profile</h1><p className="mt-1 text-sm text-brand-gray">{householdId} · Saved information is loaded from this household’s existing profile. {syncStatus.online ? '' : 'Working offline.'}</p></header>
+    <PageHeader eyebrow="HOUSEHOLD PROFILING" title="Household Profile" subtitle="Review and update the household's registered information." meta={<span className="text-xs text-white/75">{`Household ${householdId}${syncStatus.online ? '' : ' · Working offline'}`}</span>} />
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
-    {user?.role === 'bhw' && <Card className="p-4">
-      <form className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={(event) => { event.preventDefault(); recordVisit(); }}>
+    {user?.role === 'bhw' && <Card className="p-4 sm:p-5">
+      <div className="mb-3"><h2 className="text-sm font-semibold text-brand-ink">Visit Tracking</h2><p className="mt-1 text-xs text-brand-gray">Record a household visit without changing its profile.</p></div>
+      <form className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); recordVisit(); }}>
         <label className="min-w-0 text-sm font-medium text-brand-ink">
           Visit date
-          <input type="date" required value={visitDate} onChange={(event) => setVisitDate(event.target.value)} className="mt-1.5 block min-h-11 w-full min-w-0 rounded-input border border-brand-border bg-white px-3 py-2.5" />
+          <input type="date" required value={visitDate} onChange={(event) => { setVisitDate(event.target.value); visitRequestId.current = newVisitRequestId(); }} className="mt-1.5 block min-h-11 w-full min-w-0 rounded-input border border-brand-border bg-white px-3 py-2.5" />
         </label>
-        <button type="submit" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg">
-          <RotateCcw className="h-4 w-4 shrink-0" /> Record visit without profile changes
+        <label className="min-w-0 text-sm font-medium text-brand-ink">
+          Visit reason
+          <select value={visitReason} onChange={(event) => { setVisitReason(event.target.value); visitRequestId.current = newVisitRequestId(); }} className="mt-1.5 block min-h-11 w-full rounded-input border border-brand-border bg-white px-3 py-2.5">
+            {VISIT_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+          </select>
+        </label>
+        <button type="submit" disabled={recordingVisit} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-60">
+          <RotateCcw className="h-4 w-4 shrink-0" /> {recordingVisit ? 'Recording visit…' : 'Record visit'}
         </button>
       </form>
     </Card>}

@@ -27,6 +27,8 @@ import { ChevronRight } from "lucide-react";
  * New props:
  *   - eyebrow: an explicit uppercase category label that overrides `crumbs`
  *     for the eyebrow row (e.g. "Records", "Immunization").
+ *   - leadingAction: optional content (such as a Back button) shown before the
+ *     category label in the eyebrow row.
  *   - variant: "default" | "report". The "report" variant adds the
  *     "Official Record" chip used by statutory report pages (e.g. the FHSIS
  *     Form M1 consolidated report).
@@ -45,6 +47,7 @@ import { ChevronRight } from "lucide-react";
  *   subtitle?: string,
  *   subtitleClassName?: string,
  *   action?: import("react").ReactNode,
+ *   leadingAction?: import("react").ReactNode,
  *   meta?: import("react").ReactNode,
  *   eyebrowClassName?: string,
  *   variant?: "default" | "report",
@@ -59,6 +62,7 @@ export default function PageHeader({
   titleClassName = "",
   subtitle = "",
   action = null,
+  leadingAction = null,
   meta = null,
   eyebrowClassName = "text-brand-goldlight",
   subtitleClassName = "text-white/70",
@@ -68,7 +72,7 @@ export default function PageHeader({
 }) {
   const isReport = variant === "report";
   const hasCrumbs = Array.isArray(crumbs) && crumbs.length > 0;
-  const showEyebrowRow = isReport || Boolean(eyebrow) || hasCrumbs || Boolean(meta);
+  const showEyebrowRow = isReport || Boolean(eyebrow) || hasCrumbs || Boolean(meta) || Boolean(leadingAction);
   const breadcrumbRoutes = { Admin: "/app/admin/dashboard" };
 
   return (
@@ -82,6 +86,7 @@ export default function PageHeader({
         {showEyebrowRow && (
           <div className="ui-page-header-eyebrow flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              {leadingAction}
               {isReport && (
                 <span className="inline-flex items-center rounded-sm border border-white/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white/85">
                   Official Record

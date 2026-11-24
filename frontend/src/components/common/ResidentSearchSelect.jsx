@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X, User, Check } from "lucide-react";
 
 const SEARCH_DEBOUNCE_MS = 250;
+const EMPTY_RESIDENTS = Object.freeze([]);
 
 /** Secondary identifying info, e.g. "RES-1024 · 34 yrs · San Isidro". */
 const residentMeta = (r, showId) =>
@@ -31,7 +32,7 @@ const residentMeta = (r, showId) =>
  * @param {boolean} [props.showId]
  */
 export default function ResidentSearchSelect({
-  residents = [],
+  residents = EMPTY_RESIDENTS,
   value,
   onChange,
   placeholder = "Search resident by name...",
@@ -46,6 +47,16 @@ export default function ResidentSearchSelect({
   const [highlighted, setHighlighted] = useState(0);
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
+  const residentOptions = useMemo(
+    () => (Array.isArray(residents)
+      ? residents.filter((resident) =>
+        resident && typeof resident === "object" && !Array.isArray(resident)
+        && (typeof resident.id === "string" || typeof resident.id === "number")
+        && typeof resident.name === "string")
+      : []),
+    [residents],
+  );
+  const selectedResident = value && typeof value === "object" && !Array.isArray(value) ? value : null;
 
   // Debounced name search — runs only once the user types.
   useEffect(() => {
@@ -59,7 +70,7 @@ export default function ResidentSearchSelect({
     setSearching(true);
     const t = setTimeout(() => {
       const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
-      const matches = residents.filter((r) => {
+      const matches = residentOptions.filter((r) => {
         const name = String(r.name || "").toLowerCase();
         return tokens.every((token) => name.includes(token));
       });
@@ -69,7 +80,7 @@ export default function ResidentSearchSelect({
       setSearching(false);
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [query, open, residents, limit]);
+  }, [query, open, residentOptions, limit]);
 
   // Close the dropdown when clicking outside the field.
   useEffect(() => {
@@ -127,13 +138,13 @@ export default function ResidentSearchSelect({
 
   return (
     <div ref={wrapRef} className="relative">
-      {value ? (
+      {selectedResident ? (
         // Selected state — full name in the field + clear button.
         <div className="flex w-full items-center justify-between gap-2 rounded-btn border border-brand-border bg-brand-bg/60 px-3 py-2.5">
           <span className="flex min-w-0 items-center gap-2">
             <Check className="h-4 w-4 shrink-0 text-brand-green" />
-            <span className="truncate text-sm font-medium text-brand-ink">{value.name}</span>
-            <span className="shrink-0 text-xs text-brand-gray">{residentMeta(value, showId)}</span>
+            <span className="truncate text-sm font-medium text-brand-ink">{typeof selectedResident.name === "string" ? selectedResident.name : "Resident name unavailable"}</span>
+            <span className="shrink-0 text-xs text-brand-gray">{residentMeta(selectedResident, showId)}</span>
           </span>
           <button
             type="button"
@@ -180,7 +191,7 @@ export default function ResidentSearchSelect({
       )}
 
       {/* Results dropdown — only matching residents, capped at `limit`. */}
-      {open && !value && (
+      {open && !selectedResident && (
         <div className="absolute left-0 right-0 top-full z-20 mt-1.5 overflow-hidden rounded-btn border border-brand-border bg-white shadow-float">
           {searching ? (
             <p className="px-3 py-3 text-sm text-brand-gray">Searching...</p>

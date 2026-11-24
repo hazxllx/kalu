@@ -16,6 +16,8 @@ const deactivationIntentMigration = '20261120130500_personnel_deactivation_inten
 const identityGuardsMigration = '20261120131000_account_management_identity_guards.sql';
 const sessionFenceMigration = '20261120132500_personnel_session_fence.sql';
 const verificationAccountMigration = '20261120133500_resident_verification_account_status.sql';
+const delegatedAccountsMigration = '20261122100000_delegated_personnel_account_management.sql';
+const bhwFirstNameMigration = '20261126000000_bhw_profile_first_name.sql';
 const TEMPORARY_PASSWORD_CIPHERTEXT = 'v1.test-encrypted-temporary-credential';
 const ids = Object.fromEntries(['municipality', 'otherMunicipality', 'barangay', 'otherBarangay', 'legacyBarangay', 'facility']
   .map((name) => [name, randomUUID()]));
@@ -159,7 +161,8 @@ before(async () => {
     try { await db.exec(await readFile(new URL(file, migrations), 'utf8')); }
     catch (error) { throw new Error(`Baseline migration ${file}: ${error.message}`, { cause: error }); }
   }
-  preservedProfiles = await query('select * from public.profiles order by id');
+  preservedProfiles = await query(`select id, email, full_name, role, status, municipality_id, barangay_id, facility_id,
+    position, license_no, contact, created_at, rhu_stations from public.profiles order by id`);
   await db.exec(await readFile(new URL(candidate, migrations), 'utf8'));
   await db.exec(await readFile(new URL(temporaryPasswordMigration, migrations), 'utf8'));
   await db.exec(await readFile(new URL(temporaryPasswordEmailMigration, migrations), 'utf8'));
@@ -167,11 +170,14 @@ before(async () => {
   await db.exec(await readFile(new URL(identityGuardsMigration, migrations), 'utf8'));
   await db.exec(await readFile(new URL(sessionFenceMigration, migrations), 'utf8'));
   await db.exec(await readFile(new URL(verificationAccountMigration, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(delegatedAccountsMigration, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(bhwFirstNameMigration, migrations), 'utf8'));
 }, { timeout: 120000 });
 after(async () => { await db.close(); });
 
 test('migration preserves existing Auth identities, profiles, assignments, and clinical records without retrospective mail', async () => {
-  assert.deepEqual(await query('select * from public.profiles order by id'), preservedProfiles);
+  assert.deepEqual(await query(`select id, email, full_name, role, status, municipality_id, barangay_id, facility_id,
+    position, license_no, contact, created_at, rhu_stations from public.profiles order by id`), preservedProfiles);
   assert.equal((await query('select count(*)::integer as count from auth.users'))[0].count, preservedProfiles.length);
   assert.equal((await query('select count(*)::integer as count from public.residents'))[0].count, 1);
   assert.equal((await query('select count(*)::integer as count from public.visits'))[0].count, 1);
@@ -180,6 +186,29 @@ test('migration preserves existing Auth identities, profiles, assignments, and c
   assert.equal((await profile(existing.pendingBhw)).personnel_account.approval_status, 'pending');
   assert.equal((await profile(existing.disabled)).status, 'disabled');
   assert.equal((await profile(existing.legacySupervisor)).barangay_id, ids.legacyBarangay);
+});
+
+test('dedicated BHW first name is profile-backed, audited, and protected by account scope', async () => {
+  const created = await managedAccount({
+    role: 'bhw',
+    municipality_id: ids.municipality,
+    barangay_id: ids.barangay,
+    facility_id: null,
+    rhu_stations: [],
+    first_name: '',
+  });
+  assert.equal(created.account.first_name, '');
+
+  const updated = await rpc('update_bhw_profile_first_name', [created.id, existing.admin, 'Juan']);
+  assert.equal(updated.first_name, 'Juan');
+  const [event] = await audit(created.id, 'ACCOUNT_PROFILE_UPDATED');
+  assert.equal(event.metadata.previous.first_name, '');
+  assert.equal(event.metadata.new.first_name, 'Juan');
+
+  await assert.rejects(
+    () => rpc('update_bhw_profile_first_name', [created.id, existing.phn, 'Unauthorized']),
+    /limited to Health Supervisor and RHU Personnel/i,
+  );
 });
 
 test('authenticated administrators cannot directly self-grant permissions while service-role writes remain available', async () => {

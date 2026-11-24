@@ -18,6 +18,7 @@ const PROFILE_SELECT = [
   'id',
   'email',
   'full_name',
+  'first_name',
   'role',
   'status',
   'municipality_id',
@@ -41,6 +42,7 @@ const PROFILE_BASE_SELECT = [
   'id',
   'email',
   'full_name',
+  'first_name',
   'role',
   'status',
   'municipality_id',
@@ -52,6 +54,9 @@ const PROFILE_BASE_SELECT = [
   'created_at',
   'rhu_stations',
 ].join(',');
+
+const PROFILE_SELECT_WITHOUT_FIRST_NAME = PROFILE_SELECT.replace('first_name,', '');
+const PROFILE_BASE_SELECT_WITHOUT_FIRST_NAME = PROFILE_BASE_SELECT.replace('first_name,', '');
 
 /** The `profiles` table itself is missing (migrations not applied here). */
 const isTableMissing = (error) => {
@@ -71,6 +76,13 @@ const isEmbeddedResourceUnavailable = (error) => {
   return code === 'PGRST200' || /could not find a relationship/i.test(message);
 };
 
+const isFirstNameColumnUnavailable = (error) => {
+  const code = error?.code || '';
+  const message = error?.message || '';
+  return /first_name/i.test(message)
+    && (code === 'PGRST204' || code === '42703' || /schema cache|does not exist|not found/i.test(message));
+};
+
 /**
  * Load a user's profile.
  *
@@ -82,11 +94,17 @@ const isEmbeddedResourceUnavailable = (error) => {
  *                report a service problem, never "no profile"
  *   error        a database error that is neither of the above
  */
-export const loadProfile = async (userId) => {
-  const supabase = getServiceClient();
+export const loadProfile = async (userId, client = getServiceClient()) => {
+  const supabase = client;
 
-  const read = (select) =>
-    supabase.from('profiles').select(select).eq('id', userId).maybeSingle();
+  const read = async (select) => {
+    let result = await supabase.from('profiles').select(select).eq('id', userId).maybeSingle();
+    if (result.error && isFirstNameColumnUnavailable(result.error)) {
+      const legacySelect = select === PROFILE_SELECT ? PROFILE_SELECT_WITHOUT_FIRST_NAME : PROFILE_BASE_SELECT_WITHOUT_FIRST_NAME;
+      result = await supabase.from('profiles').select(legacySelect).eq('id', userId).maybeSingle();
+    }
+    return result;
+  };
 
   let { data, error } = await read(PROFILE_SELECT);
 
@@ -150,6 +168,7 @@ export const profileToSessionUser = (profile) => ({
   id: profile.id,
   email: profile.email,
   name: profile.full_name || profile.email,
+  firstName: profile.first_name || '',
   role: effectiveRole(profile),
   status: profile.status,
   municipalityId: profile.municipality_id ?? null,

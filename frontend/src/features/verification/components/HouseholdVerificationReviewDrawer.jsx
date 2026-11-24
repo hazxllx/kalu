@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import {
   X, CheckCircle2, XCircle, ShieldCheck, Home, Users, MapPin, Phone, Hash, User, Wallet,
@@ -13,12 +14,12 @@ const formatReviewDate = (date) =>
 /** Compact label-over-value cell used across the review sections. */
 function InfoCell({ icon: Icon, label, value }) {
   return (
-    <div className="rounded-btn bg-brand-bg p-3">
+    <div className="min-w-0 rounded-btn bg-brand-bg p-3">
       <div className="flex items-center gap-1.5">
         {Icon && <Icon className="w-3.5 h-3.5 text-brand-gray" strokeWidth={1.8} />}
         <p className="text-[11px] text-brand-gray uppercase tracking-wide">{label}</p>
       </div>
-      <p className="mt-1 text-sm font-medium text-brand-ink">{value || "—"}</p>
+      <p className="mt-1 break-words text-sm font-medium text-brand-ink [overflow-wrap:anywhere]">{value || "—"}</p>
     </div>
   );
 }
@@ -86,7 +87,7 @@ export default function HouseholdVerificationReviewDrawer({
     });
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50">
       <motion.div
         initial={{ opacity: 0 }}
@@ -100,7 +101,7 @@ export default function HouseholdVerificationReviewDrawer({
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.98 }}
         transition={{ type: "tween", duration: 0.16, ease: "easeOut" }}
-        className="absolute left-1/2 top-1/2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card bg-brand-bg shadow-2xl sm:max-h-[calc(100vh-2rem)] sm:w-[calc(100%-2rem)] sm:max-w-2xl"
+        className="absolute left-1/2 top-1/2 flex max-h-[85vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card bg-brand-bg shadow-2xl sm:max-w-2xl"
         role="dialog"
         aria-modal="true"
         aria-label={`Household verification review for ${household.head}`}
@@ -142,7 +143,7 @@ export default function HouseholdVerificationReviewDrawer({
         </div>
 
         {/* Body */}
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
           {/* Household information */}
           <section>
             <SectionTitle>Household Information</SectionTitle>
@@ -172,8 +173,8 @@ export default function HouseholdVerificationReviewDrawer({
           {/* Household members */}
           <section>
             <SectionTitle>Household Members</SectionTitle>
-            <div className="overflow-hidden rounded-btn border border-brand-border bg-white">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto rounded-btn border border-brand-border bg-white">
+              <table className="w-full min-w-[36rem] text-sm">
                 <thead>
                   <tr className="bg-brand-bg text-left">
                     <th className="px-3 py-2 font-medium text-brand-gray">Name</th>
@@ -346,6 +347,7 @@ export default function HouseholdVerificationReviewDrawer({
           </div>
         )}
       </motion.aside>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -145,6 +145,32 @@ test('Health Supervisor creates BHW only in the actor assigned barangay', async 
   assert.equal(createdProfile.municipality_id, MUNICIPALITY);
 });
 
+test('BHW first name is saved through the dedicated profile field', async () => {
+  const actor = { id: ACTOR, role: 'health_supervisor', municipalityId: MUNICIPALITY, barangayId: BARANGAY };
+  const calls = [];
+  await withMethods(repository, {
+    getAccountAssignmentOptions: async () => options(),
+    reservePersonnelAccount: async () => ({ target_id: TARGET, completed: true }),
+    createPersonnelAccountProfile: async ({ profile: input }) => {
+      calls.push(['create', input.first_name]);
+      return profile({ role: 'bhw', barangayId: BARANGAY });
+    },
+    updateBhwProfileFirstName: async (input) => { calls.push(['firstName', input]); },
+    getProfileById: async () => profile({ role: 'bhw', barangayId: BARANGAY, firstName: 'Juan', notification: { status: 'sent' } }),
+  }, async () => {
+    const result = await users.createUser({
+      actor,
+      input: creation({ role: 'bhw', barangayId: BARANGAY, firstName: 'Juan' }),
+      notificationProcessor: async () => ({ mailServerAccepted: 1 }),
+    });
+    assert.equal(result.firstName, 'Juan');
+  });
+  assert.deepEqual(calls, [
+    ['create', 'Juan'],
+    ['firstName', { id: TARGET, actorId: ACTOR, firstName: 'Juan' }],
+  ]);
+});
+
 test('temporary passwords are backend-generated and are never accepted from or returned to the administrator', async () => {
   let reservedProfile;
   let authInput;
@@ -441,6 +467,19 @@ test('personnel profile edits without a status omit lifecycle intent from the SQ
     const result = await users.updateUser({ id: TARGET, actorId: ACTOR, patch: { contact: '09180000000' } });
     assert.equal(result.activationRequested, true);
   });
+});
+
+test('BHW profile edits save the dedicated first name without deriving it from the full name', async () => {
+  const bhw = profile({ role: 'bhw', barangayId: BARANGAY, firstName: '' });
+  const calls = [];
+  await withMethods(repository, {
+    getProfileById: async () => bhw,
+    updatePersonnelAccountProfile: async () => bhw,
+    updateBhwProfileFirstName: async (input) => { calls.push(input); },
+  }, async () => {
+    await users.updateUser({ id: TARGET, actorId: ACTOR, patch: { firstName: 'Juan' } });
+  });
+  assert.deepEqual(calls, [{ id: TARGET, actorId: ACTOR, firstName: 'Juan' }]);
 });
 
 test('both resident roles use the resident RPC for pending details and assignment edits and cannot become staff', async () => {
@@ -803,11 +842,12 @@ test('Auth password failure never completes SQL or leaks the password/provider e
 
 test('admin shape preserves raw historical stations and strips outbox credential/lease material', () => {
   const result = profileToAdminUser({
-    id: TARGET, email: EMAIL, full_name: 'Nurse Juana', role: 'rhu_personnel', status: 'disabled', rhu_stations: ['historical'],
+    id: TARGET, email: EMAIL, full_name: 'Nurse Juana', first_name: 'Juana', role: 'rhu_personnel', status: 'disabled', rhu_stations: ['historical'],
     personnel_account: { approval_status: 'approved', activation_requested: true, setup_required: true, version: 5 },
     notifications: [{ id: OPERATION, status: 'delivery_unknown', event_type: 'approved', attempts: 1, claim_token: 'private-claim', action_link: 'private-link', password: 'private-password' }],
   });
   assert.deepEqual(result.rhuStations, ['historical']);
+  assert.equal(result.firstName, 'Juana');
   assert.equal(result.lifecycleVersion, 5);
   assert.equal(result.notification.status, 'delivery_unknown');
   assert.equal(result.mustChangePassword, false);

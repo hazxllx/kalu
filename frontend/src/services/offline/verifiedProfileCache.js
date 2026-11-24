@@ -20,7 +20,7 @@ export const verifiedProfileScopeKey = (user) => JSON.stringify([
 
 const validProfile = (user) => {
   if (!user || !uuid(user.id) || user.status !== 'active' || !ALL_ROLES.includes(user.role) || user.role === ROLE.RESIDENT_LIMITED) return false;
-  if (![user.email, user.name, user.barangay, user.municipality, user.facilityId, user.barangayId, user.municipalityId].every(optionalText)) return false;
+  if (![user.email, user.name, user.firstName, user.barangay, user.municipality, user.facilityId, user.barangayId, user.municipalityId].every(optionalText)) return false;
   if ([user.facilityId, user.barangayId, user.municipalityId].some((id) => id != null && !uuid(id))) return false;
   if (!Array.isArray(user.rhuStations) || user.rhuStations.length > 2 || user.rhuStations.some((station) => !['triage', 'consultation'].includes(station))) return false;
   if (user.role === ROLE.ADMIN) return true;
@@ -34,7 +34,7 @@ const validProfile = (user) => {
 // Project only fields received from /auth/me. Tokens, metadata roles, account
 // secrets and arbitrary server/caller properties never enter the cache.
 const minimalProfile = (user) => ({
-  id: user.id, email: user.email ?? null, name: user.name ?? user.email ?? '',
+  id: user.id, email: user.email ?? null, name: user.name ?? user.email ?? '', firstName: user.firstName ?? '',
   role: user.role, status: user.status,
   assignedBarangay: user.barangay ?? null, barangay: user.barangay ?? null,
   barangayId: user.barangayId ?? null, municipalityId: user.municipalityId ?? null,

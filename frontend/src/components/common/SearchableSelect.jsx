@@ -2,12 +2,16 @@ import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, X, Check } from "lucide-react";
 
-const normalizeOptions = (options) =>
-  (options || []).map((o) =>
-    typeof o === "string" || typeof o === "number"
-      ? { value: String(o), label: String(o) }
-      : { value: String(o.value), label: String(o.label ?? o.value) }
-  );
+const normalizeOptions = (options) => {
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((option) => {
+    if (typeof option === "string" || typeof option === "number") {
+      return [{ value: String(option), label: String(option) }];
+    }
+    if (!option || typeof option !== "object" || option.value === null || option.value === undefined) return [];
+    return [{ value: String(option.value), label: String(option.label ?? option.value) }];
+  });
+};
 
 /**
  * Reusable searchable combobox.
@@ -55,6 +59,7 @@ export default function SearchableSelect({
   const inputId = id || `select-${generatedId}`;
   const listboxId = `${inputId}-listbox`;
   const items = useMemo(() => normalizeOptions(options), [options]);
+  const selectedValue = value === null || value === undefined ? "" : String(value);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
@@ -74,8 +79,8 @@ export default function SearchableSelect({
   }, [items, query]);
 
   useEffect(() => {
-    setHighlighted(query ? 0 : Math.max(0, items.findIndex((item) => item.value === value)));
-  }, [query, open, items, value]);
+    setHighlighted(query ? 0 : Math.max(0, items.findIndex((item) => item.value === selectedValue)));
+  }, [query, open, items, selectedValue]);
 
   // Close the dropdown when clicking outside the field.
   useEffect(() => {
@@ -163,7 +168,7 @@ export default function SearchableSelect({
       e.preventDefault();
       setOpen(true);
       setQuery("");
-      setHighlighted(Math.max(0, items.findIndex((item) => item.value === value)));
+      setHighlighted(Math.max(0, items.findIndex((item) => item.value === selectedValue)));
       return;
     }
     if (!open || results.length === 0) return;
@@ -192,8 +197,8 @@ export default function SearchableSelect({
 
   // When there is a chosen value and the user is not actively filtering, the
   // field simply shows the selected option; focusing starts a fresh search.
-  const showSelected = value && !open;
-  const controlValue = showSelected ? items.find((o) => o.value === value)?.label || value : query;
+  const showSelected = selectedValue && !open;
+  const controlValue = showSelected ? items.find((o) => o.value === selectedValue)?.label || selectedValue : query;
   const dropdown = open && !disabled ? (
     <div
       ref={menuRef}
@@ -205,7 +210,7 @@ export default function SearchableSelect({
       ) : (
         <ul id={listboxId} role="listbox" aria-label={ariaLabel || label || placeholder} style={{ maxHeight: portalDropdown ? Math.max(0, (menuPosition?.maxHeight ?? 256) - 2) : Math.min(256, maxResults * 44 + 8) }} className="overflow-y-auto py-1">
           {results.map((o, i) => (
-            <li key={o.value} role="option" aria-selected={o.value === value} id={`${listboxId}-option-${i}`} data-option-index={i}>
+            <li key={o.value} role="option" aria-selected={o.value === selectedValue} id={`${listboxId}-option-${i}`} data-option-index={i}>
               <button
                  type="button"
                  tabIndex={-1}
@@ -213,11 +218,11 @@ export default function SearchableSelect({
                 onMouseEnter={() => setHighlighted(i)}
                 onClick={() => select(o)}
                 className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 min-h-[44px] sm:min-h-0 text-left transition-colors ${
-                  i === highlighted || o.value === value ? "bg-brand-light dark:bg-brand-blue/20" : "hover:bg-brand-bg dark:hover:bg-muted/50"
+                  i === highlighted || o.value === selectedValue ? "bg-brand-light dark:bg-brand-blue/20" : "hover:bg-brand-bg dark:hover:bg-muted/50"
                 }`}
               >
                 <span className="truncate text-sm font-medium text-brand-ink dark:text-foreground">{o.label}</span>
-                {o.value === value && (
+                {o.value === selectedValue && (
                   <Check className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
                 )}
               </button>
@@ -275,7 +280,7 @@ export default function SearchableSelect({
             className={`w-full min-w-0 bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70 dark:text-foreground ${disabled ? "cursor-not-allowed" : ""}`}
             disabled={disabled}
           />
-          {(value || query) && !disabled && (
+          {(selectedValue || query) && !disabled && (
             <button
               type="button"
               onClick={clear}

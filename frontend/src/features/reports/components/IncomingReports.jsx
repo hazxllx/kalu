@@ -86,7 +86,7 @@ function AuthorizedInbox({ user }) {
     return reportsApi
       .listAll({ box: "incoming" }, { ownerId: user.id })
       .then(setRows)
-      .catch((err) => setError(err?.message || "We couldn't load incoming reports. Please try again."))
+      .catch(() => setError("We couldn't load incoming reports. Please try again."))
       .finally(() => setLoading(false));
   }, [user.id]);
 
@@ -116,12 +116,11 @@ function AuthorizedInbox({ user }) {
       })
       .catch((err) => {
         if (active) {
-          // Provide more specific error messages
           const errorMsg = err?.status === 403
             ? "You do not have permission to view this report."
             : err?.status === 404
             ? "This report is unavailable."
-            : err?.message || "Could not load the submitted report.";
+            : "We couldn't load this report. Please try again.";
           setDetailError(errorMsg);
         }
       })

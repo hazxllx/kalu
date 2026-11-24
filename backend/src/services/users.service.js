@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { processPersonnelNotifications } from './personnelNotifications.service.js';
 import { ROLES, isValidRole } from '../config/roles.js';
 import { RHU_STATION_VALUES, STATION_ASSIGNED_ROLES, normalizeStations, stationLabel } from '../config/rhuStations.js';
-import { isEmail, isStrictMobile, isUuid } from '../validators/common.js';
+import { isEmail, isStrictMobile, isUuid, isValidPersonName } from '../validators/common.js';
 import { createUserValidator, updateUserValidator, userQueryValidator, personnelLifecycleValidator } from '../validators/users.validators.js';
 import { getAccountRequestHistory } from './staffAccounts.service.js';
 import { encryptTemporaryPassword, generateTemporaryPassword } from '../utils/temporaryPassword.js';
@@ -323,6 +323,7 @@ export const createUser = async ({ actor, actorId = actor?.id, input = {}, notif
   input = validated(createUserValidator, input);
   const email = String(input.email ?? '').trim().toLowerCase();
   const fullName = String(input.fullName ?? input.name ?? '').trim();
+  const firstName = String(input.firstName ?? '').trim();
   const role = String(input.role ?? '').trim();
   if (delegatedRole(actor) && !manageableRoles(actor).includes(role)) {
     throw ApiError.forbidden('You are not authorized to create an account for that role.');
@@ -330,6 +331,9 @@ export const createUser = async ({ actor, actorId = actor?.id, input = {}, notif
   const errors = [];
   if (email.length > 254 || !isEmail(email)) errors.push('Enter a valid email address.');
   if (!fullName || fullName.length > 120) errors.push('Name must be between 1 and 120 characters.');
+  if (firstName && (role !== ROLES.BHW || firstName.length > 80 || !isValidPersonName(firstName))) {
+    errors.push('Enter a valid BHW first name of at most 80 characters.');
+  }
   if (!ASSIGNABLE_ROLES.includes(role) || role === ROLES.RESIDENT) {
     errors.push('Choose an assignable staff role. Resident accounts must use resident registration.');
   }
@@ -384,6 +388,7 @@ export const createUser = async ({ actor, actorId = actor?.id, input = {}, notif
   const profile = {
     email,
     full_name: fullName,
+    ...(role === ROLES.BHW ? { first_name: firstName } : {}),
     role,
     status: approvalStatus === 'pending' ? 'pending_verification' : 'disabled',
     approval_status: approvalStatus,
@@ -421,6 +426,9 @@ export const createUser = async ({ actor, actorId = actor?.id, input = {}, notif
   if (!user?.id || user.id !== reservation.target_id) {
     throw new ApiError(503, 'Account provisioning could not be confirmed. Retry with the same operation reference.');
   }
+  if (role === ROLES.BHW && firstName) {
+    await repository.updateBhwProfileFirstName({ id: user.id, actorId, firstName });
+  }
   let createdUser = (await repository.getProfileById(user.id)) || user;
   const shouldSendCreationNotification = isHealthPersonnel
     || (role === ROLES.ADMIN && approvalStatus !== 'pending');
@@ -447,6 +455,11 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
   patch = validated(updateUserValidator, patch);
   const existing = await repository.getProfileById(id);
   if (!existing) throw ApiError.notFound('User account not found');
+  const nextRoleName = String(patch.role ?? existing.role).trim();
+  const firstName = patch.firstName === undefined ? undefined : String(patch.firstName).trim();
+  if (firstName !== undefined && (nextRoleName !== ROLES.BHW || (firstName && (firstName.length > 80 || !isValidPersonName(firstName))))) {
+    throw ApiError.unprocessable('Enter a valid BHW first name of at most 80 characters.');
+  }
   if (delegatedRole(actor)) {
     assertCanManageTarget(actor, existing);
     const assignmentFields = ['role', 'municipalityId', 'barangayId', 'facilityId', 'rhuStations', 'email', 'approvalStatus'];
@@ -491,6 +504,9 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
       delegated: true,
     });
     if (!updated) throw ApiError.notFound('Personnel account not found in your authorized scope.');
+    if (firstName !== undefined) {
+      await repository.updateBhwProfileFirstName({ id, actorId, firstName });
+    }
     return (await repository.getProfileById(updated.id)) || updated;
   }
 
@@ -505,6 +521,7 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
     if (!name || name.length > 120) errors.push('Name must be between 1 and 120 characters.');
     else fields.full_name = name;
   }
+  if (firstName !== undefined) fields.first_name = firstName;
   if (patch.contact !== undefined) fields.contact = normalizeOptionalText(patch.contact);
   if (patch.position !== undefined) fields.position = normalizeOptionalText(patch.position);
   if (patch.licenseNo !== undefined) fields.license_no = normalizeOptionalText(patch.licenseNo);
@@ -561,7 +578,8 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
       && patch.municipalityId === undefined
       && patch.barangayId === undefined
       && patch.facilityId === undefined
-      && patch.rhuStations === undefined) return existing;
+      && patch.rhuStations === undefined
+      && firstName === undefined) return existing;
 
   let requestedMunicipality = patch.municipalityId === undefined
     ? existing.municipalityId
@@ -597,6 +615,7 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
   const profile = {
     email: existing.email,
     full_name: fields.full_name ?? existing.name,
+    ...(firstName !== undefined ? { first_name: firstName } : {}),
     contact: fields.contact ?? existing.contact,
     position: fields.position ?? existing.position,
     license_no: fields.license_no ?? existing.licenseNo,
@@ -623,6 +642,9 @@ export const updateUser = async ({ id, actor = null, actorId = actor?.id ?? null
     ? await repository.updateAdminAccountProfile({ id, actorId, profile })
     : await repository.updatePersonnelAccountProfile({ id, actorId, profile, operationId: patch.operationId ?? randomUUID() });
   if (!updated) throw ApiError.notFound('User account not found');
+  if (firstName !== undefined) {
+    await repository.updateBhwProfileFirstName({ id, actorId, firstName });
+  }
   return (await repository.getProfileById(updated.id)) || updated;
 };
 
