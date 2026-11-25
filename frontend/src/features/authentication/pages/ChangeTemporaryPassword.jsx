@@ -4,16 +4,7 @@ import { AlertTriangle, Check, CheckCircle2, Circle, Eye, EyeOff, KeyRound, Load
 import { useAuth } from "@/context/AuthContext";
 import { authApi } from "@/services/api";
 import { homeForRole, landingFor } from "@/lib/roles";
-import { personnelPasswordError } from "@/features/authentication/personnelPasswordSetup";
-
-const REQUIREMENTS = [
-  ["length", "8 to 200 characters", (value) => value.length >= 8 && value.length <= 200],
-  ["uppercase", "At least one uppercase letter", (value) => /[A-Z]/.test(value)],
-  ["lowercase", "At least one lowercase letter", (value) => /[a-z]/.test(value)],
-  ["number", "At least one number", (value) => /\d/.test(value)],
-  ["special", "At least one non-whitespace special character", (value) => /[^A-Za-z0-9\s]/.test(value)],
-  ["whitespace", "No whitespace", (value) => !/\s/.test(value)],
-];
+import { personnelPasswordError, personnelPasswordRequirements } from "@/features/authentication/personnelPasswordSetup";
 
 export default function ChangeTemporaryPassword() {
   const navigate = useNavigate();
@@ -57,11 +48,8 @@ export default function ChangeTemporaryPassword() {
     return () => { active = false; };
   }, [authChecked, isAuthenticated, isLoadingAuth, isResolvingProfile, navigate, role, session?.access_token]);
 
-  const requirements = useMemo(
-    () => Object.fromEntries(REQUIREMENTS.map(([key, , check]) => [key, check(password)])),
-    [password],
-  );
-  const allRequirementsMet = Object.values(requirements).every(Boolean);
+  const requirements = useMemo(() => personnelPasswordRequirements(password), [password]);
+  const allRequirementsMet = requirements.every(({ valid }) => valid);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -152,9 +140,9 @@ export default function ChangeTemporaryPassword() {
                   </button>
                 </div>
                 <ul className="mt-2 grid grid-cols-1 gap-1 text-[11px] leading-4 sm:grid-cols-2" aria-label="Password requirements" aria-live="polite">
-                  {REQUIREMENTS.map(([key, label]) => (
-                    <li key={key} className={`flex items-center gap-1.5 ${requirements[key] ? "text-emerald-700" : "text-brand-gray"}`}>
-                      {requirements[key] ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : <Circle className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />}
+                {requirements.map(({ key, label, valid }) => (
+                    <li key={key} className={`flex items-center gap-1.5 ${valid ? "text-emerald-700" : "text-brand-gray"}`}>
+                      {valid ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : <Circle className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />}
                       {label}
                     </li>
                   ))}

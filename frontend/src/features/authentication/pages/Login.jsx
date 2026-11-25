@@ -28,7 +28,7 @@ export default function Login() {
 
   useEffect(() => {
     if (isAuthenticated && !authBusy && !submittingRef.current) {
-      navigate(user?.mustChangePassword ? "/change-password" : landingFor(role, location.state?.from) || homeForRole(role), { replace: true });
+      navigate(landingFor(role, location.state?.from) || homeForRole(role), { replace: true });
     }
   }, [isAuthenticated, authBusy, role, user?.mustChangePassword, location.state?.from, navigate]);
 
@@ -63,14 +63,7 @@ export default function Login() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      let passwordChangeRequired = false;
-      const signedInRole = await login({ email, password }, {
-        onPasswordChangeRequired: () => {
-          passwordChangeRequired = true;
-          navigate("/change-password", { replace: true });
-        },
-      });
-      if (passwordChangeRequired) return;
+      const signedInRole = await login({ email, password });
       const from = location.state?.from;
       navigate(landingFor(signedInRole, from) || homeForRole(signedInRole), { replace: true });
     } catch (err) {

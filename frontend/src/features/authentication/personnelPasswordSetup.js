@@ -25,9 +25,21 @@ export const passwordWasSaved = (error) => error?.passwordSaved === true || erro
 
 export const personnelSetupBlocked = (status) => status?.setupRequired === true && (status.approvalStatus !== "approved" || status.suspended === true);
 
+export const personnelPasswordRequirements = (password = "") => {
+  const value = typeof password === "string" ? password : String(password ?? "");
+  return [
+    { key: "minLength", label: "At least 8 characters", valid: value.length >= 8 },
+    { key: "maxLength", label: "No more than 200 characters", valid: value.length <= 200 },
+    { key: "uppercase", label: "At least one uppercase letter (A–Z)", valid: /[A-Z]/.test(value) },
+    { key: "lowercase", label: "At least one lowercase letter (a–z)", valid: /[a-z]/.test(value) },
+    { key: "number", label: "At least one number (0–9)", valid: /[0-9]/.test(value) },
+    { key: "special", label: "At least one special character (!, @, #, $, %, etc.)", valid: /[^A-Za-z0-9\s]/.test(value) },
+    { key: "noWhitespace", label: "No whitespace characters", valid: !/\s/.test(value) },
+  ];
+};
+
 export function personnelPasswordError(password) {
-  if (password.length < 8 || password.length > 200 || !/[A-Z]/.test(password) || !/[a-z]/.test(password)
-    || !/\d/.test(password) || !/[^A-Za-z0-9\s]/.test(password) || /\s/.test(password)) {
+  if (personnelPasswordRequirements(password).some(({ valid }) => !valid)) {
     return "Use 8 to 200 characters with uppercase, lowercase, a number, a special character, and no whitespace.";
   }
   return "";

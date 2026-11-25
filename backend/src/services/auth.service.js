@@ -530,10 +530,13 @@ export const changeTemporaryPersonnelPassword = async ({ accessToken, password }
   let passwordDigest;
   try { passwordDigest = digestTemporaryPasswordChange(owner.id, validation.value.password, env.supabaseServiceRoleKey); }
   catch { throw new ApiError(503, 'Temporary password protection is not configured.'); }
-  let claimId;
-  try { claimId = await repository.beginPersonnelTemporaryPasswordChange({ id: owner.id, passwordDigest }); }
+  let claim;
+  try {
+    const started = await repository.beginPersonnelTemporaryPasswordChange({ id: owner.id, passwordDigest });
+    claim = typeof started === 'string' ? { claimId: started } : started;
+  }
   catch { throw new ApiError(503, 'The temporary-password change could not be authorized. Retry or contact your administrator.'); }
-  if (!claimId) {
+  if (!claim?.claimId) {
     if (account.temporaryPasswordExpiresAt && Date.parse(account.temporaryPasswordExpiresAt) <= Date.now()) {
       throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.');
     }
@@ -549,7 +552,7 @@ export const changeTemporaryPersonnelPassword = async ({ accessToken, password }
   if (result.error || result.data?.user?.id !== owner.id) {
     const authErrorStatus = Number(result.error?.status ?? result.error?.statusCode);
     if (authErrorStatus >= 400 && authErrorStatus < 500) {
-      try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId }); }
+      try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId: claim.claimId, leaseId: claim.leaseId }); }
       catch { /* Preserve the Auth error if cleanup is unavailable. */ }
     }
     throw new ApiError(503, 'The password change could not be confirmed. Please retry.');
@@ -557,14 +560,14 @@ export const changeTemporaryPersonnelPassword = async ({ accessToken, password }
 
   let completed;
   try {
-    completed = await repository.completeClaimedTemporaryPasswordChange({ id: owner.id, claimId });
+    completed = await repository.completeClaimedTemporaryPasswordChange({ id: owner.id, claimId: claim.claimId, leaseId: claim.leaseId });
   } catch {
-    try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId }); }
+    try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId: claim.claimId, leaseId: claim.leaseId }); }
     catch { /* A confirmed Auth update can safely hand recovery to a fresh invitation. */ }
     throw new ApiError(503, 'Your password was saved, but the password-change requirement could not be confirmed. Please retry.');
   }
   if (!completed || completed.mustChangePassword) {
-    try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId }); }
+    try { await repository.releasePersonnelTemporaryPasswordChange({ id: owner.id, claimId: claim.claimId, leaseId: claim.leaseId }); }
     catch { /* A confirmed Auth update can safely hand recovery to a fresh invitation. */ }
     throw new ApiError(503, 'Your password was saved, but the password-change requirement could not be confirmed. Please retry.');
   }

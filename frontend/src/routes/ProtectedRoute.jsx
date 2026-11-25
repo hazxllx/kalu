@@ -58,10 +58,6 @@ export default function ProtectedRoute({ allow = [] }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  if (user?.mustChangePassword) {
-    return <Navigate to="/change-password" replace />;
-  }
-
   const reportRoute = submittedReportPaths.some((path) => matchPath(path, location.pathname));
   if (allow.length > 0 && !allow.includes(role)) {
     if (reportRoute) return <UnauthorizedPage />;

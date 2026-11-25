@@ -2733,24 +2733,24 @@ export const supabaseRepository = {
       p_target_id: id, p_password_digest: passwordDigest,
     });
     throwAccountError(error, 'The temporary-password change could not be authorized.');
-    return typeof data === 'string' ? data : null;
+    return data && typeof data === 'object' ? data : (typeof data === 'string' ? { claimId: data } : null);
   },
 
   async updatePersonnelOwnPassword({ accessToken, password }) {
     return updateOwnPassword(accessToken, password);
   },
 
-  async releasePersonnelTemporaryPasswordChange({ id, claimId }) {
+  async releasePersonnelTemporaryPasswordChange({ id, claimId, leaseId }) {
     const { data, error } = await getServiceClient().rpc('release_personnel_temporary_password_change', {
-      p_target_id: id, p_claim_id: claimId,
+      p_target_id: id, p_claim_id: claimId, p_lease_id: leaseId,
     });
     throwAccountError(error, 'The temporary-password change could not be released.');
     return data === true;
   },
 
-  async completeClaimedTemporaryPasswordChange({ id, claimId }) {
+  async completeClaimedTemporaryPasswordChange({ id, claimId, leaseId }) {
     const { data, error } = await getServiceClient().rpc('complete_claimed_temporary_personnel_password_change', {
-      p_target_id: id, p_claim_id: claimId,
+      p_target_id: id, p_claim_id: claimId, p_lease_id: leaseId,
     });
     throwAccountError(error, 'Your password was saved, but the password-change requirement could not be confirmed.');
     const row = Array.isArray(data) ? data[0] : data;

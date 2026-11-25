@@ -12,6 +12,13 @@ import {
   User,
   Settings,
   Lock,
+  Check,
+  Circle,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import Icon from "@/components/common/Icon";
 import OfflineStatusIndicator from "@/features/offline/components/OfflineStatusIndicator";
@@ -34,8 +41,55 @@ import { usePermissions } from "@/context/PermissionsContext";
 import { hasValidPermissionSnapshot, permissionNotice, routePermissionsAllowed } from "@/services/accessControl/permissionAccess";
 import { isNavigatorOnline } from "@/services/offline/connectivity";
 import { getSupervisorScope } from "@/lib/supervisorScope";
+import { authApi } from "@/services/api";
+import { personnelPasswordError, personnelPasswordRequirements } from "@/features/authentication/personnelPasswordSetup";
 
 const BP_CONFIG_READ_ROLES = new Set(["admin", "mho", "phn", "health_supervisor", "rhu_personnel"]);
+const PERSONNEL_ROLES = new Set(["phn", "bhw", "health_supervisor", "rhu_personnel"]);
+
+function MandatoryPasswordModal({ onComplete }) {
+  const { session } = useAuth();
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const requirements = useMemo(() => personnelPasswordRequirements(password), [password]);
+  const valid = requirements.every((item) => item.valid) && password && password === confirmation;
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy || !valid || !session?.access_token) return;
+    const policyError = personnelPasswordError(password);
+    if (policyError || password !== confirmation) { setError(policyError || "The passwords do not match."); return; }
+    setBusy(true); setError("");
+    try {
+      const result = await authApi.temporaryPersonnelPasswordChange(password, session.access_token);
+      if (result?.passwordChanged !== true) throw new Error("The server did not confirm the password change.");
+      await onComplete();
+    } catch (failure) {
+      setError(failure?.message || "Your password could not be changed. Please try again.");
+    } finally { setBusy(false); }
+  };
+
+  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/45 p-4" role="dialog" aria-modal="true" aria-labelledby="secure-account-title">
+    <section className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7">
+      <p className="mb-2 text-[10px] font-bold tracking-[0.14em] text-brand-blue">FIRST-TIME ACCOUNT SETUP</p>
+      <h2 id="secure-account-title" className="font-display text-2xl font-bold text-brand-dark">Secure Your Account</h2>
+      <p className="mt-2 text-sm leading-5 text-brand-gray">Before accessing your dashboard, create your permanent password.</p>
+      {error && <div className="mt-4 flex gap-2 border border-brand-danger/30 bg-brand-danger/5 p-3 text-xs leading-5 text-brand-danger" role="alert"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</div>}
+      <form onSubmit={submit} className="mt-5 space-y-4">
+        {[{ id: "modal-new-password", label: "New Password", value: password, set: setPassword, show: showPassword, toggle: () => setShowPassword((v) => !v) }, { id: "modal-confirm-password", label: "Confirm Password", value: confirmation, set: setConfirmation, show: showConfirmation, toggle: () => setShowConfirmation((v) => !v) }].map((field) => <div key={field.id}>
+          <label htmlFor={field.id} className="text-sm font-semibold text-brand-ink">{field.label}</label>
+          <div className="mt-1 flex rounded-input border border-brand-border focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/15"><input id={field.id} type={field.show ? "text" : "password"} autoComplete="new-password" value={field.value} onChange={(e) => { field.set(e.target.value); setError(""); }} disabled={busy} className="min-w-0 w-full rounded-l-input px-3 py-2.5 text-sm outline-none" required /><button type="button" onClick={field.toggle} aria-label={field.show ? `Hide ${field.label}` : `Show ${field.label}`} className="px-3 text-brand-gray">{field.show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
+        </div>)}
+        <ul className="grid grid-cols-1 gap-1 text-[11px] leading-4 sm:grid-cols-2" aria-label="Password requirements" aria-live="polite">{requirements.map(({ key, label, valid: requirementValid }) => <li key={key} className={`flex items-center gap-1.5 ${requirementValid ? "text-emerald-700" : "text-brand-gray"}`}>{requirementValid ? <Check className="h-3 w-3" /> : <Circle className="h-2.5 w-2.5" />}{label}</li>)}</ul>
+        <button type="submit" disabled={busy || !valid} className="flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50">{busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</> : <><KeyRound className="h-4 w-4" /> Save New Password</>}</button>
+      </form>
+    </section>
+  </div>;
+}
 
 /**
  * Main application shell for authenticated users.
@@ -205,6 +259,7 @@ export default function DashboardLayout({ roleKey }) {
   const effectiveRole = user?.role === "resident-limited" ? "resident" : user?.role;
   const notice = permissionNotice(matrixLoadState, user?.id, online);
   const feedback = recheckFeedback?.userId === user?.id ? recheckFeedback?.status : null;
+  const showMandatoryPasswordModal = PERSONNEL_ROLES.has(roleKey) && user?.mustChangePassword === true;
   const permissionsReady = hasValidPermissionSnapshot(
     matrixLoadState,
     user?.id,
@@ -997,6 +1052,7 @@ export default function DashboardLayout({ roleKey }) {
           </motion.div>
         </main>
       </div>
+      {showMandatoryPasswordModal && <MandatoryPasswordModal onComplete={async () => { await refreshProfile(); }} />}
     </div>
   );
 }

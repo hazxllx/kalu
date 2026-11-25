@@ -283,7 +283,7 @@ export default function ResetPassword() {
     { label: "At least one lowercase letter (a–z)", valid: /[a-z]/.test(newPassword) },
     { label: "At least one number (0–9)", valid: /\d/.test(newPassword) },
     { label: "At least one special character (!, @, #, $, %, etc.)", valid: /[^A-Za-z0-9\s]/.test(newPassword) },
-    { label: "Special characters must not be whitespace", valid: !/\s/.test(newPassword) || !/[^A-Za-z0-9\s]/.test(newPassword) },
+    { label: "No whitespace characters", valid: !/\s/.test(newPassword) },
   ];
   const passwordRequirementsMet = passwordRequirements.every((item) => item.valid);
   const confirmPasswordMessage = confirmPassword.length > 0
@@ -645,7 +645,7 @@ export default function ResetPassword() {
               <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
                 Create a secure password for your KALUSAGAP account. Make sure your password meets all the requirements below.
               </p>
-              <ul className="mt-3 space-y-2 text-[12px] text-slate-600">
+              <ul className="mt-3 grid grid-cols-1 gap-y-2 text-[12px] text-slate-600 sm:grid-cols-2 sm:gap-x-5">
                 {passwordRequirements.map((requirement) => {
                   const passes = requirement.valid;
                   return (
