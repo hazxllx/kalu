@@ -439,14 +439,16 @@ function EmailDiagnostics({ notifications }) {
 
 function DetailsModal({ target: initialTarget, options, onClose, notify }) {
   const [target, setTarget] = useState(initialTarget);
-  const personnel = Boolean(personnelState(target));
+  const [loading, setLoading] = useState(true);
+  const [detailsError, setDetailsError] = useState("");
+  const personnel = isPersonnelRole(target.roleId || target.role);
   const [history, setHistory] = useState(null);
   const [historyError, setHistoryError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(personnel);
   const sequence = useRef(0);
   const loadHistory = useCallback(async () => {
     const request = ++sequence.current;
-    setHistoryLoading(true);
+    setHistoryLoading(true); setLoading(true); setDetailsError("");
     setHistoryError("");
     try {
       const [result, profile] = await Promise.allSettled([usersApi.history(target.id), usersApi.get(target.id)]);
@@ -457,13 +459,17 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
         }
         if (result.status === "rejected") throw result.reason;
         if (profile.status === "rejected") throw profile.reason;
+        if (profile.value?.user) {
+          const account = profile.value.user;
+          setTarget({ ...account, roleId: account.role, role: roleLabel(account.role), statusId: account.status });
+        }
         setHistory(result.value);
       }
       return result.status === "fulfilled" ? result.value : null;
     } catch (error) {
-      if (request === sequence.current) setHistoryError(error?.message || "Account history could not be loaded.");
+      if (request === sequence.current) { setHistoryError(error?.message || "Account history could not be loaded."); setDetailsError(error?.message || "Account details could not be loaded."); }
     } finally {
-      if (request === sequence.current) setHistoryLoading(false);
+      if (request === sequence.current) { setHistoryLoading(false); setLoading(false); }
     }
   }, [target.id]);
 
@@ -471,13 +477,16 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
     if (personnel) void loadHistory();
     else {
       const request = ++sequence.current;
-      usersApi.get(target.id).then((profile) => {
+      setLoading(true); setDetailsError(""); setTarget(initialTarget);
+      usersApi.get(initialTarget.id).then((profile) => {
         if (request === sequence.current && profile?.user) {
           const account = profile.user;
           setTarget({ ...account, roleId: account.role, role: roleLabel(account.role), statusId: account.status });
         }
       }).catch((error) => {
-        if (request === sequence.current) setHistoryError(error?.message || "Account details could not be loaded.");
+        if (request === sequence.current) { const message = error?.message || "Account details could not be loaded."; setHistoryError(message); setDetailsError(message); }
+      }).finally(() => {
+        if (request === sequence.current) setLoading(false);
       });
     }
     return () => { sequence.current += 1; };
@@ -485,8 +494,13 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
 
   const legacyRequest = history?.request;
   const documents = Array.isArray(legacyRequest?.verificationDocuments) ? legacyRequest.verificationDocuments : [];
-  const coverage = target.barangay || target.facility || target.municipality
-    || (target.roleId === "admin" ? "System-wide" : "Not assigned");
+  const missing = (value, assigned = false) => value || <span className="font-normal italic text-slate-400">{assigned ? "Not assigned" : "Not provided"}</span>;
+  const assignmentMissing = (value) => value || (
+    target.address
+      ? <span className="font-normal italic text-slate-400">No formal assignment</span>
+      : <span className="font-normal italic text-slate-400">Not assigned</span>
+  );
+  const roleId = target.roleId || target.role;
 
   const dialogHeader = (
     <div className="flex min-w-0 items-center gap-3">
@@ -504,30 +518,40 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
 
   return (
     <AccountDialog title={target.name || "Account details"} description={target.email || "Account profile and history"} onClose={onClose} wide header={dialogHeader}>
-      {!personnel && historyError && <p role="alert" className="rounded-btn bg-brand-danger/10 p-3 text-sm text-brand-danger">{historyError}</p>}
+      {loading && <div role="status" className="space-y-3"><div className="h-4 w-40 animate-pulse rounded bg-slate-100" /><div className="h-24 animate-pulse rounded-xl bg-slate-50" /><div className="h-32 animate-pulse rounded-xl bg-slate-50" /></div>}
+      {!loading && detailsError && <p role="alert" className="rounded-xl bg-brand-danger/10 p-4 text-sm text-brand-danger">{detailsError}</p>}
+      {!loading && !detailsError && <div className="grid gap-4 md:grid-cols-2">
+      <div className="space-y-4">
       <InfoSection title="Account Overview">
-        <DetailRow label={personnel ? "Account status" : "Status"} value={<LifecyclePill account={target} />} />
-        {personnel && <DetailRow label="Sign-in access" value={target.statusId === "active" && personnelState(target) === "active" ? "Enabled" : "Not enabled"} />}
-        <DetailRow label="Role" value={roleLabel(target.roleId)} />
-        <DetailRow label="Coverage" value={coverage} />
+        <DetailRow label="Account status" value={<LifecyclePill account={target} />} />
+        <DetailRow label="User role" value={roleLabel(roleId)} />
+        <DetailRow label="Verification" value={missing(target.verificationStatus)} />
+        <DetailRow label="Created" value={formatTimestamp(target.createdAt)} />
       </InfoSection>
-
       <InfoSection title="Assignment Information">
-        <DetailRow label="Municipality" value={target.municipality || "Not assigned"} />
-        <DetailRow label="Barangay" value={target.barangay || "Not assigned"} />
-        <DetailRow label="RHU facility" value={target.facility || "Not assigned"} />
-        {isPersonnelRole(target.roleId) && <DetailRow label="RHU stations" value={stationsLabel(target.rhuStations, options.rhuStations)} />}
+        <DetailRow label="Municipality" value={assignmentMissing(target.municipality)} />
+        <DetailRow label="Barangay" value={assignmentMissing(target.barangay)} />
+        <DetailRow label="RHU facility" value={missing(target.facility, true)} />
+        {personnel && <DetailRow label="RHU stations" value={stationsLabel(target.rhuStations, options.rhuStations)} />}
       </InfoSection>
-
-      <InfoSection title="Personnel Information">
-        <DetailRow label="Contact number" value={target.contact || "Not provided"} />
-        <DetailRow label="Position" value={target.position || "Not provided"} />
-        <DetailRow label="License number" value={target.licenseNo || "Not provided"} />
+      </div><div className="space-y-4">
+      <InfoSection title="Personal Information">
+        <DetailRow label="First name" value={missing(target.firstName)} /><DetailRow label="Middle name" value={missing(target.middleName)} />
+        <DetailRow label="Last name" value={missing(target.lastName)} /><DetailRow label="Suffix" value={missing(target.suffix)} />
+        <DetailRow label="Date of birth" value={missing(target.birthDate)} /><DetailRow label="Sex" value={missing(target.sex)} />
+        <DetailRow label="Contact number" value={missing(target.residentContact || target.contact)} /><DetailRow label="Complete address" value={missing(target.address)} />
+      </InfoSection>
+      {personnel && <InfoSection title="Professional Information"><DetailRow label="Position" value={missing(target.position)} /><DetailRow label="License number" value={missing(target.licenseNo)} /><DetailRow label="Personnel ID" value={missing(target.id)} /></InfoSection>}
+      </div></div>}
+      {personnel && !loading && !detailsError && <>
+        <InfoSection title="Personnel Account"><DetailRow label="Approval status" value={missing(target.approvalStatus)} /><DetailRow label="Activation requested" value={typeof target.activationRequested === "boolean" ? target.activationRequested ? "Yes" : "No" : missing(null)} /></InfoSection>
+      </>}
+      {false && <InfoSection title="Personnel Information">
         {personnel && <>
           <DetailRow label="Approval status" value={target.approvalStatus ? target.approvalStatus.replace(/_/g, " ") : "Not recorded"} />
           <DetailRow label="Activation requested" value={typeof target.activationRequested === "boolean" ? target.activationRequested ? "Yes" : "No; activation withheld" : "Not recorded"} />
         </>}
-      </InfoSection>
+      </InfoSection>}
 
       {personnel && <section className="mt-6 border-t border-slate-100 pt-5 dark:border-border" aria-label="Account activity">
         <div className="mb-3 flex items-center justify-between gap-3">

@@ -505,69 +505,92 @@ children: [
 
   mho: [
     {
-      label: "Dashboard",
+      label: "Overview",
       icon: "LayoutDashboard",
-      path: "/app/mho/dashboard",
-      group: "Main",
+      children: [
+        {
+          label: "Dashboard",
+          icon: "LayoutDashboard",
+          path: "/app/mho/dashboard",
+        },
+        {
+          label: "Resident Directory",
+          icon: "Users",
+          path: "/app/mho/residents",
+          permission: "residents.directory.view",
+        },
+      ],
     },
     {
-      label: "Resident Directory",
-      icon: "Users",
-      path: "/app/mho/residents",
-      permission: "residents.directory.view",
-      group: "Main",
+      label: "Community Monitoring",
+      icon: "Activity",
+      children: [
+        {
+          label: "Health Trends",
+          icon: "TrendingUp",
+          path: "/app/mho/trends",
+          permission: "reports.analytics.view",
+        },
+        {
+          label: "Resident Risk Summary",
+          icon: "Users",
+          path: "/app/mho/risk-summary",
+          permission: "reports.analytics.view",
+        },
+        {
+          label: "Referrals",
+          icon: "Send",
+          path: "/app/mho/referrals",
+          permission: "referrals.view",
+        },
+      ],
     },
     {
-      label: "Health Trends",
-      icon: "TrendingUp",
-      path: "/app/mho/trends",
-      permission: "reports.analytics.view",
-      group: "Monitoring",
-    },
-    {
-      label: "Resident Risk Summary",
-      icon: "Users",
-      path: "/app/mho/risk-summary",
-      permission: "reports.analytics.view",
-      group: "Monitoring",
-    },
-    {
-      label: "Referrals",
-      icon: "Send",
-      path: "/app/mho/referrals",
-      permission: "referrals.view",
-      group: "Monitoring",
-    },
-    {
-      label: "TCL & M1 Submissions",
+      label: "Operations",
       icon: "ClipboardList",
-      path: "/app/mho/submissions",
-      permission: "reports.view",
-      group: "Submissions",
+      children: [
+        {
+          label: "TCL & M1 Submissions",
+          icon: "ClipboardList",
+          path: "/app/mho/submissions",
+          permission: "reports.view",
+        },
+        {
+          label: "Medical Certificates",
+          icon: "FileText",
+          path: "/app/mho/certificates",
+        },
+      ],
     },
     {
-      label: "Medical Certificates",
-      icon: "FileText",
-      path: "/app/mho/certificates",
-      group: "Health Services",
-    },
-    {
-      label: "Reports",
+      label: "Insights & Account",
       icon: "BarChart3",
-      path: "/app/mho/reports",
-      permission: "reports.view",
-      group: "Reports",
+      children: [
+        {
+          label: "Reports",
+          icon: "BarChart3",
+          path: "/app/mho/reports",
+          permission: "reports.view",
+        },
+        {
+          label: "Notifications",
+          icon: "Bell",
+          path: "/app/mho/notifications",
+        },
+      ],
     },
-    {
-      label: "Notifications",
-      icon: "Bell",
-      path: "/app/mho/notifications",
-      group: "Account",
-    },
+    /* Settings remains available in the fixed account footer. */
     {
       label: "Settings",
       icon: "Settings",
       path: "/app/mho/settings",
+      group: "Account",
+    },
+    /* Profile is rendered in the fixed account footer. */
+    {
+      label: "Profile",
+      icon: "User",
+      path: "/app/mho/profile",
       group: "Account",
     },
   ],

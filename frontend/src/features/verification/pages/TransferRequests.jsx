@@ -41,7 +41,7 @@ const STATUS_FILTERS = [
 // row so the columns line up exactly. Collapses to a single stacked column on
 // mobile so nothing overflows horizontally.
 const ROW_GRID =
-  "sm:grid-cols-[minmax(0,2.2fr)_minmax(0,2.4fr)_minmax(0,1.3fr)_auto_auto]";
+  "sm:grid-cols-[minmax(0,32fr)_minmax(0,26fr)_minmax(0,19fr)_minmax(7rem,13fr)_minmax(8.5rem,10fr)]";
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -80,21 +80,6 @@ const guessMime = (fileName) => {
 const DOCUMENT_LABELS = {
   transfer_proof_of_address: "Proof of address",
   transfer_previous_health_record: "Previous health record",
-};
-
-const documentStatusLabel = (status, url) => {
-  if (!url) return "Unavailable — unable to inspect";
-  if (status === "rejected") return "Invalid — correction required";
-  if (status === "resubmission_required") return "Correction required";
-  if (status === "approved" || status === "verified") return "Verified";
-  if (status === "pending") return "Uploaded — not yet verified";
-  return status ? `Status: ${status.replaceAll("_", " ")}` : "Status not recorded";
-};
-
-const documentStatusClass = (status, url) => {
-  if (!url || status === "rejected" || status === "resubmission_required") return "text-rose-700";
-  if (status === "approved" || status === "verified") return "text-emerald-700";
-  return "text-amber-800";
 };
 
 const auditActionLabel = (action) => ({
@@ -244,7 +229,7 @@ export default function TransferRequests({ embedded = false }) {
       )}
 
       <section className="overflow-hidden rounded-card border border-brand-border bg-white dark:border-border dark:bg-card">
-        {/* Compact toolbar: search + status filter + refresh + request count */}
+        {/* Compact toolbar: search + status filter + request count */}
         <VerificationQueueToolbar
           filters={STATUS_FILTERS}
           status={statusFilter}
@@ -253,16 +238,7 @@ export default function TransferRequests({ embedded = false }) {
           onSearchChange={setQuery}
           searchPlaceholder="Search resident, record no., or barangay"
           resultText={`${filtered.length} request${filtered.length === 1 ? "" : "s"}`}
-        >
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-input border border-brand-border px-3 text-[13px] font-medium text-brand-gray transition-colors hover:text-brand-ink disabled:opacity-60 dark:border-border dark:hover:text-foreground"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </button>
-        </VerificationQueueToolbar>
+        />
 
         {loading ? (
           <div className="flex items-center justify-center gap-2 px-6 py-12 text-sm text-brand-gray">
@@ -284,13 +260,13 @@ export default function TransferRequests({ embedded = false }) {
           <>
             {/* Column headers (desktop only) */}
             <div
-              className={`hidden border-b border-brand-border bg-brand-bg/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:border-border dark:bg-card-nested sm:grid sm:items-center sm:gap-3 ${ROW_GRID}`}
+              className={`hidden border-b border-brand-border bg-brand-bg/50 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:border-border dark:bg-card-nested sm:grid sm:items-center sm:gap-4 ${ROW_GRID}`}
             >
               <span>Resident</span>
               <span>Transfer</span>
               <span>Submitted</span>
               <span>Status</span>
-              <span className="justify-self-end">Action</span>
+              <span className="justify-self-end pr-1">Action</span>
             </div>
 
             <ul className="divide-y divide-brand-border dark:divide-border">
@@ -299,7 +275,7 @@ export default function TransferRequests({ embedded = false }) {
                 return (
                   <li
                     key={request.id}
-                    className={`grid grid-cols-1 items-start gap-1.5 px-4 py-3 transition-colors hover:bg-brand-bg/40 dark:hover:bg-card-nested sm:items-center sm:gap-3 sm:py-2.5 ${ROW_GRID}`}
+                    className={`grid grid-cols-1 items-start gap-1.5 px-5 py-3 transition-colors hover:bg-brand-bg/40 dark:hover:bg-card-nested sm:items-center sm:gap-4 sm:py-2.5 ${ROW_GRID}`}
                   >
                     {/* Resident */}
                     <div className="min-w-0">
@@ -323,12 +299,12 @@ export default function TransferRequests({ embedded = false }) {
                     </p>
 
                     {/* Status */}
-                    <div>
+                    <div className="flex w-full justify-center">
                       <StatusChip status={request.status} />
                     </div>
 
                     {/* Review action */}
-                    <div className="sm:justify-self-end">
+                    <div className="sm:justify-self-end sm:pr-1">
                       <button
                         type="button"
                         onClick={() => setReviewId(request.id)}
@@ -436,8 +412,6 @@ function TransferReviewModal({ request, onClose, onDecide }) {
         filename: d.fileName,
         mimeType: d.mimeType || guessMime(d.fileName),
         url: d.url,
-        statusLabel: documentStatusLabel(d.verificationStatus, d.url),
-        statusClassName: documentStatusClass(d.verificationStatus, d.url),
         verificationStatus: d.verificationStatus,
         rejectionReason: d.rejectionReason,
       })),
@@ -625,7 +599,6 @@ function TransferReviewModal({ request, onClose, onDecide }) {
                 onEnlarge={openLightbox}
                 onRefreshUrl={refreshDocumentUrl}
                 filenameWrap
-                statusClassName={doc.statusClassName}
               />
             ))}
           </div>

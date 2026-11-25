@@ -2,6 +2,7 @@ export const APPROVED_BARANGAYS = Object.freeze([
   "San Antonio",
   "San Isidro",
   "Old San Roque",
+  "San Jose",
 ]);
 
 const approvedBarangayLookup = new Set(

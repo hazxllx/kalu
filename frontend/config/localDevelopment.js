@@ -11,14 +11,22 @@ export function loadLocalEnvironment(mode, directory, inherited = process.env) {
     throw new Error('Local VITE_ configuration must come exclusively from .env; remove inherited VITE_ variables.');
   }
   const env = {};
+  const parsedEnvironment = {};
   const path = resolve(directory, '.env');
   if (existsSync(path)) {
     // Literal values only: no expansion from the file or the shell.
     const parsed = parseEnv(readFileSync(path, 'utf8'));
+    Object.assign(parsedEnvironment, parsed);
     for (const [name, value] of Object.entries(parsed)) {
       if (name.startsWith('VITE_')) env[name] = value;
     }
   }
+  // Accept the public backend-style aliases used by the shared environment
+  // files, while exposing only VITE_* values to the browser bundle.
+  env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL?.trim()
+    || String(parsedEnvironment.SUPABASE_URL || '').trim();
+  env.VITE_SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY?.trim()
+    || String(parsedEnvironment.SUPABASE_ANON_KEY || '').trim();
   validateLocalEnvironment(env);
   return env;
 }

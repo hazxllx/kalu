@@ -24,7 +24,7 @@ export function Toaster() {
             onOpenChange: _onOpenChange,
             ...props
           }) => (
-          <Toast key={id} {...props} data-state={open === false ? "closed" : "open"} role="status">
+          <Toast key={id} {...props} data-state={open === false ? "closed" : "open"} role={props.variant === "error" || props.variant === "destructive" ? "alert" : "status"} aria-live={props.variant === "error" || props.variant === "destructive" ? "assertive" : "polite"}>
             <div className="grid gap-1">
               {title && <ToastTitle>{title}</ToastTitle>}
               {description && <ToastDescription>{description}</ToastDescription>}
@@ -36,4 +36,4 @@ export function Toaster() {
       </ToastViewport>
     </ToastProvider>
   );
-} 
+}

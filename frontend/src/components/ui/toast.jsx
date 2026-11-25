@@ -44,6 +44,10 @@ const toastVariants = cva(
     variants: {
       variant: {
         default: "border bg-background text-foreground",
+        success: "border-brand-green/30 bg-brand-green/10 text-brand-ink",
+        info: "border-brand-blue/30 bg-brand-blue/10 text-brand-ink",
+        warning: "border-amber-300 bg-amber-50 text-amber-950",
+        error: "border-brand-danger/40 bg-brand-danger text-white",
         destructive:
           "destructive group border-destructive bg-destructive text-destructive-foreground",
       },
@@ -54,7 +58,7 @@ const toastVariants = cva(
   }
 );
 
-/** @type {React.ForwardRefRenderFunction<HTMLDivElement, DivProps & { variant?: "default" | "destructive" }>} */
+/** @type {React.ForwardRefRenderFunction<HTMLDivElement, DivProps & { variant?: "default" | "success" | "info" | "warning" | "error" | "destructive" }>} */
 const renderToast = ({ className = "", variant = "default", ...props }, ref) => (
   <div
     ref={ref}

@@ -16,10 +16,12 @@ import { openReferralPdf } from "@/features/referrals/lib/referralPdf";
 import { downloadHealthRecordPdf, medicalHistoryForRecord } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
-import { formatLongDate } from "@/lib/dateUtils";
+import { formatClinicalTime, formatLongDate } from "@/lib/dateUtils";
 import RiskBadge from "@/components/common/RiskBadge";
 import { consultationBloodPressureClassification, consultationRiskLevel, consultationRiskReasons, consultationServiceName } from "@/features/consultations/lib/consultationRisk";
 import { bloodPressureBadgeClassName } from "@/features/consultations/utils/bpClassification";
+import { canonicalRiskLevel, RISK_PRESENTATION } from "@/lib/riskLevel";
+import { ageAtDate, classifyClinicalVitals } from "../../../../../shared/clinicalScreening.js";
 
 // Uploaded laboratory files are listed separately and are not embedded in PDF exports.
 const labs = [];
@@ -68,6 +70,18 @@ const vitalCards = (vitals = {}, bpClassification = null) => {
   return cards.filter((c) => c.value !== null && c.value !== undefined && c.value !== "");
 };
 
+const vitalRiskFromScreening = (screening) => {
+  const severities = Object.values(screening?.classifications || {}).map((item) => item?.severity);
+  if (!severities.length || severities.every((severity) => severity === "unknown")) return null;
+  if (severities.includes("critical") || severities.includes("high")) return "High";
+  if (severities.includes("moderate") || severities.includes("monitor") || severities.includes("review") || severities.includes("unknown")) return "Moderate";
+  return "Low";
+};
+
+const vitalScreeningFor = (consultation, resident) => consultation
+  ? classifyClinicalVitals(consultation.vitals || {}, { ageYears: ageAtDate(resident?.birthDate, consultation.date || new Date()) })
+  : null;
+
 /* ------------------------------------------------------------------------- */
 /* Consultation History filters                                              */
 /* ------------------------------------------------------------------------- */
@@ -92,6 +106,14 @@ const bmiBadgeClass = (category) => {
   return "";
 };
 
+const statusTone = (value) => {
+  const key = String(value || "").trim().toLowerCase();
+  if (["approved", "completed", "accepted"].includes(key)) return "border-emerald-500 bg-emerald-50 text-emerald-700";
+  if (["pending", "in progress", "scheduled"].includes(key)) return "border-amber-500 bg-amber-50 text-amber-800";
+  if (["rejected", "cancelled"].includes(key)) return "border-rose-500 bg-rose-50 text-rose-700";
+  return "border-slate-300 bg-slate-50 text-slate-600";
+};
+
 const consultationFields = (consultation) => [
   [
     { label: "Chief Complaint", value: consultation.chiefComplaint },
@@ -101,8 +123,6 @@ const consultationFields = (consultation) => [
     { label: "Risk Reasons", value: consultationRiskReasons(consultation), preserveLines: true },
   ],
   [
-    { label: "Diagnosis", value: consultation.diagnosis },
-    { label: "Treatment", value: consultation.treatmentGiven },
     { label: "Recommendations", value: consultation.recommendations },
     {
       label: "Follow-up",
@@ -344,7 +364,7 @@ export default function HealthRecord() {
     setReferralDetailLoading(true);
     setReferralActionError("");
     try {
-      const data = await referralsApi.get(record.id, { ownerId: user.id, cache: "no-store" });
+      const data = await referralsApi.get(record.id, { cache: "no-store" });
       setSelectedReferral(data?.record || record);
     } catch (err) {
       setReferralActionError(err?.message || "Could not load the selected referral.");
@@ -358,7 +378,7 @@ export default function HealthRecord() {
     setReferralDownloadId(record.id);
     setReferralActionError("");
     try {
-      const data = await referralsApi.get(record.id, { ownerId: user.id, cache: "no-store" });
+      const data = await referralsApi.get(record.id, { cache: "no-store" });
       if (!data?.record?.id) throw new Error("Could not load the saved referral.");
       const url = await openReferralPdf(data.record);
       if (!url) throw new Error("Could not generate the referral document.");
@@ -928,12 +948,59 @@ export default function HealthRecord() {
               ))}
               <div className="min-w-0 rounded-lg bg-brand-bg/60 px-3 py-2.5 xl:bg-transparent xl:px-0 xl:py-0">
                 <p className="text-xs font-medium text-brand-gray">Verification</p>
-                <p className="mt-1 inline-flex max-w-full break-words border-l-2 border-brand-gold bg-brand-bg px-2.5 py-1 text-xs font-semibold text-brand-ink">
-                  {dash(resident?.verificationStatus)}
-                </p>
+                <span className={`mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full border-l-2 px-2.5 py-1 text-xs font-semibold capitalize ${statusTone(resident?.verificationStatus)}`}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />{dash(resident?.verificationStatus)}
+                </span>
               </div>
             </div>
           </Card>
+
+          {(() => {
+            const latestConsultation = latestRecord?.consultations?.[0] || null;
+            const screening = vitalScreeningFor(latestConsultation, resident);
+            const vitalRisk = vitalRiskFromScreening(screening);
+            // A consultation-level assessment is authoritative for that
+            // consultation. Only fall back to its vital-sign screening when
+            // no overall assessment was recorded on the same latest visit.
+            const consultationRisk = canonicalRiskLevel(latestConsultation?.riskLevel);
+            const risk = consultationRisk || vitalRisk;
+            const basis = consultationRisk ? "Overall health assessment" : vitalRisk ? "Vital signs assessment" : "Not available";
+            const presentation = risk ? RISK_PRESENTATION[risk] : RISK_PRESENTATION.Unassessed;
+            const reasons = consultationRisk
+              ? (latestConsultation?.riskReasons || latestRecord?.riskReasons || []).map((item) => item?.message || item).filter(Boolean)
+              : [];
+            const flagged = Object.entries(screening?.classifications || {}).filter(([, item]) => item?.severity && item.severity !== "none");
+            const assessedAt = latestConsultation?.date && latestConsultation?.time
+              ? `${latestConsultation.date}T${latestConsultation.time}`
+              : latestConsultation?.date || null;
+            const explanation = risk === "High"
+              ? "The latest recorded assessment indicates a high level of health risk and may require prompt follow-up."
+              : risk === "Moderate"
+                ? "The latest recorded assessment indicates a medium level of health risk and should be monitored."
+                : risk === "Low"
+                  ? "The latest recorded assessment found no significant risk indicators."
+                  : "No valid health risk assessment is recorded yet.";
+            return (
+              <section className={`mb-5 overflow-hidden rounded-card border border-brand-border border-l-4 ${risk === "High" || risk === "Critical" ? "border-l-rose-600 bg-rose-50/40" : risk === "Moderate" ? "border-l-amber-500 bg-amber-50/40" : risk === "Low" ? "border-l-emerald-600 bg-emerald-50/30" : "border-l-slate-400 bg-slate-50/50"}`} aria-labelledby="health-risk-heading">
+                <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(14rem,0.8fr)_minmax(0,1.5fr)] lg:items-center">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-gray">Latest Health Risk Assessment</p>
+                    <h2 id="health-risk-heading" className={`mt-2 text-3xl font-bold tracking-tight ${presentation.text}`}>{risk ? risk.toUpperCase() : "NOT ASSESSED"}</h2>
+                    <p className="mt-1 text-sm text-brand-gray">{basis}</p>
+                    {assessedAt && <p className="mt-3 text-xs text-brand-gray">Assessed: <span className="font-medium text-brand-ink">{formatDate(assessedAt)}{latestConsultation?.time ? ` · ${formatClinicalTime(assessedAt)}` : ""}</span></p>}
+                  </div>
+                  <div className="min-w-0 text-sm text-brand-gray">
+                    {risk ? <>
+                      <p className="leading-6">{explanation}</p>
+                      {reasons.length > 0 && <div className="mt-3"><p className="font-semibold text-brand-ink">Why this classification</p><ul className="mt-1 list-disc space-y-1 pl-5">{reasons.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)}</ul></div>}
+                      {flagged.length > 0 && <div className="mt-3"><p className="font-semibold text-brand-danger">Flagged readings</p><ul className="mt-1 list-disc space-y-1 pl-5">{flagged.map(([key, item]) => <li key={key}>{item.classification}{item.value != null ? ` (${item.value})` : ""}</li>)}</ul></div>}
+                      {latestRecord?.riskNextSteps && <div className="mt-3"><p className="font-semibold text-brand-ink">Recommended next steps</p><p className="mt-1 leading-6">{latestRecord.riskNextSteps}</p></div>}
+                    </> : <p className="leading-6">{explanation}</p>}
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* Section tabs — Consultation History is a subsection of this page. */}
           <div className="mb-5 flex w-full gap-1 overflow-x-auto rounded-xl border border-brand-border bg-white p-1 shadow-card dark:bg-card" role="tablist" aria-label="Health record sections">
@@ -969,12 +1036,6 @@ export default function HealthRecord() {
                 <h3 className="min-w-0 text-lg font-semibold leading-6 text-brand-ink">
                   Latest Vitals{latestRecord?.consultations?.length ? ` — ${formatDate(latestRecord.consultations[0].date)}` : ""}
                 </h3>
-                <RiskBadge
-                  level={consultationRiskLevel(latestRecord?.consultations?.[0])}
-                  mediumLabel="Medium"
-                  unassessedLabel="Not yet assessed"
-                  className="shrink-0"
-                />
               </div>
               {latestVitals.length === 0 ? (
                 <Card className="mb-5 rounded-[14px] border-slate-200 bg-white p-7 shadow-none dark:bg-card">
