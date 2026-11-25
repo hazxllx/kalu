@@ -164,6 +164,11 @@ OTP_PEPPER=<generated-by-local-configure>
 **Security Notes:**
 - Never commit `.env` files.
 - Set production variables in the hosting platform's environment settings.
+- Configure the backend's `CLIENT_URL` as exactly one canonical frontend origin:
+  `http://localhost:5173` in development and `https://kalusagap.vercel.app` in
+  production. Production rejects missing, non-HTTPS, localhost, and loopback
+  values. `CORS_ORIGIN` is a separate optional comma-separated allowlist for
+  additional staging/preview browser origins; it is never used for email links.
 - Never expose `SUPABASE_SERVICE_ROLE_KEY` to the frontend or as a `VITE_` variable. It bypasses RLS and must stay server-side.
 - Use separate credentials for staging and production.
 - Use a dedicated non-production Supabase project for isolated test work.
@@ -206,6 +211,16 @@ with sender name `Kalusagap`. Use the same host, port, SMTP login/key, and
 verified sender in the backend hosting environment as `SMTP_HOST`, `SMTP_PORT`,
 `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM`. Port 587 requires STARTTLS.
 Never store SMTP credentials in source control or expose them to the frontend.
+
+For deployed password setup, resident invitation, verification, and recovery
+links, set the backend hosting environment to `NODE_ENV=production` and
+`CLIENT_URL=https://kalusagap.vercel.app`. Set any additional API browser origins
+only in `CORS_ORIGIN`. Add `https://kalusagap.vercel.app/` and
+`https://kalusagap.vercel.app/reset-password` to the Supabase Auth redirect URL
+allowlist, and use the same public frontend as the Supabase Site URL.
+Development uses `CLIENT_URL=http://localhost:5173`; the
+personnel notification worker will not claim jobs while connected to hosted
+Supabase from development mode.
 
 ### Database Setup
 

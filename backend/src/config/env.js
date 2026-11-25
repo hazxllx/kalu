@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { assertDevelopmentEnvironment } from './localSafety.js';
+import { normalizeClientUrl } from './clientUrl.js';
 
 /**
  * KALUSAGAP — centralized backend environment & runtime configuration.
@@ -26,6 +27,9 @@ if ((process.env.NODE_ENV || 'development') !== runtimeMode) {
 const isProduction = (process.env.NODE_ENV || 'development') === 'production';
 const clientUrlValue = process.env.CLIENT_URL || '';
 const corsOriginValue = process.env.CORS_ORIGIN || '';
+const clientUrl = clientUrlValue.trim()
+  ? normalizeClientUrl(clientUrlValue, { nodeEnv: runtimeMode })
+  : '';
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -35,16 +39,12 @@ const DEVELOPMENT_CLIENT_URLS = Object.freeze([
   'http://localhost:5173',
   'http://127.0.0.1:5173',
 ]);
-const PRODUCTION_CLIENT_URLS = Object.freeze([
-  'https://kalusagap-frontend.onrender.com',
-  'https://kalusagap.vercel.app',
-]);
 
 // Fail fast on boot in production if mandatory CORS or Supabase credentials are missing,
 // preventing a misconfigured deployment from starting with degraded security or broken auth.
 if (isProduction) {
   const missing = [];
-  if (!clientUrlValue && !corsOriginValue) missing.push('CLIENT_URL or CORS_ORIGIN');
+  if (!clientUrlValue.trim()) missing.push('CLIENT_URL');
   if (!supabaseUrl) missing.push('SUPABASE_URL');
   if (!supabaseAnonKey) missing.push('SUPABASE_ANON_KEY');
   if (!supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
@@ -77,16 +77,16 @@ const parseHttpOrigin = (value) => {
   return url.origin;
 };
 
-// Combine comma-separated `CLIENT_URL` and `CORS_ORIGIN` entries with the
-// environment-appropriate defaults into a deduplicated exact-origin allowlist.
+// CORS is an allowlist. Authentication redirects always use `clientUrl` alone.
+// Development keeps both loopback browser addresses; production must explicitly
+// list any additional frontend origins in CORS_ORIGIN.
 const configuredClientUrls = [
   ...new Set(
     [
-      clientUrlValue,
-      corsOriginValue,
-      ...(isProduction ? PRODUCTION_CLIENT_URLS : DEVELOPMENT_CLIENT_URLS),
+      clientUrl,
+      ...corsOriginValue.split(','),
+      ...(!isProduction ? DEVELOPMENT_CLIENT_URLS : []),
     ]
-      .flatMap((value) => value.split(','))
       .map((origin) => origin.trim())
       .filter(Boolean)
       .map(parseHttpOrigin),
@@ -132,14 +132,11 @@ const env = {
   authRateLimitWindowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
   authRateLimitMaxRequests: Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 10,
 
-  // Browser origins allowed to call this API. `CLIENT_URL` is the canonical
-  // deployment URL; `CORS_ORIGIN` adds comma-separated staging/preview URLs.
-  // Documented production frontends and both development loopback hostnames
-  // are centralized above. No wildcard origin is permitted.
+  // Browser origins allowed to call this API. `CORS_ORIGIN` may add
+  // comma-separated staging/preview origins; it never supplies email targets.
   clientUrls: configuredClientUrls,
-  // Mail redirects require an explicitly configured canonical CLIENT_URL, not
-  // one of the implicit development CORS origins.
-  clientUrl: clientUrlValue.split(',').map((value) => value.trim()).find(Boolean) || '',
+  // One normalized origin for every authentication email redirect.
+  clientUrl,
 
   // --- Supabase (server side) ------------------------------------------------
   // The service-role key bypasses Row Level Security, so it lives ONLY here on

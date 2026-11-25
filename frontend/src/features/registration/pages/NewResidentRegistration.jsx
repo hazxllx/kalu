@@ -22,6 +22,7 @@ import {
 import { ButtonSelectGroup } from "@/components/system";
 import { REGISTRATION_OTP_LENGTH, isValidRegistrationOtp } from "@/features/registration/otp";
 import { supabase } from "@/lib/supabase";
+import { authEmailRedirectTo } from "@/lib/authEmailRedirect";
 import { useAuth } from "@/context/AuthContext";
 import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
@@ -348,7 +349,11 @@ export default function NewResidentRegistration() {
     setSendNotice("");
     try {
       if (isResend) {
-        const { error } = await supabase.auth.resend({ type: "signup", email: normalizedEmail });
+        const { error } = await supabase.auth.resend({
+          type: "signup",
+          email: normalizedEmail,
+          options: { emailRedirectTo: authEmailRedirectTo("/") },
+        });
         if (error) throw error;
       } else {
         // Supabase's Confirm Signup email (with the {{ .Token }} OTP) is triggered
@@ -388,6 +393,7 @@ export default function NewResidentRegistration() {
           email: normalizedEmail,
           password: tempPassword,
           options: {
+            emailRedirectTo: authEmailRedirectTo("/"),
             data: {
               full_name: `${form.firstName} ${form.lastName}`.trim(),
               name: `${form.firstName} ${form.lastName}`.trim(),

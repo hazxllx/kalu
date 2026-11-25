@@ -9,6 +9,7 @@ import {
 } from "@/features/registration/components/RegistrationDesign";
 import { REGISTRATION_OTP_LENGTH, isValidRegistrationOtp, sanitizeRegistrationOtp } from "@/features/registration/otp";
 import { supabase } from "@/lib/supabase";
+import { authEmailRedirectTo } from "@/lib/authEmailRedirect";
 import { registrationApi } from "@/services/api";
 import {
   normalizeRegistrationEmail,
@@ -174,14 +175,22 @@ export default function ExistingResidentActivation({ onBack }) {
     setBusy(true);
     try {
       if (isResend) {
-        const { error: resendErr } = await supabase.auth.resend({ type: "signup", email: normalizedEmail });
+        const { error: resendErr } = await supabase.auth.resend({
+          type: "signup",
+          email: normalizedEmail,
+          options: { emailRedirectTo: authEmailRedirectTo("/") },
+        });
         if (resendErr) throw resendErr;
       } else {
         // A random temp password only triggers the Confirm-Signup OTP email; the
         // resident sets their real password in Step 3.
         const tempPassword = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}K${Math.floor(Math.random() * 10)}`;
         tempPasswordRef.current = tempPassword;
-        const { data, error: signErr } = await supabase.auth.signUp({ email: normalizedEmail, password: tempPassword });
+        const { data, error: signErr } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password: tempPassword,
+          options: { emailRedirectTo: authEmailRedirectTo("/") },
+        });
         const issue = signupResponseIssue({ data, error: signErr, email: normalizedEmail });
         if (issue === "duplicate_email") {
           // The email already has an auth account — do NOT silently claim a code

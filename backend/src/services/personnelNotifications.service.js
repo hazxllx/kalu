@@ -5,6 +5,7 @@ import { emailSender, getEmailTransporter, getSmtpFailureDetails, sendSmtpMail }
 import { decryptTemporaryPassword } from '../utils/temporaryPassword.js';
 import { digestInvitationRecoverySecret } from '../utils/personnelInvitationRecovery.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
+import { authRedirectUrl, isLoopbackHostname } from '../config/clientUrl.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MANAGED_ROLES = new Set(['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']);
@@ -59,19 +60,23 @@ const emptyResult = () => ({
 });
 
 const clientOrigin = (config) => {
-  if (!config.clientUrl) throw failure('CLIENT_URL_NOT_CONFIGURED');
   try {
-    const url = new URL(config.clientUrl);
-    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-      || url.pathname !== '/' || url.search || url.hash
-      || (url.protocol === 'http:' && (!local || config.isProduction))) {
-      throw failure('CLIENT_URL_INVALID');
-    }
-    return url.origin;
+    const mode = config.nodeEnv || (config.isProduction ? 'production' : process.env.NODE_ENV || 'development');
+    const resetUrl = authRedirectUrl(config.clientUrl, '/reset-password', { nodeEnv: mode });
+    return new URL(resetUrl).origin;
   } catch {
-    throw failure('CLIENT_URL_INVALID');
+    throw failure(config.clientUrl ? 'CLIENT_URL_INVALID' : 'CLIENT_URL_NOT_CONFIGURED');
   }
+};
+
+const workerEnvironmentAllowed = (config) => {
+  const mode = config.nodeEnv || process.env.NODE_ENV || 'development';
+  if (mode === 'production' || mode === 'test') return true;
+  if (mode !== 'development' || config.supabaseMode !== 'local') return false;
+  try {
+    const url = new URL(config.supabaseUrl);
+    return ['http:', 'https:'].includes(url.protocol) && isLoopbackHostname(url.hostname);
+  } catch { return false; }
 };
 
 const eventStillValid = (job, account) => ACCESS_EVENTS.has(job.event_type)
@@ -265,6 +270,10 @@ const smtpResult = (info, message) => {
 export const processPersonnelNotifications = ({
   targetId = null, limit = 10, supabase, transport, config = env, logger = console,
 } = {}) => {
+  if (!workerEnvironmentAllowed(config)) {
+    log(logger, 'warn', null, 'WORKER_ENVIRONMENT_NOT_ALLOWED');
+    return Promise.resolve({ ...emptyResult(), errorCode: 'WORKER_ENVIRONMENT_NOT_ALLOWED' });
+  }
   if (activeBatch) return Promise.resolve({ ...emptyResult(), errorCode: 'WORKER_BUSY' });
   activeBatch = (async () => {
     const result = emptyResult();
@@ -459,6 +468,10 @@ export const startPersonnelNotificationWorker = (options = {}) => {
   const logger = options.logger || console;
   if (!options.supabase && !config.isSupabaseConfigured) {
     log(logger, 'warn', null, 'SUPABASE_NOT_CONFIGURED');
+    return async () => {};
+  }
+  if (!workerEnvironmentAllowed(config)) {
+    log(logger, 'warn', null, 'WORKER_ENVIRONMENT_NOT_ALLOWED');
     return async () => {};
   }
   const interval = Math.min(3_600_000, Math.max(10_000, Number(config.personnelNotificationIntervalMs) || 60_000));

@@ -20,6 +20,7 @@
 import { createAuthClient, getServiceClient, updateOwnPassword } from '../config/supabase.js';
 import { randomBytes } from 'node:crypto';
 import env from '../config/env.js';
+import { authRedirectUrl } from '../config/clientUrl.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import ApiError from '../utils/apiError.js';
 
@@ -2510,7 +2511,9 @@ export const supabaseRepository = {
 
   async sendAccountRecoveryEmail({ user, actorId }) {
     const supabase = createAuthClient();
-    const redirectTo = env.clientUrls[0] ? `${env.clientUrls[0]}/reset-password` : undefined;
+    let redirectTo;
+    try { redirectTo = authRedirectUrl(env.clientUrl, '/reset-password', { nodeEnv: env.nodeEnv }); }
+    catch { throw new ApiError(503, 'The account recovery request cannot be sent because the frontend URL is not configured correctly.'); }
     const admin = getServiceClient();
     const { error: auditError } = await admin.from('health_audit_logs').insert({
       actor_id: actorId,
@@ -2523,9 +2526,7 @@ export const supabaseRepository = {
     });
     throwAccountError(auditError, 'Could not record the account access reset request. No recovery request has been sent.');
 
-    const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-      ...(redirectTo ? { redirectTo } : {}),
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo });
     if (error) throw new ApiError(503, 'The password recovery request could not be confirmed. Please try again shortly.');
   },
 

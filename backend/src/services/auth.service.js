@@ -5,6 +5,7 @@ import repository from '../repositories/supabaseRepository.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
 import { AUTH_SERVICE_UNAVAILABLE_CODE, AUTH_SERVICE_UNAVAILABLE_MESSAGE, isAuthServiceUnavailable } from '../../../shared/authConnectivity.js';
 import env from '../config/env.js';
+import { authRedirectUrl, passwordRecoveryUrl } from '../config/clientUrl.js';
 import { getSmtpFailureDetails, sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service.js';
 import {
   digestInvitationRecoverySecret,
@@ -268,12 +269,9 @@ export const requestPasswordReset = async ({ email } = {}) => {
     isInitialPersonnelSetup = true;
   }
 
-  const frontendUrl = env.clientUrl || env.clientUrls?.[0];
-  if (!frontendUrl) throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
-  const passwordPath = '/reset-password';
-  // The generated token hash is verified on our app route, so preserve the
-  // previously configured Supabase redirect target for compatibility.
-  const redirectTo = `${new URL(frontendUrl).origin}/reset-password`;
+  let redirectTo;
+  try { redirectTo = authRedirectUrl(env.clientUrl, '/reset-password', { nodeEnv: env.nodeEnv }); }
+  catch { throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.'); }
   let generated;
   try {
     generated = await supabase.auth.admin.generateLink({
@@ -288,12 +286,10 @@ export const requestPasswordReset = async ({ email } = {}) => {
     throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
   }
 
-  const resetUrl = new URL(passwordPath, new URL(frontendUrl).origin);
-  resetUrl.searchParams.set('token_hash', tokenHash);
-  resetUrl.searchParams.set('type', actionType);
+  const resetUrl = passwordRecoveryUrl(env.clientUrl, tokenHash, actionType, { nodeEnv: env.nodeEnv });
   try {
-    if (isInitialPersonnelSetup) await sendPasswordSetupEmail({ email: authUser.email, setupUrl: resetUrl.href });
-    else await sendPasswordResetEmail({ email: authUser.email, resetUrl: resetUrl.href });
+    if (isInitialPersonnelSetup) await sendPasswordSetupEmail({ email: authUser.email, setupUrl: resetUrl });
+    else await sendPasswordResetEmail({ email: authUser.email, resetUrl });
   } catch (error) {
     console.error('smtp_email_delivery_failed', {
       operation: isInitialPersonnelSetup ? 'personnel_password_setup' : 'password_reset',

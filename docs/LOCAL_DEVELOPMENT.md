@@ -37,6 +37,13 @@ Never place `SUPABASE_SERVICE_ROLE_KEY` or another privileged credential in a
 `VITE_` variable or in Git. The frontend uses only its public anon/publishable
 key. RLS remains enabled.
 
+`CLIENT_URL` is the one canonical origin used for authentication email links.
+Local development uses `http://localhost:5173`; production must explicitly set
+`CLIENT_URL=https://kalusagap.vercel.app`. Do not use `CORS_ORIGIN` as a
+redirect fallback. `CORS_ORIGIN` is only for additional browser origins that
+may call the API. In development, personnel notification polling is limited to
+a loopback/local Supabase URL; a hosted Supabase connection cannot claim jobs.
+
 ## Start the application
 
 Install dependencies and start each process separately:
@@ -53,6 +60,12 @@ Open `http://localhost:5173`. The backend uses `http://localhost:5000/api`.
 
 Set `VITE_API_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY` in Vercel.
 Set backend credentials and service configuration in Render or the selected
-native hosting provider. Redeploy after changing public environment variables.
+native hosting provider. Set the backend variables `NODE_ENV=production` and
+`CLIENT_URL=https://kalusagap.vercel.app` there, then redeploy after changing
+environment variables. Keep `CORS_ORIGIN` limited to any extra permitted browser
+origins. In Supabase Auth URL configuration, set the Site URL to
+`https://kalusagap.vercel.app` and allow
+`https://kalusagap.vercel.app/` plus
+`https://kalusagap.vercel.app/reset-password` as redirect destinations.
 
 Do not configure a service-role key for browser builds.

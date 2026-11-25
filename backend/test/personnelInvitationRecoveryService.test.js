@@ -16,6 +16,7 @@ const PASSWORD = 'OwnerChosen9!';
 const RECOVERY_SECRET = 'supabase-generated-one-time-token-hash';
 const account = (patch = {}) => ({
   id: ACCOUNT_ID,
+  email: 'nurse@example.gov',
   status: 'disabled',
   approvalStatus: 'approved',
   activationRequested: false,

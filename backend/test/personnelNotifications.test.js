@@ -266,6 +266,7 @@ test('notification worker refuses to send a non-nine-character temporary credent
 test('an unconfirmed setup-required identity gets an expiring invite, never createUser', async () => {
   const f = fixture({ account: { setup_required: true }, profile: { status: 'pending_verification' }, authUser: { email_confirmed_at: null } });
   await f.run();
+  assert.equal(f.state.links[0].options.redirectTo, 'https://app.example.test/reset-password');
   assert.deepEqual(f.state.links, [{ type: 'invite', email: EMAIL, options: { redirectTo: 'https://app.example.test/reset-password' } }]);
   assert(f.state.events.indexOf('auth:read') < f.state.events.indexOf('auth:link'));
   assert(f.state.events.indexOf('link:prepare') < f.state.events.indexOf('auth:link'));
@@ -507,6 +508,24 @@ test('setup invitations use an app confirmation URL carrying the one-time token 
   assert.equal(link.searchParams.get('token_hash'), TOKEN);
   assert.equal(link.searchParams.get('type'), 'recovery');
   assert.equal(link.searchParams.has('token'), false);
+});
+
+test('production personnel invitations target the configured canonical frontend', async () => {
+  const f = fixture({
+    config: {
+      ...CONFIG,
+      nodeEnv: 'production',
+      isProduction: true,
+      clientUrl: 'https://kalusagap.vercel.app',
+    },
+    account: { setup_required: true },
+  });
+  await f.run();
+  assert.equal(f.state.links[0].options.redirectTo, 'https://kalusagap.vercel.app/reset-password');
+  const link = new URL(f.state.messages[0].text.match(/Set Your Password: (\S+)/)[1]);
+  assert.equal(link.origin, 'https://kalusagap.vercel.app');
+  assert.equal(link.searchParams.get('token_hash'), TOKEN);
+  assert.equal(link.searchParams.get('type'), 'recovery');
 });
 
 test('missing generated token hashes are never sent', async () => {
@@ -824,6 +843,28 @@ test('worker startup with no Supabase creates no timer', async (t) => {
   t.mock.method(globalThis, 'setInterval', () => assert.fail('No DB configuration must not start a worker timer'));
   const stop = startPersonnelNotificationWorker({ config: { ...CONFIG, isSupabaseConfigured: false }, logger: { warn: () => {} } });
   await stop();
+});
+
+test('hosted Supabase development cannot claim production notification jobs or start a poller', async (t) => {
+  t.mock.method(globalThis, 'setInterval', () => assert.fail('Hosted development must not start the notification worker'));
+  const f = fixture({ config: { nodeEnv: 'development', supabaseMode: 'hosted-development' } });
+  const result = await f.run({ targetId: ACCOUNT_ID });
+  assert.equal(result.errorCode, 'WORKER_ENVIRONMENT_NOT_ALLOWED');
+  assert.equal(f.state.rpcCalls.length, 0);
+  const stop = startPersonnelNotificationWorker({
+    config: { ...CONFIG, nodeEnv: 'development', supabaseMode: 'hosted-development' },
+    logger: { warn: () => {} },
+  });
+  await stop();
+});
+
+test('development notification processing is allowed only for loopback Supabase', async () => {
+  const f = fixture({ config: {
+    nodeEnv: 'development', supabaseMode: 'local', supabaseUrl: 'http://127.0.0.1:54321',
+  } });
+  const result = await f.run();
+  assert.equal(result.mailServerAccepted, 1);
+  assert.equal(f.state.rpcCalls.filter((call) => call.name === 'claim_personnel_notifications').length, 1);
 });
 
 test('worker is started only by the server entry point, not app imports', () => {

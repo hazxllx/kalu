@@ -18,6 +18,7 @@ import { assignedBarangay } from '../config/scope.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import { getServiceClient, getUserClient } from '../config/supabase.js';
 import env from '../config/env.js';
+import { authRedirectUrl } from '../config/clientUrl.js';
 import {
   ageFromDateOnly,
   CIVIL_STATUSES,
@@ -137,16 +138,9 @@ const findExistingResidentInvitationAccount = async ({ supabase, email, resident
 };
 
 const residentInvitationRedirect = () => {
-  const configuredClientUrl = String(env.clientUrl || '').trim();
   try {
-    const url = new URL(configuredClientUrl);
-    const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-      || (url.pathname && url.pathname !== '/') || url.search || url.hash
-      || (env.isProduction && (url.protocol !== 'https:' || localHost))) {
-      throw new Error('Invalid frontend origin');
-    }
-    return { origin: url.origin, redirectTo: `${url.origin}/reset-password` };
+    const redirectTo = authRedirectUrl(env.clientUrl, '/reset-password', { nodeEnv: env.nodeEnv });
+    return { origin: new URL(redirectTo).origin, redirectTo };
   } catch {
     throw new ApiError(503, 'The resident invitation cannot be sent because the public frontend URL is not configured correctly.');
   }
@@ -1899,8 +1893,7 @@ export const resendResidentInvitation = async ({ id, user } = {}) => {
     throw ApiError.tooManyRequests('An invitation was issued recently. Check the recipient inbox before requesting another; try again after one minute.');
   }
 
-  const { origin } = residentInvitationRedirect();
-  const redirectTo = `${origin}/reset-password`;
+  const { redirectTo } = residentInvitationRedirect();
   const { data: generated, error: linkError } = await supabase.auth.admin.generateLink({
     type: 'invite',
     email: authUser.email,
