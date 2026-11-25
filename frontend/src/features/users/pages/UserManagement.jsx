@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Card } from "@/components/common/Card";
 import PageHeader from "@/components/common/PageHeader";
 import TablePagination from "@/components/tables/TablePagination";
+import { ActionMenu, ActionMenuContent, ActionMenuItem, ActionMenuTrigger } from "@/components/ui/action-menu";
 import { NavTabs } from "@/layouts/NavTabsLayout";
 import DocumentPreviewCard from "@/features/verification/components/DocumentPreviewCard";
 import { useAuth } from "@/context/AuthContext";
@@ -18,7 +18,7 @@ import {
 } from "../personnelLifecycle";
 import {
   AlertTriangle, Ban, CheckCircle2, Clock, Eye, Filter, KeyRound,
-  Loader2, Mail, MoreVertical, Pencil, Plus, RotateCcw, Search, ShieldCheck,
+  Loader2, Mail, Pencil, Plus, RotateCcw, Search, ShieldCheck,
   Trash2, UserCheck, UserCog, Users, UserX, X, UserPlus, ShieldOff, MailCheck,
   KeySquare, FileText, Copy, ChevronDown,
 } from "lucide-react";
@@ -201,52 +201,27 @@ function SummaryCards({ summary, loading, error, activeStatus, onPick, personnel
 /* ------------------------------------------------------------------------- */
 
 function ActionsMenu({ items, buttonLabel = "Account actions" }) {
-  const btnRef = useRef(null);
-  const selected = useRef(false);
   const available = items.filter(Boolean);
   if (available.length === 0) return <span className="text-xs text-brand-gray">-</span>;
 
   return (
-    <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild><button
-        ref={btnRef}
-        type="button"
-        aria-label={buttonLabel}
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-brand-ink shadow-none transition-colors hover:text-brand-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-      >
-        <MoreVertical className="h-5 w-5" strokeWidth={2.2} aria-hidden="true" />
-      </button></DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          side="bottom"
-          sideOffset={6}
-          collisionPadding={12}
-          aria-label={buttonLabel}
-          onCloseAutoFocus={(event) => { if (selected.current) event.preventDefault(); selected.current = false; }}
-          className="z-[95] w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-border dark:bg-card"
-        >
-          {available.map((item) => (
-            <DropdownMenu.Item
-              key={item.key}
-              disabled={item.disabled}
-              title={item.title || undefined}
-              onSelect={() => { selected.current = true; btnRef.current?.focus(); item.onClick(); }}
-              className={`flex w-full cursor-default items-center gap-2.5 px-3 py-2 text-left text-sm outline-none transition-colors ${
-                item.disabled
-                  ? "cursor-not-allowed text-slate-400"
-                  : item.danger
-                    ? "text-brand-danger data-[highlighted]:bg-brand-danger/10"
-                    : "text-brand-ink data-[highlighted]:bg-brand-bg"
-              }`}
-            >
-              <item.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1">{item.label}</span>
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+    <ActionMenu>
+      <ActionMenuTrigger label={buttonLabel} />
+      <ActionMenuContent aria-label={buttonLabel}>
+        {available.map((item) => (
+          <ActionMenuItem
+            key={item.key}
+            icon={item.icon}
+            disabled={item.disabled}
+            title={item.title || undefined}
+            danger={item.danger}
+            onSelect={item.onClick}
+          >
+            {item.label}
+          </ActionMenuItem>
+        ))}
+      </ActionMenuContent>
+    </ActionMenu>
   );
 }
 

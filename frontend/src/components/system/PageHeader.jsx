@@ -74,7 +74,7 @@ export default function PageHeader({
               {eyebrow}
             </p>
           )}
-          <h1 className="mb-1 truncate text-[#12263F] dark:text-[#E8EDF3]"
+          <h1 className="mb-1 break-words text-[#12263F] dark:text-[#E8EDF3]"
               style={{
                 fontFamily: TYPE.h1.family,
                 fontSize: TYPE.h1.base,

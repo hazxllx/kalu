@@ -14,7 +14,7 @@
 import * as residentsService from '../services/residents.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 import ApiError from '../utils/apiError.js';
-import { getResidentRiskSummaryRecords } from '../services/residentRisk.service.js';
+import { getResidentRiskClinicalDetails as loadResidentRiskClinicalDetails, getResidentRiskSummaryRecords } from '../services/residentRisk.service.js';
 
 /**
  * Handles `GET /residents` — lists resident records within `req.user`'s geographic
@@ -113,6 +113,12 @@ export const getResidentRiskSummary = async (req, res) => {
       offset,
     },
   });
+  sendData(res, result);
+};
+
+export const getResidentRiskClinicalDetails = async (req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  const result = await loadResidentRiskClinicalDetails({ user: req.user, residentId: req.params.id });
   sendData(res, result);
 };
 

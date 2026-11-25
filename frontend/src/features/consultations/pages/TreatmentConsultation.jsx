@@ -1,5 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -12,7 +11,7 @@ import StatusBadge from "@/components/common/StatusBadge";
 import RiskBadge from "@/components/common/RiskBadge";
 import useAuthorizedData from "@/hooks/useAuthorizedData";
 import {
-  Search, FileText, Save, X, Plus, CheckCircle2, ChevronLeft, MoreVertical, Eye, AlertTriangle,
+  Search, FileText, Save, X, Plus, CheckCircle2, ChevronLeft, Eye, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -43,87 +42,13 @@ import { loadServerRows } from "@/lib/serverRows";
 import { consultationRiskLevel, consultationAssessment, consultationServiceName, consultationTemperatureWarningVisible, consultationRiskReasons, consultationFollowUp, consultationBloodPressureClassification } from "@/features/consultations/lib/consultationRisk";
 import { hasMaternalDetails, hasMaternalInformation, isMaternalHealthService } from "@/features/consultations/lib/consultationForm";
 import ButtonSelectGroup from "@/components/system/ButtonSelectGroup";
+import { ActionMenu, ActionMenuContent, ActionMenuItem, ActionMenuTrigger } from "@/components/ui/action-menu";
 import {
   getManilaDateTime, calculateConsultationBmi, validateConsultationVitals,
   validateConsultationDateTime, normalizeConsultationClinicalText,
   clinicalTextIndicatesPregnancy,
   validateConsultationMedications,
 } from "../../../../../shared/consultationClinical.js";
-
-function ConsultationActionMenu({ anchor, onClose, onView, onEdit }) {
-  const menuRef = useRef(null);
-
-  useLayoutEffect(() => {
-    const menu = menuRef.current;
-    const anchorCell = anchor.parentElement;
-    const gap = 4;
-    const position = () => {
-      const trigger = anchor.getBoundingClientRect();
-      const { clientWidth, clientHeight } = document.documentElement;
-      const viewport = window.visualViewport;
-      const left = (viewport?.offsetLeft ?? 0) + gap;
-      const top = (viewport?.offsetTop ?? 0) + gap;
-      const width = Math.min(viewport?.width ?? clientWidth, clientWidth);
-      const height = Math.min(viewport?.height ?? clientHeight, clientHeight);
-      const right = left + width - 2 * gap;
-      const bottom = top + height - 2 * gap;
-
-      // Keep the original shrink-to-fit width from the Actions cell.
-      menu.style.setProperty("--menu-max-width", `min(${Math.max(0, width - 2 * gap)}px, max(10rem, ${anchorCell.clientWidth}px))`);
-      menu.style.maxHeight = `${Math.max(0, height - 2 * gap)}px`;
-      const { width: menuWidth, height: menuHeight } = menu.getBoundingClientRect();
-      const below = trigger.bottom + gap;
-      const above = trigger.top - gap - menuHeight;
-      const preferredTop = below + menuHeight <= bottom ? below : above;
-      menu.style.left = `${Math.max(left, Math.min(trigger.right - menuWidth, right - menuWidth))}px`;
-      menu.style.top = `${Math.max(top, Math.min(preferredTop, bottom - menuHeight))}px`;
-    };
-
-    const dismissOutside = (event) => {
-      if (!menu.contains(event.target) && !anchor.contains(event.target)) onClose();
-    };
-    const dismissOnEscape = (event) => {
-      if (event.key !== "Escape") return;
-      anchor.focus({ preventScroll: true });
-      onClose();
-    };
-
-    position();
-    menu.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
-    const resizeObserver = new ResizeObserver(position);
-    resizeObserver.observe(menu);
-    resizeObserver.observe(anchorCell);
-    const anchorObserver = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting) onClose();
-    });
-    anchorObserver.observe(anchor);
-    window.addEventListener("scroll", position, { capture: true, passive: true });
-    window.addEventListener("resize", position);
-    const viewport = window.visualViewport;
-    viewport?.addEventListener("scroll", position);
-    viewport?.addEventListener("resize", position);
-    document.addEventListener("pointerdown", dismissOutside, true);
-    document.addEventListener("keydown", dismissOnEscape);
-    return () => {
-      resizeObserver.disconnect();
-      anchorObserver.disconnect();
-      window.removeEventListener("scroll", position, true);
-      window.removeEventListener("resize", position);
-      viewport?.removeEventListener("scroll", position);
-      viewport?.removeEventListener("resize", position);
-      document.removeEventListener("pointerdown", dismissOutside, true);
-      document.removeEventListener("keydown", dismissOnEscape);
-    };
-  }, [anchor, onClose]);
-
-  return createPortal(
-    <div ref={menuRef} role="menu" className="fixed left-0 top-0 z-40 w-max min-w-[min(10rem,var(--menu-max-width))] max-w-[var(--menu-max-width)] overflow-auto rounded-btn border border-brand-border bg-white p-1 text-slate-700 shadow-lg dark:text-slate-300">
-      <button type="button" role="menuitem" onClick={onView} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>
-      {onEdit && <button type="button" role="menuitem" onClick={onEdit} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><FileText className="h-4 w-4 text-brand-gray" /> Edit Consultation</button>}
-    </div>,
-    document.body,
-  );
-}
 
 const inputCls = (error) =>
   `w-full rounded-btn border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card dark:text-foreground dark:border-border ${
@@ -1016,7 +941,6 @@ export default function TreatmentConsultation() {
   const displayedRecords = focusedId
     ? focusedRecord.data ? [focusedRecord.data] : []
     : filteredRecordRows.slice((recordPage - 1) * recordPageSize, recordPage * recordPageSize);
-  const actionRow = openActionMenu && displayedRecords.find((row) => row.id === openActionMenu.id);
   useEffect(() => { setRecordPage(1); }, [recordSearch, recordDateFrom, recordDateTo, recordRisk, recordFollowUp, recordSort]);
   useEffect(() => {
     setRecordPage((page) => Math.min(page, Math.max(1, Math.ceil(filteredRecordRows.length / recordPageSize))));
@@ -1788,7 +1712,7 @@ export default function TreatmentConsultation() {
               columns={columns}
               rows={displayedRecords}
               dense={isHealthSupervisor}
-              renderCell={(key, row) => {
+              renderCell={(key, row, presentation) => {
                 if (key === "resident")
                   return (
                     <div className="flex items-center gap-2.5">
@@ -1822,26 +1746,28 @@ export default function TreatmentConsultation() {
                   const followUp = consultationFollowUp(row);
                   return <StatusBadge value={followUp.status} className="whitespace-nowrap px-2 py-0.5 text-[11px]" />;
                 }
-                if (key === "actions")
+                if (key === "actions") {
+                  const menuId = `${presentation}:${row.id}`;
                   return (
                     <div className="flex justify-center">
-                      <button type="button" onClick={(event) => {
-                        const anchor = event.currentTarget;
-                        setOpenActionMenu((current) => current?.anchor === anchor ? null : { id: row.id, anchor });
-                      }} className="inline-flex h-8 w-8 items-center justify-center rounded-btn text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" aria-label={`Actions for ${row.resident?.name || "consultation"}`} aria-haspopup="menu" aria-expanded={openActionMenu?.id === row.id}>
-                        <MoreVertical className="h-4 w-4" aria-hidden="true" />
-                      </button>
+                      <ActionMenu
+                        open={openActionMenu === menuId}
+                        onOpenChange={(open) => setOpenActionMenu(open ? menuId : null)}
+                      >
+                        <ActionMenuTrigger label={`Actions for ${row.resident?.name || "consultation"}`} />
+                        <ActionMenuContent aria-label={`Actions for ${row.resident?.name || "consultation"}`}>
+                          <ActionMenuItem icon={Eye} onSelect={() => openRecord(row)}>View Details</ActionMenuItem>
+                          {canEditConsultation && !consultationDateIsPast(row) && (
+                            <ActionMenuItem icon={FileText} onSelect={() => openRecord(row, true)}>Edit Consultation</ActionMenuItem>
+                          )}
+                        </ActionMenuContent>
+                      </ActionMenu>
                     </div>
                   );
+                }
                 return row[key];
               }}
             />
-            {actionRow && <ConsultationActionMenu
-              anchor={openActionMenu.anchor}
-              onClose={closeActionMenu}
-              onView={() => openRecord(actionRow)}
-              onEdit={canEditConsultation && !consultationDateIsPast(actionRow) ? () => openRecord(actionRow, true) : null}
-            />}
             {!focusedId && filteredRecordRows.length > 0 && <TablePagination total={filteredRecordRows.length} page={recordPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }} className="mt-3" />}
             {focusedId ? null : loading ? (
               <p className="py-10 text-center text-sm text-brand-gray">Loading consultations...</p>

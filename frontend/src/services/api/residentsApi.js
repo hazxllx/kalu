@@ -6,6 +6,7 @@ import { api } from './apiClient.js';
  *
  * Live endpoints (role-scoped: Health Supervisor / PHN / MHO — NOT BHW):
  *   GET  /residents        directory listing + search, scope-enforced
+ *   GET  /residents/risk-summary/:id/clinical-details  selected resident assessment history
  *   POST /residents        register a resident (validated, duplicate-guarded)
  *   GET  /residents/:id    single record (within the caller's scope)
  *   PUT  /residents/:id    permitted demographic corrections
@@ -14,6 +15,7 @@ export const residentsApi = {
   list: (params, options = {}) => api.get('/residents', { ...options, params }),
   directoryFilters: (options = {}) => api.get('/residents/directory-filters', options),
   riskSummary: (params = {}, options = {}) => api.get('/residents/risk-summary', { ...options, params, cache: 'no-store' }),
+  riskClinicalDetails: (id, options = {}) => api.get(`/residents/risk-summary/${encodeURIComponent(id)}/clinical-details`, { ...options, cache: 'no-store' }),
   get: (id, options = {}) => api.get(`/residents/${id}`, options),
   healthHistory: (id, options = {}) => api.get(`/residents/${encodeURIComponent(id)}/health-history`, { ...options, cache: 'no-store' }),
   create: (payload, options) => api.post('/residents', payload, options),

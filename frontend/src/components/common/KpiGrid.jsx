@@ -7,9 +7,10 @@ import React from "react";
  *
  * Responsive breakpoints:
  * - Mobile (default): 1 column
- * - Tablet (sm): 2 columns
- * - Desktop (lg): 3 columns
- * - Wide desktop (xl): 4 columns
+ * - Mobile: 1 column (2 from 640px when space allows)
+ * - Tablet: 2 columns
+ * - Laptop: 3 columns
+ * - Desktop: 4 columns
  *
  * When only 3 KPIs exist, uses 3-column layout on desktop for balance.
  * Maintains consistent gap spacing and alignment.
@@ -34,8 +35,8 @@ export default function KpiGrid({
   const isThreeCard = count === 3;
   const gridClass = `grid w-full ${gap} ${
     isThreeCard
-      ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-      : "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"
+      ? "grid-cols-1 sm:grid-cols-2 laptop:grid-cols-3"
+      : "grid-cols-1 sm:grid-cols-2 laptop:grid-cols-3 desktop:grid-cols-4"
   }`;
 
   return <div className={`${gridClass} ${className}`}>{children}</div>;

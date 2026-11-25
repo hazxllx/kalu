@@ -38,6 +38,11 @@ const errorHandler = (err, req, res, next) => {
   const statusCode = err.statusCode || 500;
   const isServerError = statusCode >= 500;
   const clinicalRequest = /(?:^|\/)(?:intake|phn)(?:\/|$)/.test(req.path || '');
+  const safeClinicalDetailsCode = [
+    'RISK_CLINICAL_DETAILS_SCHEMA_UNAVAILABLE',
+    'RISK_CLINICAL_DETAILS_CONNECTION_ERROR',
+    'RISK_CLINICAL_DETAILS_INVALID_RESPONSE',
+  ].includes(err.code);
 
   if (clinicalRequest) {
     // Database error messages and URL identifiers can contain clinical data.
@@ -61,7 +66,7 @@ const errorHandler = (err, req, res, next) => {
 
   const message = clinicalRequest && isServerError
     ? 'The clinical operation could not be confirmed. Your entries are still available; retry using the same form.'
-    : isServerError && env.isProduction && err.code !== 'ACCOUNT_CREATED_EMAIL_FAILED'
+    : isServerError && env.isProduction && err.code !== 'ACCOUNT_CREATED_EMAIL_FAILED' && !safeClinicalDetailsCode
     ? 'Something went wrong. Please try again later.'
     : err.message || 'Unexpected error';
 

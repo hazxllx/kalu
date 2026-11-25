@@ -39,7 +39,9 @@ export default function DataTable({
 }) {
   const responsiveTableClass = mobileCards ? (mobileBreakpoint === "lg" ? "hidden lg:table" : "hidden md:table") : "";
   const responsiveCardsClass = mobileBreakpoint === "lg" ? "lg:hidden" : "md:hidden";
-  const cellValue = (column, row) => column.render ? column.render(row) : renderCell ? renderCell(column.key, row) : row[column.key];
+  const cellValue = (column, row, presentation) => column.render
+    ? column.render(row, presentation)
+    : renderCell ? renderCell(column.key, row, presentation) : row[column.key];
   const alignClass = (column) => column.align === "right" ? "text-right" : column.align === "center" ? "text-center" : "text-left";
   return (
     <div
@@ -68,7 +70,7 @@ export default function DataTable({
             >
               {columns.map((c) => (
                  <td key={c.key} className={`${compact ? "px-3 py-2" : "px-5 py-4"} ${alignClass(c)} ${c.wrap ? "whitespace-normal break-words leading-snug" : "whitespace-nowrap"} ${c.className || ""} text-slate-700 dark:text-slate-300`}>
-                   {cellValue(c, row)}
+                   {cellValue(c, row, "table")}
                  </td>
               ))}
             </motion.tr>
@@ -97,7 +99,7 @@ export default function DataTable({
                       {c.mobileLabel || c.label}
                     </dt>
                      <dd className={`text-sm text-slate-700 dark:text-slate-300 break-words ${c.align === "right" ? "sm:text-right" : ""}`}>
-                       {cellValue(c, row)}
+                       {cellValue(c, row, "card")}
                     </dd>
                   </div>
            ))}

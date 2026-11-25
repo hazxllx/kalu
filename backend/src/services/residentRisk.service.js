@@ -237,6 +237,73 @@ export const getResidentRiskSummaryRecords = async ({ user, filters = {}, supaba
   return data;
 };
 
+const clinicalDetailsSchemaErrorCodes = new Set([
+  'PGRST202', 'PGRST203', 'PGRST204', 'PGRST205', '3F000', '42P01', '42703', '42883',
+]);
+const isClinicalDetailsNetworkError = (error) => error instanceof TypeError
+  || error?.name === 'FetchError'
+  || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(error?.code || error?.cause?.code)
+  || /failed to fetch|network request failed|fetch failed/i.test(error?.message || '');
+
+export const getResidentRiskClinicalDetails = async ({ user, residentId, supabase = getServiceClient() } = {}) => {
+  if (!user?.id || !['health_supervisor', 'phn', 'mho'].includes(user.role)) {
+    throw ApiError.forbidden('Resident clinical details are not available to this account.');
+  }
+  if (!user.municipalityId) throw ApiError.forbidden('An assigned municipality is required to view resident clinical details.');
+  if (typeof residentId !== 'string' || !residentId.trim() || residentId.length > 200) {
+    throw ApiError.badRequest('A valid resident ID is required.');
+  }
+  let response;
+  try {
+    response = await supabase.rpc('resident_risk_clinical_details', {
+      p_actor_id: user.id,
+      p_resident_id: residentId,
+    });
+  } catch (error) {
+    if (isClinicalDetailsNetworkError(error)) {
+      throw new ApiError(503, 'Clinical details could not be loaded because the database connection failed. Please retry.')
+        .withCode('RISK_CLINICAL_DETAILS_CONNECTION_ERROR');
+    }
+    throw error;
+  }
+  const { data, error } = response || {};
+  if (error?.code === '42501') throw ApiError.forbidden('Resident clinical details are outside the current account scope.');
+  if (error?.code === '22023') throw ApiError.badRequest('A valid resident ID is required.');
+  if (error && clinicalDetailsSchemaErrorCodes.has(error.code)) {
+    throw new ApiError(503, 'The clinical details database function or schema is unavailable. Contact a system administrator to apply pending migrations and refresh the API schema.')
+      .withCode('RISK_CLINICAL_DETAILS_SCHEMA_UNAVAILABLE');
+  }
+  if (error && isClinicalDetailsNetworkError(error)) {
+    throw new ApiError(503, 'Clinical details could not be loaded because the database connection failed. Please retry.')
+      .withCode('RISK_CLINICAL_DETAILS_CONNECTION_ERROR');
+  }
+  if (error) {
+    throw new ApiError(503, 'Clinical details could not be loaded. Please retry.')
+      .withCode('RISK_CLINICAL_DETAILS_UNAVAILABLE');
+  }
+  if (!data || data.residentId !== residentId || data.resident?.id !== residentId
+    || !Array.isArray(data.assessments) || !Array.isArray(data.riskFactors)) {
+    throw new ApiError(502, 'The clinical details response did not match the requested resident.')
+      .withCode('RISK_CLINICAL_DETAILS_INVALID_RESPONSE');
+  }
+  return {
+    ...data,
+    assessments: data.assessments.map((assessment) => {
+      const assessedAt = assessment.assessmentAt || assessment.createdAt || null;
+      const clinicalScreening = classifyClinicalVitals(assessment.measurements || {}, {
+        ageYears: ageAtDate(data.birthDate, assessedAt || new Date()),
+        pregnancy: assessment.assessmentDetails?.clinicalContext?.pregnancy
+          || assessment.assessmentDetails?.clinicalContext?.pregnancyStatus
+          || null,
+      });
+      return {
+        ...assessment,
+        clinicalScreening: { ...clinicalScreening, assessmentAt: assessedAt },
+      };
+    }),
+  };
+};
+
 export const getHighRiskResidents = async ({ barangay = null, municipalityId = null, repo = repository, user = null, supabase, limit = 100, offset = 0, includeTotal = false } = {}) => {
   if (repo.driver === 'supabase') {
     const result = await sqlRiskSummary({ user, barangay, municipalityId, limit, offset, supabase });

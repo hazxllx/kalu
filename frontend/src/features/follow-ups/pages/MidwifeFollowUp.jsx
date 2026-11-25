@@ -1,7 +1,6 @@
 // @ts-nocheck
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import FormModal from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
@@ -12,7 +11,8 @@ import PriorityBadge from "@/features/follow-ups/components/PriorityBadge";
 import FollowUpStatusBadge, { STATUS_DOTS } from "@/features/follow-ups/components/FollowUpStatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
-import { Search, Plus, Calendar, MapPin, X, CheckCircle2, MoreVertical, AlertTriangle, Loader2 } from "lucide-react";
+import { Search, Plus, Calendar, MapPin, X, CheckCircle2, AlertTriangle, Loader2, Eye, Pencil, RefreshCw, MessageSquareText, ClipboardCheck, Ban } from "lucide-react";
+import { ActionMenu, ActionMenuContent, ActionMenuItem, ActionMenuTrigger } from "@/components/ui/action-menu";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
@@ -665,169 +665,24 @@ export default function MidwifeFollowUp() {
       canComplete: canCompleteFollowUp,
       canRecordVisit,
     });
-    const triggerRef = useRef(null);
-    const menuRef = useRef(null);
-    const [menuPosition, setMenuPosition] = useState(null);
-
-    useLayoutEffect(() => {
-      if (!isOpen) {
-        setMenuPosition(null);
-        return undefined;
-      }
-
-      const updatePosition = () => {
-        const trigger = triggerRef.current;
-        const menu = menuRef.current;
-        if (!trigger || !menu) return;
-
-        const triggerRect = trigger.getBoundingClientRect();
-        const menuRect = menu.getBoundingClientRect();
-        const margin = 8;
-        const left = Math.max(
-          margin,
-          Math.min(triggerRect.right - menuRect.width, window.innerWidth - menuRect.width - margin),
-        );
-        const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
-        const spaceAbove = triggerRect.top - margin;
-        const preferredTop = spaceBelow >= menuRect.height || spaceBelow >= spaceAbove
-          ? triggerRect.bottom + 4
-          : triggerRect.top - menuRect.height - 4;
-        const top = Math.max(
-          margin,
-          Math.min(preferredTop, window.innerHeight - menuRect.height - margin),
-        );
-        setMenuPosition({ left, top });
-      };
-
-      updatePosition();
-      window.addEventListener("resize", updatePosition);
-      document.addEventListener("scroll", updatePosition, true);
-      return () => {
-        window.removeEventListener("resize", updatePosition);
-        document.removeEventListener("scroll", updatePosition, true);
-      };
-    }, [isOpen]);
-
-    useEffect(() => {
-      if (!isOpen) return undefined;
-      const onPointerDown = (event) => {
-        if (
-          !triggerRef.current?.contains(event.target) &&
-          !menuRef.current?.contains(event.target)
-        ) {
-          setOpenActionMenu(null);
-        }
-      };
-      const onKeyDown = (event) => {
-        if (event.key === "Escape") {
-          setOpenActionMenu(null);
-          triggerRef.current?.focus();
-        }
-      };
-      document.addEventListener("pointerdown", onPointerDown);
-      document.addEventListener("keydown", onKeyDown);
-      return () => {
-        document.removeEventListener("pointerdown", onPointerDown);
-        document.removeEventListener("keydown", onKeyDown);
-      };
-    }, [isOpen]);
 
     return (
-      <>
-        <button
-          ref={triggerRef}
-          type="button"
-          onClick={() => setOpenActionMenu(isOpen ? null : followUp.id)}
-          className="clinical-action inline-flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-          aria-label={`Actions for ${followUp.resident}`}
-          aria-haspopup="menu"
-          aria-expanded={isOpen}
-        >
-          <MoreVertical className="w-4 h-4" />
-        </button>
-        {isOpen && typeof document !== "undefined" && createPortal(
-          <div
-            ref={menuRef}
-            role="menu"
-            className={`fixed z-[60] max-h-[calc(100vh-1rem)] w-56 overflow-y-auto rounded-lg border border-brand-border bg-white py-1 shadow-lg dark:border-border dark:bg-card ${supervisor ? "supervisor-menu" : ""}`}
-            style={{
-              left: menuPosition?.left ?? 0,
-              top: menuPosition?.top ?? 0,
-              visibility: menuPosition ? "visible" : "hidden",
-            }}
-          >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => handleActionClick('view', followUp)}
-                className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
-              >
-                View Details
-              </button>
-              {actions.edit && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleActionClick('edit', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
-                >
-                  Edit / Reschedule
-                </button>
-              )}
-              {actions.missed && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleActionClick('missed', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
-                >
-                  Mark Missed
-                </button>
-              )}
-              {actions.updateStatus && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleActionClick('updateStatus', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
-                >
-                  Update Status
-                </button>
-              )}
-              {actions.addRemarks && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleActionClick('addRemarks', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
-                >
-                  Add Remarks
-                </button>
-              )}
-              {actions.recordVisit && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleActionClick('recordVisit', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
-                >
-                  {followUp.consultation?.id ? "Continue Consultation" : followUp.status === "Ongoing" ? "Continue Follow-Up" : /vaccin|immuniz/i.test(String(followUp.purpose || "")) ? "Start Vaccination" : /consult|check.?up|clinical/i.test(String(followUp.purpose || "")) ? "Start Consultation" : "Start Follow-Up"}
-                </button>
-              )}
-              {actions.cancel && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleActionClick('cancel', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-danger transition-colors hover:bg-brand-danger/5 dark:hover:bg-destructive/10"
-                >
-                  Cancel Follow-up
-                </button>
-              )}
-          </div>,
-          document.body,
-        )}
-      </>
+      <ActionMenu open={isOpen} onOpenChange={(open) => setOpenActionMenu(open ? followUp.id : null)}>
+        <ActionMenuTrigger label={`Actions for ${followUp.resident}`} />
+        <ActionMenuContent aria-label={`Actions for ${followUp.resident}`}>
+          <ActionMenuItem icon={Eye} onSelect={() => handleActionClick("view", followUp)}>View Details</ActionMenuItem>
+          {actions.edit && <ActionMenuItem icon={Pencil} onSelect={() => handleActionClick("edit", followUp)}>Edit / Reschedule</ActionMenuItem>}
+          {actions.missed && <ActionMenuItem icon={AlertTriangle} onSelect={() => handleActionClick("missed", followUp)}>Mark Missed</ActionMenuItem>}
+          {actions.updateStatus && <ActionMenuItem icon={RefreshCw} onSelect={() => handleActionClick("updateStatus", followUp)}>Update Status</ActionMenuItem>}
+          {actions.addRemarks && <ActionMenuItem icon={MessageSquareText} onSelect={() => handleActionClick("addRemarks", followUp)}>Add Remarks</ActionMenuItem>}
+          {actions.recordVisit && (
+            <ActionMenuItem icon={ClipboardCheck} onSelect={() => handleActionClick("recordVisit", followUp)}>
+              {followUp.consultation?.id ? "Continue Consultation" : followUp.status === "Ongoing" ? "Continue Follow-Up" : /vaccin|immuniz/i.test(String(followUp.purpose || "")) ? "Start Vaccination" : /consult|check.?up|clinical/i.test(String(followUp.purpose || "")) ? "Start Consultation" : "Start Follow-Up"}
+            </ActionMenuItem>
+          )}
+          {actions.cancel && <ActionMenuItem icon={Ban} danger onSelect={() => handleActionClick("cancel", followUp)}>Cancel Follow-up</ActionMenuItem>}
+        </ActionMenuContent>
+      </ActionMenu>
     );
   };
 

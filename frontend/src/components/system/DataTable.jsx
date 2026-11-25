@@ -36,6 +36,7 @@ export default function DataTable({
   loading = false,
   stickyFirst = true,
   stickyLast = false,
+  mobileCards = true,
   className = "",
   ...toolbarProps
 }) {
@@ -97,7 +98,7 @@ export default function DataTable({
   }
 
   return (
-    <div className={`min-w-0 overflow-hidden rounded-[8px] border border-[#D6DEE8] bg-white dark:border-[#2A3645] dark:bg-[#131E2C] ${className}`}>
+    <div className={`responsive-data-table min-w-0 overflow-hidden rounded-[8px] border border-[#D6DEE8] bg-white dark:border-[#2A3645] dark:bg-[#131E2C] ${className}`}>
       <div className="flex flex-col gap-3 border-b border-[#E7ECF1] bg-[#F4F6FA] px-4 py-3 dark:border-[#2A3645] dark:bg-[#0D1826] sm:flex-row sm:items-center sm:justify-between">
         {primaryAction && <div>{primaryAction}</div>}
         <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
@@ -139,7 +140,7 @@ export default function DataTable({
         )}
       </div>
 
-      <div className="table-scroll overflow-x-auto">
+      <div className={`${mobileCards ? "hidden md:block" : "block"} table-scroll min-w-0 overflow-x-auto`}>
         <table className="min-w-[640px] text-[13px]">
           <thead className="sticky top-0 bg-[#F4F6FA] text-[11px] font-semibold uppercase tracking-[0.08em] text-[#54637A] dark:bg-[#0D1826] dark:text-[#9AA7B5]">
             <tr>
@@ -196,6 +197,42 @@ export default function DataTable({
           </tbody>
         </table>
       </div>
+
+      {mobileCards && (
+        <div className="divide-y divide-[#E7ECF1] md:hidden dark:divide-[#2A3645]">
+          {filteredRows.length === 0 ? (
+            <p className="px-4 py-8 text-center text-[13px] text-[#54637A] dark:text-[#9AA7B5]">
+              {emptyMessage}
+            </p>
+          ) : (
+            filteredRows.map((row, i) => (
+              <article
+                key={row[rowKey] ?? i}
+                onClick={() => onRowClick && onRowClick(row)}
+                className={`min-w-0 space-y-3 p-4 ${i % 2 === 1 ? "bg-[#FBFCFE] dark:bg-[#0E1A29]" : "bg-white dark:bg-[#131E2C]"} ${onRowClick ? "cursor-pointer" : ""}`}
+              >
+                <dl className="grid min-w-0 grid-cols-1 gap-3">
+                  {columns.map((col) => (
+                    <div key={col.key} className="grid min-w-0 grid-cols-[minmax(6rem,0.8fr)_minmax(0,1.2fr)] items-start gap-3">
+                      <dt className="min-w-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#54637A] dark:text-[#9AA7B5]">
+                        {col.label}
+                      </dt>
+                      <dd className={`min-w-0 break-words text-right text-[13px] text-[#12263F] dark:text-[#E8EDF3] ${col.align === "right" ? "tabular-nums" : ""}`}>
+                        {renderCell ? renderCell(col.key, row) : row[col.key] ?? "—"}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                {rowActions && (
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#E7ECF1] pt-3 dark:border-[#2A3645]">
+                    {rowActions(row)}
+                  </div>
+                )}
+              </article>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

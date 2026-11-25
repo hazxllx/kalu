@@ -74,9 +74,12 @@ export default function DashboardLayout({ roleKey }) {
   const sidebarPreferenceKey = `kalusagap.sidebar.collapsed.v1:${user?.id || roleKey}`;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
-      return window.localStorage.getItem(sidebarPreferenceKey) === "true";
+      const preference = window.localStorage.getItem(sidebarPreferenceKey);
+      if (preference !== null) return preference === "true";
+      return window.matchMedia("(min-width: 768px) and (max-width: 1023px)").matches;
     } catch {
-      return false;
+      return typeof window !== "undefined" &&
+        window.matchMedia("(min-width: 768px) and (max-width: 1023px)").matches;
     }
   });
   const [open, setOpen] = useState(false);
@@ -662,7 +665,7 @@ export default function DashboardLayout({ roleKey }) {
   return (
     <div className={`kalusagap-shell min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""} ${roleKey === "admin" ? "admin-shell" : ""}`}>
       <aside
-        className={`app-sidebar hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : roleKey === "admin" ? "w-[272px]" : isSupervisor ? "w-64" : "w-72"}`}
+        className={`app-sidebar hidden md:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : roleKey === "admin" ? "w-[272px]" : isSupervisor ? "w-64" : "w-72"}`}
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
       >
         {/* Brand header — fixed */}
@@ -717,7 +720,7 @@ export default function DashboardLayout({ roleKey }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setOpen(false)}
-              className="fixed inset-0 bg-slate-900/40 z-40 lg:hidden"
+              className="fixed inset-0 bg-slate-900/40 z-40 md:hidden"
             />
 
             <motion.aside
@@ -726,7 +729,7 @@ export default function DashboardLayout({ roleKey }) {
               exit={{ x: -280 }}
               transition={{ type: "spring", damping: 26, stiffness: 240 }}
               aria-label="Mobile navigation"
-              className="app-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar lg:hidden"
+              className="app-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar md:hidden"
             >
               <div className={`shrink-0 flex h-16 items-center justify-between border-b border-slate-200 dark:border-border ${roleKey === "admin" ? "gap-2 px-4" : "gap-3 px-4"}`}>
                 <SidebarBrand />
@@ -766,14 +769,14 @@ export default function DashboardLayout({ roleKey }) {
         )}
       </AnimatePresence>
 
-      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : roleKey === "admin" ? "lg:pl-[272px]" : isSupervisor ? "lg:pl-64" : "lg:pl-72"}`}>
+      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "md:pl-20" : roleKey === "admin" ? "md:pl-[272px]" : isSupervisor ? "md:pl-64" : "md:pl-72"}`}>
         <header className={`app-header sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 ${roleKey === "admin" ? "md:px-5" : "md:px-6"}`}>
           <button
             onClick={() => setOpen(true)}
             type="button"
             aria-label="Open navigation menu"
             aria-expanded={open}
-            className="lg:hidden text-slate-600 dark:text-slate-300"
+            className="md:hidden text-slate-600 dark:text-slate-300"
           >
             <Menu className="w-6 h-6" />
           </button>

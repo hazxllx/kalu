@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Activity, AlertTriangle, Eye, Search, X } from 'lucide-react';
@@ -6,6 +6,7 @@ import PageHeader from '@/components/common/PageHeader';
 import TablePagination from '@/components/tables/TablePagination';
 import { residentsApi } from '@/services/api/residentsApi';
 import { useAuth } from '@/context/AuthContext';
+import { usePermissions } from '@/context/PermissionsContext';
 import { formatShortDate } from '@/lib/dateUtils';
 
 const pageSize = 25;
@@ -21,6 +22,56 @@ const riskTone = {
 
 const prettyDate = (value) => value ? formatShortDate(value) || '—' : '—';
 const readError = (error) => error?.payload?.error?.message || error?.message || 'Resident risk information could not be loaded.';
+const clinicalDetailsError = (error) => {
+  const code = error?.payload?.error?.code || error?.code;
+  if (code === 'RISK_CLINICAL_DETAILS_SCHEMA_UNAVAILABLE') {
+    return error?.payload?.error?.message
+      || 'The clinical details database function or schema is unavailable. Contact a system administrator.';
+  }
+  if (code === 'RISK_CLINICAL_DETAILS_CONNECTION_ERROR' || error?.status === undefined
+    || error?.status === 0 || error instanceof TypeError) {
+    return 'Connection error. Check your internet connection and retry.';
+  }
+  if (code === 'RISK_CLINICAL_DETAILS_INVALID_RESPONSE') {
+    return 'The clinical details response could not be verified. Contact a system administrator.';
+  }
+  return error?.status >= 500
+    ? 'Clinical details could not be loaded. Please retry.'
+    : readError(error);
+};
+const labelize = (value) => String(value || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ')
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+const isRecorded = (value) => value !== null && value !== undefined && String(value).trim() !== '';
+const measurementUnits = {
+  bp: ' mmHg', bloodPressure: ' mmHg', systolic: ' mmHg', diastolic: ' mmHg', hr: ' bpm', heartRate: ' bpm',
+  rr: ' breaths/min', respiratoryRate: ' breaths/min', o2sat: '%', oxygenSaturation: '%',
+  temperature: ' °C', heightCm: ' cm', height: ' cm', weightKg: ' kg', weight: ' kg',
+  bloodSugar: ' mg/dL', bmi: ' kg/m²',
+};
+const measurementLabels = {
+  bp: 'Blood pressure', hr: 'Heart rate', rr: 'Respiratory rate', o2sat: 'Oxygen saturation',
+  heightCm: 'Height', weightKg: 'Weight', bmiCategory: 'BMI category', bloodSugar: 'Blood sugar',
+};
+const clinicalValue = (key, value) => {
+  if (!isRecorded(value)) return 'Not assessed';
+  if (typeof value === 'object') return JSON.stringify(value);
+  const unit = measurementUnits[key] || '';
+  return unit && !String(value).toLowerCase().includes(unit.trim().toLowerCase()) ? `${value}${unit}` : String(value);
+};
+const classificationKey = {
+  bp: 'bloodPressure', hr: 'heartRate', rr: 'respiratoryRate', o2sat: 'oxygenSaturation',
+  height: 'heightCm', weight: 'weightKg', bloodSugar: 'bloodSugar',
+};
+const fieldEntries = (value, prefix = '') => {
+  if (value !== null && typeof value === 'object') {
+    const entries = Array.isArray(value) ? value.map((item, index) => [String(index + 1), item]) : Object.entries(value);
+    return entries.flatMap(([key, item]) => {
+      if (/^(id|code|ruleId|reference|source|residentId|consultationId)$/i.test(key)) return [];
+      return fieldEntries(item, prefix ? `${prefix}.${labelize(key)}` : labelize(key));
+    });
+  }
+  return isRecorded(value) ? [[prefix, String(value)]] : [];
+};
 
 function RiskLabel({ value }) {
   const label = value || 'Unassessed';
@@ -28,20 +79,80 @@ function RiskLabel({ value }) {
 }
 
 function ScreeningFlags({ row }) {
-  const classifications = row.clinicalScreening?.classifications || {};
-  const labels = { bloodPressure: 'BP', bmi: 'BMI', oxygenSaturation: 'SpO₂', respiratoryRate: 'RR', temperature: 'Temp', heartRate: 'HR' };
   const flagTone = {
     critical: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300',
     high: 'border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-300',
     moderate: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300',
+    monitor: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300',
     low: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300',
     review: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-border dark:bg-card-nested dark:text-muted-foreground',
     unknown: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-border dark:bg-card-nested dark:text-muted-foreground',
     none: 'border-brand-border bg-white text-brand-ink dark:border-border dark:bg-card dark:text-foreground',
   };
-  const entries = Object.entries(classifications);
-  if (!entries.length) return <span className="text-xs text-brand-gray dark:text-muted-foreground">No results</span>;
-  return <Dialog.Root>
+  const [open, setOpen] = useState(false);
+  const [details, setDetails] = useState(null);
+  const [selectedId, setSelectedId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    let active = true;
+    setDetails(null);
+    setSelectedId('');
+    setError('');
+    setLoading(true);
+    residentsApi.riskClinicalDetails(row.residentId)
+      .then((response) => {
+        if (response?.residentId !== row.residentId || response?.resident?.id !== row.residentId
+          || !Array.isArray(response.assessments) || !Array.isArray(response.riskFactors)) {
+          const invalidResponse = Object.assign(
+            new Error('Clinical details returned for a different resident or in an invalid format.'),
+            { code: 'RISK_CLINICAL_DETAILS_INVALID_RESPONSE' },
+          );
+          throw invalidResponse;
+        }
+        if (!active) return;
+        setDetails(response);
+        setSelectedId(response.assessments[0]?.id || '');
+      })
+      .catch((err) => { if (active) setError(clinicalDetailsError(err)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [open, retry, row.residentId]);
+
+  const selectedAssessment = details?.assessments?.find((assessment) => assessment.id === selectedId) || null;
+  const measurementEntries = Object.entries(selectedAssessment?.measurements || {});
+  const screeningClasses = selectedAssessment?.clinicalScreening?.classifications || {};
+  const screeningRows = new Map();
+  for (const [key, value] of measurementEntries) {
+    const normalizedKey = classificationKey[key] || key;
+    screeningRows.set(normalizedKey, {
+      key: normalizedKey,
+      label: measurementLabels[key] || labelize(key),
+      value,
+      classification: screeningClasses[normalizedKey]?.classification,
+      severity: screeningClasses[normalizedKey]?.severity,
+    });
+  }
+  for (const [key, item] of Object.entries(screeningClasses)) {
+    if (!screeningRows.has(key)) screeningRows.set(key, {
+      key,
+      label: labelize(key),
+      value: item?.value,
+      classification: item?.classification,
+      severity: item?.severity,
+    });
+  }
+  const currentScreeningRows = [...screeningRows.values()];
+  const selectedDate = selectedAssessment?.assessmentAt || selectedAssessment?.createdAt;
+  const dateTime = selectedDate
+    ? `${prettyDate(selectedDate)}${Number.isFinite(new Date(selectedDate).getTime()) ? ` · ${new Date(selectedDate).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`
+    : 'Not recorded';
+  const recordedDetails = fieldEntries(selectedAssessment?.assessmentDetails || {});
+
+  return <Dialog.Root open={open} onOpenChange={setOpen}>
     <Dialog.Trigger asChild>
       <button type="button" className="inline-flex min-h-9 items-center gap-2 rounded-full border border-brand-border bg-white px-3 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:bg-card dark:text-blue-300 dark:hover:bg-hover">
         <Activity className="h-4 w-4" aria-hidden="true" />
@@ -50,55 +161,202 @@ function ScreeningFlags({ row }) {
     </Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-[1px]" />
-      <Dialog.Content className="fixed inset-0 z-[85] flex h-[100dvh] w-full flex-col overflow-hidden bg-white shadow-2xl focus:outline-none dark:bg-card sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:max-h-[85dvh] sm:w-[calc(100%-2rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:border sm:border-brand-border sm:dark:border-border">
-        <header className="flex items-start justify-between gap-4 border-b border-brand-border px-5 py-4 dark:border-border sm:px-6">
+      <Dialog.Content className="fixed inset-3 z-[85] flex h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-xl border border-brand-border bg-white shadow-2xl focus:outline-none dark:border-border dark:bg-card sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:max-h-[90dvh] sm:w-[calc(100%-2rem)] sm:max-w-3xl sm:-translate-x-1/2 sm:-translate-y-1/2">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border bg-white px-4 py-3 dark:border-border dark:bg-card sm:px-5">
           <div className="min-w-0">
-            <Dialog.Title className="text-lg font-semibold leading-6 text-brand-ink dark:text-foreground">Clinical details</Dialog.Title>
-            <Dialog.Description className="mt-1 truncate text-sm text-brand-gray dark:text-muted-foreground">{row.name || 'Resident'} · {row.residentId}</Dialog.Description>
+            <Dialog.Title className="text-base font-semibold leading-6 text-brand-ink dark:text-foreground sm:text-lg">Clinical details</Dialog.Title>
+            <Dialog.Description className="mt-0.5 truncate text-sm text-brand-gray dark:text-muted-foreground">{row.name || 'Resident'} · {row.residentId}</Dialog.Description>
           </div>
           <Dialog.Close asChild><button type="button" aria-label="Close clinical details" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-brand-gray hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:text-muted-foreground dark:hover:bg-hover dark:hover:text-foreground"><X className="h-5 w-5" /></button></Dialog.Close>
         </header>
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
-          <section aria-label="Clinical screening classifications">
-            <h3 className="mb-3 text-sm font-semibold text-brand-ink dark:text-foreground">Clinical screening</h3>
-            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {entries.map(([key, item]) => <li key={key} className={`min-w-0 rounded-lg border px-3 py-2.5 ${flagTone[item.severity] || flagTone.unknown}`}>
-                <div className="flex min-w-0 items-start justify-between gap-2"><span className="shrink-0 text-sm font-semibold">{labels[key] || key}</span>
-                  <span className="min-w-0 break-words text-right text-sm font-medium">{item.classification}</span></div>
-                {item.value != null && <p className="mt-1 text-xs tabular-nums opacity-80">{item.value}</p>}
-              </li>)}
-            </ul>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+          <section aria-label="Resident information">
+            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Resident information</h3>
+            {details?.resident ? <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+              {[
+                ['Full name', details.resident.name],
+                ['Resident ID', details.resident.id],
+                ['Barangay', details.resident.barangay],
+                ['Age', details.resident.age],
+                ['Sex', details.resident.sex],
+              ].map(([label, value]) => <div key={label} className="min-w-0">
+                <dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">{label}</dt>
+                <dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">
+                  {isRecorded(value) ? (label === 'Age' ? `${value} years` : value) : 'Not recorded'}
+                </dd>
+              </div>)}
+            </dl> : <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
+              {loading ? 'Loading resident information…' : 'Resident information is unavailable.'}
+            </p>}
           </section>
-          <section className="border-t border-brand-border pt-4 dark:border-border">
-            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Overall risk factors</h3>
-            <RiskFactors row={row} />
+          <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Clinical screening classifications">
+            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Clinical screening</h3>
+              {details?.assessments?.length > 0 && <label className="flex items-center gap-2 text-xs text-brand-gray dark:text-muted-foreground">
+                Assessment
+                <select aria-label="Select clinical assessment" className={`${filterClass} h-9 w-auto max-w-full min-w-[12rem]`}
+                  value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+                  {details.assessments.map((assessment) => {
+                    const at = assessment.assessmentAt || assessment.createdAt;
+                    return <option key={assessment.id} value={assessment.id}>{prettyDate(at)}</option>;
+                  })}
+                </select>
+              </label>}
+            </div>
+            {loading && <p className="flex items-center gap-2 py-2 text-sm text-brand-gray dark:text-muted-foreground" role="status">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-blue/30 border-t-brand-blue" aria-hidden="true" />
+              Loading clinical details…
+            </p>}
+            {error && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300" role="alert">
+              <p>{error}</p><button type="button" onClick={() => setRetry((count) => count + 1)} className="mt-2 font-semibold underline">Retry</button>
+            </div>}
+            {!loading && !error && !selectedAssessment && <p className="rounded-lg border border-dashed border-brand-border px-3 py-4 text-sm text-brand-gray dark:border-border dark:text-muted-foreground">No clinical screening record is available for this resident.</p>}
+            {!loading && !error && selectedAssessment && <>
+              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {currentScreeningRows.map(({ key, label, value, classification, severity }) => {
+                  const bmiComputed = key === 'bmi' && !isRecorded(value)
+                    && isRecorded(screeningClasses.bmi?.value)
+                    && isRecorded(selectedAssessment.measurements?.heightCm)
+                    && isRecorded(selectedAssessment.measurements?.weightKg);
+                  const displayedValue = bmiComputed ? screeningClasses.bmi.value : value;
+                  const recorded = isRecorded(displayedValue);
+                  return <li key={key} className={`min-w-0 rounded-lg border px-3 py-2.5 ${recorded ? flagTone[severity] || flagTone.unknown : flagTone.unknown}`}>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <span className="shrink-0 text-sm font-semibold">{label}</span>
+                      <span className="min-w-0 break-words text-right text-sm font-medium">{classification || 'Classification not available'}</span>
+                    </div>
+                    <p className={`mt-1 break-words text-xs tabular-nums ${recorded ? 'font-semibold opacity-100' : 'opacity-75'}`}>
+                      {bmiComputed ? `${clinicalValue(key, displayedValue)} (calculated from recorded height and weight)` : clinicalValue(key, displayedValue)}
+                    </p>
+                  </li>;
+                })}
+              </ul>
+              {!currentScreeningRows.length && <p className="rounded-lg border border-dashed border-brand-border px-3 py-4 text-sm text-brand-gray dark:border-border dark:text-muted-foreground">No assessment indicators are recorded in this visit.</p>}
+            </>}
           </section>
-          <dl className="grid grid-cols-1 gap-3 border-t border-brand-border pt-4 text-sm sm:grid-cols-2 dark:border-border">
-            <div><dt className="text-xs font-medium uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Assessment date</dt><dd className="mt-1 font-medium text-brand-ink dark:text-foreground">{prettyDate(row.assessmentAt)}</dd></div>
-            <div><dt className="text-xs font-medium uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Recorded by</dt><dd className="mt-1 font-medium text-brand-ink dark:text-foreground">{row.responsiblePersonnel || '—'}</dd></div>
-          </dl>
+          <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Overall risk summary">
+            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Overall risk summary</h3>
+            {details && <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${riskTone[details.riskLevel] || riskTone.Unassessed}`}>
+                {details.riskLevel || 'Unassessed'}
+              </span>
+              <span className="text-sm text-brand-gray dark:text-muted-foreground">
+                Status: {labelize(details.riskAssessmentStatus || 'unassessed')}
+              </span>
+              {details.riskAssessedAt && <span className="text-sm text-brand-gray dark:text-muted-foreground">
+                Assessed {prettyDate(details.riskAssessedAt)}
+              </span>}
+            </div>}
+            {details ? <RiskFactors details={details} /> : <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
+              {loading ? 'Loading risk factors…' : 'Risk factors are unavailable until clinical details load.'}
+            </p>}
+          </section>
+          <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Assessment information">
+            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Assessment information</h3>
+            {selectedAssessment ? <>
+              <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-2.5 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Assessment date and time</dt><dd className="mt-0.5 font-medium text-brand-ink dark:text-foreground">{dateTime}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Assessment status</dt><dd className="mt-0.5 font-medium text-brand-ink dark:text-foreground">{labelize(selectedAssessment.status || 'not recorded')}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Overall risk level</dt><dd className="mt-0.5 font-medium text-brand-ink dark:text-foreground">{details?.riskLevel || 'Unassessed'}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Recorded by</dt><dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">{selectedAssessment.recordedBy || 'Not recorded'}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Personnel</dt><dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">{selectedAssessment.performedBy || 'Not recorded'}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Assessment type / category</dt><dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">{[selectedAssessment.assessmentType, selectedAssessment.assessmentCategory].filter(Boolean).join(' · ') || 'Not recorded'}</dd></div>
+              </dl>
+            </> : <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
+              {loading ? 'Loading assessment information…' : error ? 'Assessment information is unavailable.' : 'No assessment information is recorded for this resident.'}
+            </p>}
+          </section>
+          <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Findings and PHN assessment">
+            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Findings and PHN assessment</h3>
+            {selectedAssessment ? (() => {
+              const assessmentDetails = selectedAssessment.assessmentDetails || {};
+              const findings = assessmentDetails.findings;
+              const phnAssessment = assessmentDetails.phnAssessment;
+              const normalizeNarrative = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+              const duplicateNarrative = isRecorded(findings) && isRecorded(phnAssessment)
+                && normalizeNarrative(findings) === normalizeNarrative(phnAssessment);
+              const otherDetails = fieldEntries({
+                ...assessmentDetails,
+                findings: undefined,
+                phnAssessment: undefined,
+              }).filter(([, value]) => ![findings, phnAssessment].filter(isRecorded)
+                .some((narrative) => normalizeNarrative(narrative) === normalizeNarrative(value)));
+              const paragraphs = (value) => String(value || '').split(/\n\s*\n/).filter((paragraph) => paragraph.trim());
+              return <>
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Findings</h4>
+                    {isRecorded(findings)
+                      ? <div className="mt-1 max-w-prose space-y-2 break-words text-sm leading-6 text-brand-ink dark:text-foreground">
+                        {paragraphs(findings).map((paragraph, index) => <p className="whitespace-pre-wrap" key={index}>{paragraph}</p>)}
+                      </div>
+                      : <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Not recorded</p>}
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-medium text-brand-gray dark:text-muted-foreground">PHN assessment</h4>
+                    {duplicateNarrative
+                      ? <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Same as findings.</p>
+                      : isRecorded(phnAssessment)
+                        ? <div className="mt-1 max-w-prose space-y-2 break-words text-sm leading-6 text-brand-ink dark:text-foreground">
+                          {paragraphs(phnAssessment).map((paragraph, index) => <p className="whitespace-pre-wrap" key={index}>{paragraph}</p>)}
+                        </div>
+                        : <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Not recorded</p>}
+                  </div>
+                </div>
+                {otherDetails.length > 0 && <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 border-t border-brand-border/70 pt-3 text-sm sm:grid-cols-2 dark:border-border">
+                  {otherDetails.map(([label, value], index) => <div key={`${label}-${index}`} className="min-w-0">
+                    <dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">{label}</dt>
+                    <dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">{value}</dd>
+                  </div>)}
+                </dl>}
+              </>;
+            })() : <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
+              {loading ? 'Loading assessment information…' : error ? 'Assessment information is unavailable.' : 'No assessment information is recorded for this resident.'}
+            </p>}
+          </section>
         </div>
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>;
 }
 
-function RiskFactors({ row }) {
-  const factors = row.riskFactors;
+function RiskFactors({ details }) {
+  const factors = details.riskFactors;
   const entries = Array.isArray(factors) ? factors : factors && typeof factors === 'object'
-    ? Object.entries(factors).filter(([, value]) => value !== null && value !== false && value !== 0)
+    ? Object.entries(factors).filter(([, value]) => value !== null && value !== undefined && value !== false)
     : [];
-  if (!entries.length) return <span className="text-xs text-brand-gray dark:text-muted-foreground">No recorded factors</span>;
-  return <ul className="mt-1 flex flex-wrap gap-1.5 text-xs text-brand-gray dark:text-muted-foreground">
-    {entries.slice(0, 4).map((factor, index) => <li key={index} className="max-w-full break-words rounded-md bg-brand-bg px-2 py-1 dark:bg-card-nested">{Array.isArray(factor) ? `${factor[0]}: ${String(factor[1])}` : typeof factor === 'object' ? (factor.label || factor.name || factor.code || 'Recorded factor') : String(factor)}</li>)}
+  if (!entries.length) return <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">No recorded risk factors.</p>;
+  const fieldLabels = { systolic: 'Systolic blood pressure', diastolic: 'Diastolic blood pressure', o2sat: 'Oxygen saturation', pulse: 'Heart rate', respiratory: 'Respiratory rate', bmi: 'Body mass index' };
+  const normalized = entries.map((entry) => Array.isArray(entry) ? { code: entry[0], ...((entry[1] && typeof entry[1] === 'object') ? entry[1] : { measured: entry[1] }) }
+    : (entry && typeof entry === 'object' ? entry : { code: entry }));
+  const uniqueFactors = [...new Map(normalized.map((factor) => [
+    `${factor.code || factor.ruleId || factor.name || factor.field || ''}:${factor.field || ''}:${factor.measured ?? ''}`,
+    factor,
+  ])).values()];
+  return <ul className="mt-2 grid grid-cols-1 gap-x-5 sm:grid-cols-2">
+    {uniqueFactors.map((factor, index) => {
+      const code = String(factor.code || factor.ruleId || '').toLowerCase();
+      const name = factor.name || factor.label || (code === 'bp_severe' ? 'Blood Pressure – Severe' : labelize(code || factor.field));
+      const field = factor.field ? fieldLabels[factor.field] || labelize(factor.field) : '';
+      return <li key={`${factor.code || factor.name || factor.field}-${index}`} className="min-w-0 border-t border-brand-border py-2 first:border-0 dark:border-border">
+        <p className="break-words text-sm font-semibold text-brand-ink dark:text-foreground">{name}</p>
+        {factor.description && <p className="mt-1 break-words text-xs text-brand-gray dark:text-muted-foreground">{factor.description}</p>}
+        {(field || isRecorded(factor.measured)) && <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+          {field && <div><dt className="text-brand-gray dark:text-muted-foreground">Clinical indicator</dt><dd className="font-medium text-brand-ink dark:text-foreground">{field}</dd></div>}
+          {isRecorded(factor.measured) && <div><dt className="text-brand-gray dark:text-muted-foreground">Recorded value</dt><dd className="font-medium text-brand-ink dark:text-foreground">{clinicalValue(factor.field || '', factor.measured)}</dd></div>}
+        </dl>}
+      </li>;
+    })}
   </ul>;
 }
 
 export default function ResidentRiskSummary() {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const location = useLocation();
   const role = location.pathname.split('/').filter(Boolean)[1] || user?.role || 'phn';
   const barangayLocked = role === 'health_supervisor';
+  const canViewFollowUps = can('followups.view');
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ barangayId: '', zone: '', riskLevel: '', assessmentStatus: '', indicator: '', from: '', to: '' });
   const [page, setPage] = useState(1);
@@ -138,50 +396,60 @@ export default function ResidentRiskSummary() {
   };
   const summary = payload?.summary || {};
   const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-  const metrics = useMemo(() => [
-    ['Residents in scope', summary.totalResidents ?? 0, 'blue'],
-    ['Assessed', summary.assessed ?? 0, 'teal'],
-    ['High risk', summary.high ?? 0, 'red'],
-    ['Moderate risk', summary.moderate ?? 0, 'amber'],
-    ['Low risk', summary.low ?? 0, 'green'],
-    ['Incomplete', summary.incomplete ?? 0, 'amber'],
-    ['Unassessed', summary.unassessed ?? 0, 'slate'],
-  ], [summary]);
-  const distribution = Array.isArray(summary.distribution) ? summary.distribution : [];
-  const distributionTone = {
-    Low: 'bg-emerald-500', Moderate: 'bg-amber-500', High: 'bg-rose-500',
-    Incomplete: 'bg-orange-500', Unassessed: 'bg-slate-400',
-  };
+  const totalResidents = summary.totalResidents ?? 0;
+  const assessedResidents = summary.assessed ?? 0;
+  const assessmentCoverage = totalResidents ? Math.round((assessedResidents / totalResidents) * 100) : 0;
+  const pendingFollowUps = Number.isFinite(summary.pendingFollowUps) ? summary.pendingFollowUps : null;
+  const distribution = [
+    ['Low Risk', summary.low ?? 0, 'bg-emerald-500'],
+    ['Moderate Risk', summary.moderate ?? 0, 'bg-amber-500'],
+    ['High Risk', summary.high ?? 0, 'bg-rose-500'],
+    ['Incomplete', summary.incomplete ?? 0, 'bg-violet-500'],
+    ['Unassessed', summary.unassessed ?? 0, 'bg-slate-400'],
+  ];
 
   return <div className="space-y-5">
     <PageHeader eyebrow="Community Risk" title="Resident Risk Summary" subtitle="Review current resident risk classifications and clinical screening flags within your authorized area." />
-    <div className="rounded-card border border-brand-border bg-white p-4 text-sm text-brand-gray dark:border-border dark:bg-card dark:text-muted-foreground" role="note">
-      Screening flags support clinical review and do not diagnose a condition or replace professional assessment.
-    </div>
 
-    <section aria-label="Resident risk metrics" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
-      {metrics.map(([label, value, tone]) => <div key={label} className="min-w-0 rounded-card border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">{label}</p>
-        <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone === 'red' ? 'text-rose-600 dark:text-rose-400' : tone === 'green' ? 'text-emerald-700 dark:text-emerald-400' : tone === 'amber' ? 'text-amber-700 dark:text-amber-400' : 'text-brand-ink dark:text-foreground'}`}>{value}</p>
-      </div>)}
+    <section aria-label="Resident operational metrics" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="min-w-0 rounded-card border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Residents in Scope</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums text-brand-blue dark:text-blue-300">{totalResidents}</p>
+      </div>
+      <div className="min-w-0 rounded-card border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Assessment Coverage</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums text-brand-blue dark:text-blue-300">{assessmentCoverage}%</p>
+        <p className="mt-0.5 text-xs text-brand-gray dark:text-muted-foreground">{assessedResidents} of {totalResidents} assessed</p>
+      </div>
+      <div className="min-w-0 rounded-card border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Pending Follow-ups</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums text-amber-700 dark:text-amber-400">{pendingFollowUps ?? '—'}</p>
+        <p className="mt-0.5 text-xs text-brand-gray dark:text-muted-foreground">
+          {pendingFollowUps !== null ? 'Residents with pending follow-up actions' : canViewFollowUps ? 'Follow-up count unavailable' : 'Follow-up access required'}
+        </p>
+      </div>
     </section>
 
     <section className="rounded-card border border-brand-border bg-white p-4 dark:border-border dark:bg-card" aria-label="Risk distribution">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2"><h2 className="font-semibold text-brand-ink dark:text-foreground">Risk distribution</h2><p className="text-xs text-brand-gray dark:text-muted-foreground">For the filtered resident set</p></div>
-      {distribution.length ? <div className="space-y-3">
-        {distribution.map((item) => {
-          const value = Number(item.value) || 0;
-          const total = Number(summary.totalResidents) || 0;
-          const percent = total ? Math.min(100, (value / total) * 100) : 0;
-          return <div key={item.name} className="grid grid-cols-[6.5rem_minmax(0,1fr)_3rem] items-center gap-3 text-sm">
-            <span className="text-brand-gray dark:text-muted-foreground">{item.name}</span>
-            <div className="h-2.5 overflow-hidden rounded-full bg-brand-bg dark:bg-card-nested" role="img" aria-label={`${item.name}: ${value} of ${total} residents`}>
-              <div className={`h-full rounded-full ${distributionTone[item.name] || 'bg-brand-blue'}`} style={{ width: `${percent}%` }} />
-            </div>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-semibold text-brand-ink dark:text-foreground">Risk Distribution</h2>
+        <p className="text-xs text-brand-gray dark:text-muted-foreground">For the currently filtered resident set</p>
+      </div>
+      <div className="space-y-3">
+        {distribution.map(([label, rawValue, tone]) => {
+          const value = Number(rawValue);
+          const percent = totalResidents ? Math.min(100, (value / totalResidents) * 100) : 0;
+          return <div key={label} className="grid grid-cols-[7rem_minmax(0,1fr)_2.5rem] items-center gap-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_3rem]">
+            <span className="text-brand-gray dark:text-muted-foreground">{label}</span>
+            {value > 0
+              ? <div className="h-2.5 overflow-hidden rounded-full bg-brand-bg dark:bg-card-nested" role="img" aria-label={`${label}: ${value} of ${totalResidents} residents`}>
+                <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
+              </div>
+              : <span className="text-xs text-brand-gray dark:text-muted-foreground">No residents</span>}
             <span className="text-right font-semibold tabular-nums text-brand-ink dark:text-foreground">{value}</span>
           </div>;
         })}
-      </div> : <p className="text-sm text-brand-gray dark:text-muted-foreground">Risk distribution is not available.</p>}
+      </div>
     </section>
 
     <section className="rounded-card border border-brand-border bg-white p-4 dark:border-border dark:bg-card" aria-label="Filter resident risk summary">

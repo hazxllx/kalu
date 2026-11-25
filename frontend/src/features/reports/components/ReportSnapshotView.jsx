@@ -13,7 +13,7 @@ const textValue = (value) => typeof value === "string" ? value : "";
  * Falls back to an explicit "content unavailable" state for legacy rows that
  * were submitted before snapshotting existed (content is null / malformed).
  */
-export default function ReportSnapshotView({ content }) {
+export default function ReportSnapshotView({ content, showMetadata = true }) {
   if (!hasSnapshot(content)) {
     return (
       <div className="rounded-btn border border-dashed border-brand-border p-6 text-center">
@@ -40,7 +40,7 @@ export default function ReportSnapshotView({ content }) {
   return (
     <div className="min-w-0 max-w-full space-y-4 break-words">
       {/* Snapshot metadata */}
-      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+      {showMetadata && <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
         {[
           ["Reporting Period", textValue(content.reportPeriod) || "—"],
           ["Scope", textValue(content.scope) || textValue(content.barangay) || "—"],
@@ -52,7 +52,7 @@ export default function ReportSnapshotView({ content }) {
             <p className="mt-0.5 font-medium text-brand-ink">{value}</p>
           </div>
         ))}
-      </div>
+      </div>}
 
       {/* Summary */}
       {summary && (

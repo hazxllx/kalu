@@ -4,6 +4,12 @@ import PageHeader from "@/components/common/PageHeader";
 import FormModal from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
+import {
+  ActionMenu as SharedActionMenu,
+  ActionMenuContent,
+  ActionMenuItem,
+  ActionMenuTrigger,
+} from "@/components/ui/action-menu";
 import StatusBadge from "@/components/common/StatusBadge";
 import ErrorState from "@/components/common/ErrorState";
 import EmptyState from "@/components/common/EmptyState";
@@ -20,7 +26,7 @@ import DocumentUploadField from "./DocumentUploadField";
 import { filterHealthServices } from "../lib/filterHealthServices";
 import {
   Plus, X, CheckCircle2, Search, Users, MapPin, Building2, Activity, UserPlus, UserMinus,
-  UserCheck, UserX, CalendarDays, MoreVertical, Pencil, Trash2, Power, AlertTriangle,
+  UserCheck, UserX, CalendarDays, Pencil, Trash2, Power, AlertTriangle,
   FileText, RefreshCw,
 } from "lucide-react";
 
@@ -1590,17 +1596,7 @@ function SummaryCard({ icon: Icon, label, value, tone, loading }) {
  * Delete. Closes on outside click or Escape.
  */
 function ActionMenu({ service, open, onToggle, onClose, canEdit, canDelete, active, busy, onEdit, onToggleActive, onDelete }) {
-  const ref = useRef(null);
   const [downloading, setDownloading] = useState(false);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [open, onClose]);
 
   const downloadMemo = async () => {
     if (!service?.attachments?.memo) return;
@@ -1626,43 +1622,23 @@ function ActionMenu({ service, open, onToggle, onClose, canEdit, canDelete, acti
   };
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={onToggle}
+    <SharedActionMenu open={open} onOpenChange={(nextOpen) => (nextOpen ? onToggle() : onClose())}>
+      <ActionMenuTrigger
+        label="Service actions"
         disabled={busy || downloading}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Service actions"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink disabled:opacity-60 dark:hover:bg-hover xl:h-8 xl:w-8"
-      >
-        <MoreVertical className="h-4 w-4" />
-      </button>
-      {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-btn border border-brand-border bg-white py-1 shadow-lg dark:border-border dark:bg-card">
-          {service?.attachments?.memo && (
-            <button role="menuitem" onClick={downloadMemo} disabled={downloading} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:hover:bg-hover">
-              <FileText className="h-3.5 w-3.5" /> {downloading ? "Downloading..." : "Memo"}
-            </button>
-          )}
-          {canEdit && (
-            <button role="menuitem" onClick={onEdit} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg dark:hover:bg-hover">
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </button>
-          )}
-          {canEdit && (
-            <button role="menuitem" onClick={onToggleActive} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg dark:hover:bg-hover">
-              <Power className="h-3.5 w-3.5" /> {active ? "Deactivate" : "Reactivate"}
-            </button>
-          )}
-          {canDelete && (
-            <button role="menuitem" onClick={onDelete} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-brand-danger hover:bg-brand-danger/5">
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </button>
-          )}
-        </div>
-      )}
-    </div>
+        className="xl:h-8 xl:w-8"
+      />
+      <ActionMenuContent aria-label="Service actions">
+        {service?.attachments?.memo && (
+          <ActionMenuItem icon={FileText} onSelect={downloadMemo} disabled={downloading}>
+            {downloading ? "Downloading..." : "Memo"}
+          </ActionMenuItem>
+        )}
+        {canEdit && <ActionMenuItem icon={Pencil} onSelect={onEdit}>Edit</ActionMenuItem>}
+        {canEdit && <ActionMenuItem icon={Power} onSelect={onToggleActive}>{active ? "Deactivate" : "Reactivate"}</ActionMenuItem>}
+        {canDelete && <ActionMenuItem icon={Trash2} danger onSelect={onDelete}>Delete</ActionMenuItem>}
+      </ActionMenuContent>
+    </SharedActionMenu>
   );
 }
 

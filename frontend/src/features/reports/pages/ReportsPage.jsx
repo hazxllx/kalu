@@ -59,6 +59,13 @@ const reportDateTime = (value) => {
   return new Date(value).toLocaleString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
+const reportRoleLabel = (role) => ({
+  phn: "PHN",
+  mho: "MHO",
+  rhu_personnel: "RHU Personnel",
+  health_supervisor: "Health Supervisor",
+}[role] || "—");
+
 // --- Real-data report generation helpers ----------------------------------
 //
 // A generated report preview is built from the SAME authenticated, scope-
@@ -173,6 +180,37 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [detailRetry, setDetailRetry] = useState(0);
   const [detailOwner, setDetailOwner] = useState(null);
   const detailStatus = detailContent?.status || detailReport?.status;
+  const detailSnapshot = detailContent?.content;
+  const storedRecipient = reportRoleLabel(detailContent?.recipientRole || detailReport?.recipientRole);
+  const persistedBarangay = typeof (detailContent?.barangay || detailReport?.barangay) === "string"
+    ? detailContent?.barangay || detailReport?.barangay
+    : "";
+  const snapshotScope = typeof detailSnapshot?.scope === "string"
+    ? detailSnapshot.scope
+    : typeof detailSnapshot?.barangay === "string" ? detailSnapshot.barangay : "";
+  const scopeMatchesReport = !persistedBarangay || !snapshotScope ||
+    persistedBarangay.trim().toLocaleLowerCase() === snapshotScope.trim().toLocaleLowerCase();
+  const detailSnapshotMatchesReport = Boolean(
+    detailContent &&
+    detailSnapshot?.reportType === detailContent.reportType &&
+    detailSnapshot?.reportPeriod === detailContent.reportPeriod &&
+    Number.isFinite(Date.parse(detailSnapshot?.generatedAt)) &&
+    scopeMatchesReport,
+  );
+  const canSubmitStoredDraft = Boolean(
+    canSubmitReports &&
+    !submitting &&
+    !detailLoading &&
+    detailStatus === "Draft" &&
+    detailReport?.persisted &&
+    detailContent?.id &&
+    String(detailContent.id) === String(detailReport.id) &&
+    detailContent?.recipientRole &&
+    detailContent?.reportType?.trim() &&
+    detailContent?.reportPeriod?.trim() &&
+    hasSnapshot(detailSnapshot) &&
+    detailSnapshotMatchesReport
+  );
   const [submitError, setSubmitError] = useState("");
   const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [toast, setToast] = useState(null);
@@ -211,7 +249,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           name: row.title || row.reportType || "Report",
           type: row.reportType,
           period: row.reportPeriod,
-          status: row.status === "Submitted" ? `Submitted to ${submitTarget}` : row.status,
+          recipientRole: row.recipientRole,
+          senderName: row.senderName,
+          senderRole: row.senderRole,
+          status: row.status === "Submitted" ? `Submitted to ${reportRoleLabel(row.recipientRole)}` : row.status,
           date: row.createdAt ? new Date(row.createdAt).toLocaleDateString(supervisor ? "en-PH" : "en-US", { ...(supervisor ? { timeZone: "Asia/Manila" } : {}), month: supervisor ? "short" : "long", day: "numeric", year: "numeric" }) : "",
           barangay: row.barangay || assignedBarangay || "",
           submittedDate: row.submittedAt ? new Date(row.submittedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
@@ -422,7 +463,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   };
 
   const submitStoredDraft = async () => {
-    if (!canSubmitReports || submitting || detailStatus !== "Draft" || !detailReport?.id || !hasSnapshot(detailContent?.content)) return;
+    if (!canSubmitStoredDraft) return;
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -433,7 +474,8 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       return;
     }
     setSubmitting(false);
-    setDetailReport(null);
+    setDetailContent(null);
+    setDetailRetry((value) => value + 1);
     showToast("Report submitted successfully.");
     await loadOutgoing();
   };
@@ -1143,64 +1185,76 @@ export default function ReportsPage({ roleKey = "midwife" }) {
 
       {/* Report Details Modal (View a persisted submission) */}
       {detailReport && canLoadOutgoing && detailOwner === user?.id && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Saved Report Details" className={`min-w-0 w-[calc(100vw-1.5rem)] max-w-[1000px] max-h-[88dvh] overflow-y-auto overscroll-contain break-words ${supervisor ? "supervisor-modal" : ""}`}>
-            <div className="p-3 sm:p-6">
-              <div className="sticky top-0 z-20 -mx-3 -mt-3 mb-4 flex items-start justify-between gap-3 border-b border-brand-border bg-white px-3 pt-3 pb-3 dark:border-border dark:bg-card sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-brand-ink">{detailReport.name}</h3>
-                  <p className="mt-0.5 text-sm text-brand-gray">{detailReport.type}{detailReport.period ? ` · ${detailReport.period}` : ""}</p>
-                </div>
-                <button onClick={() => !submitting && setDetailReport(null)} disabled={submitting} className="text-brand-gray hover:text-brand-ink disabled:opacity-60" aria-label="Close">
-                  <X className="w-5 h-5" />
-                </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4">
+          <Card role="dialog" aria-modal="true" aria-label="Saved Report Details" className={`flex max-h-[90dvh] min-w-0 w-full max-w-3xl flex-col overflow-hidden overscroll-contain break-words rounded-xl border border-brand-border dark:border-border ${supervisor ? "supervisor-modal" : ""}`}>
+            <header className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border bg-white px-4 py-3 dark:border-border dark:bg-card sm:px-5">
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-brand-ink sm:text-lg">{detailContent?.title || detailReport.name || "Report details"}</h3>
+                <p className="mt-0.5 text-sm text-brand-gray">{detailContent?.reportType || detailReport.type || "Report"}{(detailContent?.reportPeriod || detailReport.period) ? ` · ${detailContent?.reportPeriod || detailReport.period}` : ""}</p>
               </div>
+              <button onClick={() => !submitting && setDetailReport(null)} disabled={submitting} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-brand-gray hover:bg-brand-bg hover:text-brand-ink disabled:opacity-60 dark:hover:bg-hover" aria-label="Close">
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
 
               {supervisor && (detailContent?.remarks || detailReport.remarks) && <section className="mt-4 rounded border border-amber-300 bg-amber-50 p-3"><h4 className="text-ui font-semibold text-amber-900">{["Needs Revision", "Rejected"].includes(detailContent?.status || detailReport.status) ? "Reviewer Explanation" : "Reviewer Remarks"}</h4><p className="mt-1 whitespace-pre-wrap text-ui text-amber-900">{detailContent?.remarks || detailReport.remarks}</p>{(detailContent?.reviewedByName || detailReport.reviewedByName) && <p className="mt-2 text-caption text-amber-900">{detailContent?.reviewedByName || detailReport.reviewedByName}{(detailContent?.reviewedAt || detailReport.reviewedAt) ? ` · ${reportDateTime(detailContent?.reviewedAt || detailReport.reviewedAt)}` : ""}</p>}</section>}
               {supervisor && detailContent?.receivedAt && <section className="mt-4 rounded border border-brand-green/30 bg-brand-green/5 p-3"><h4 className="text-ui font-semibold text-brand-ink">Received by PHN</h4><p className="mt-1 text-caption text-brand-gray">{detailContent.receivedByName || "Public Health Nurse"} · {reportDateTime(detailContent.receivedAt)}</p></section>}
               {supervisor && Array.isArray(detailContent?.history) && detailContent.history.length > 0 && <section className="mt-4"><h4 className="mb-2 text-ui font-semibold text-brand-ink">Persisted Report History</h4><ol className="divide-y divide-brand-border rounded border border-brand-border px-3">{detailContent.history.map((event, index) => <li key={`${event.at}-${index}`} className="py-2"><p className="text-ui font-medium text-brand-ink">{event.previousStatus ? `${event.previousStatus} → ` : ""}{event.status || event.action}</p><p className="text-caption text-brand-gray">{reportDateTime(event.at)}{event.actorName ? ` · ${event.actorName}` : ""}{event.actorRole ? ` (${event.actorRole.replaceAll("_", " ")})` : ""}</p>{event.explanation && <p className="mt-1 whitespace-pre-wrap text-ui text-brand-gray">{event.explanation}</p>}</li>)}</ol></section>}
-              <div className="grid min-w-0 grid-cols-1 gap-x-5 gap-y-3 rounded-btn border border-brand-border bg-brand-bg/50 p-3 sm:grid-cols-2 sm:p-4">
-                {[
-                  ["Type", detailReport.type || "—"],
-                  ["Period", detailReport.period || "—"],
-                  [isPhn ? "Scope" : "Barangay", (isPhn ? scopeLabel(detailReport, user) : detailReport.barangay) || "—"],
-                  ["Recipient", submitTarget],
-                  ["Status", displayStatus({ ...detailReport, status: detailStatus })],
-                  ["Date Generated", detailReport.date || "—"],
-                  ["Submitted", detailReport.submittedDate || "—"],
-                ].map(([label, value]) => (
-                  <div key={label} className="min-w-0 [overflow-wrap:anywhere]">
-                    <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</p>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-brand-ink">{value}</p>
-                  </div>
-                ))}
-              </div>
+              <section aria-label="Saved report information">
+                <h4 className="mb-2 text-sm font-semibold text-brand-ink">Report information</h4>
+                <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 rounded-lg border border-brand-border bg-brand-bg/40 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    ["Report type", detailContent?.reportType || detailReport.type || "—"],
+                    ["Reporting period", detailContent?.reportPeriod || detailReport.period || "—"],
+                    [isPhn ? "Scope" : "Barangay", persistedBarangay || snapshotScope || (isPhn ? scopeLabel(detailReport, user) : assignedBarangay) || "—"],
+                    ["Recipient", storedRecipient],
+                    ["Status", detailStatus || "—"],
+                    ["Date generated", reportDateTime(detailSnapshot?.generatedAt || detailContent?.createdAt) !== "—" ? reportDateTime(detailSnapshot?.generatedAt || detailContent?.createdAt) : detailReport.date || "—"],
+                    ["Generated by", detailContent?.senderName || detailReport.senderName || "—"],
+                    ["Date submitted", detailContent?.submittedAt ? reportDateTime(detailContent.submittedAt) : detailReport.submittedDate || "—"],
+                    ["Submitted by", detailContent?.submittedAt ? detailContent?.senderName || detailReport.senderName || "—" : "—"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="min-w-0 [overflow-wrap:anywhere]">
+                      <dt className="text-[11px] font-medium uppercase tracking-wide text-brand-gray">{label}</dt>
+                      <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm font-medium text-brand-ink">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
 
               {/* Submitted report snapshot — the EXACT content submitted, read
                   back from the server (never regenerated from live records). */}
-              <div className="mt-4">
-                <h4 className="mb-2 text-sm font-semibold text-brand-ink">{detailStatus === "Draft" ? "Saved Draft Snapshot" : "Submitted Report Snapshot"}</h4>
+              <section aria-label={detailStatus === "Draft" ? "Saved draft snapshot" : "Report snapshot"}>
+                <h4 className="mb-2 text-sm font-semibold text-brand-ink">{detailStatus === "Draft" ? "Saved Draft Snapshot" : "Report Snapshot"}</h4>
                 {detailLoading ? (
-                  <p className="inline-flex items-center gap-2 text-sm text-brand-gray">
-                    <RefreshCw className="h-4 w-4 animate-spin" /> Loading submitted report…
+                  <p role="status" className="inline-flex items-center gap-2 rounded-lg border border-brand-border px-3 py-4 text-sm text-brand-gray">
+                    <RefreshCw className="h-4 w-4 animate-spin" /> Loading saved report…
                   </p>
                 ) : detailError ? (
-                  <div role="alert" className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 p-4 text-sm text-brand-danger">
+                  <div role="alert" className="rounded-lg border border-brand-danger/30 bg-brand-danger/5 p-3 text-sm text-brand-danger">
                     {detailError}
-                    <button type="button" onClick={() => setDetailRetry((value) => value + 1)} className={supervisor ? "supervisor-button mt-2" : "mt-2 block text-sm font-medium text-brand-blue hover:underline"}>Retry saved report</button>
+                    <button type="button" onClick={() => setDetailRetry((value) => value + 1)} className={supervisor ? "supervisor-button mt-2" : "mt-2 block text-sm font-medium text-brand-blue hover:underline"}>Retry loading report</button>
                   </div>
-                ) : hasSnapshot(detailContent?.content) ? (
-                  <ReportSnapshotView content={detailContent.content} />
+                ) : hasSnapshot(detailSnapshot) ? (
+                  <>
+                    {!detailSnapshotMatchesReport && <p role="alert" className="mb-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">The saved snapshot metadata does not match this report record. Submission is disabled until the saved report can be verified.</p>}
+                    <ReportSnapshotView content={detailSnapshot} showMetadata={false} />
+                  </>
                 ) : (
-                  <div className="rounded-btn border border-dashed border-brand-border p-4 text-sm text-brand-gray">
-                    The full content for this report was not captured at submission time, so it cannot be displayed. Only the submission details above are available for this record.
+                  <div className="rounded-lg border border-dashed border-brand-border p-4 text-sm text-brand-gray">
+                    The original report snapshot is unavailable for this record. It cannot be reconstructed from current source data.
                   </div>
                 )}
-              </div>
+              </section>
 
-              {submitError && <p role="alert" className="mt-4 rounded border border-brand-danger/30 bg-brand-danger/5 px-3 py-2 text-ui text-brand-danger">{submitError}</p>}
+              {detailStatus === "Draft" && detailContent && !detailContent.recipientRole && <p role="alert" className="rounded-lg border border-brand-danger/30 bg-brand-danger/5 px-3 py-2 text-sm text-brand-danger">The saved report has no recipient assignment, so it cannot be submitted.</p>}
+              {submitError && <p role="alert" className="rounded-lg border border-brand-danger/30 bg-brand-danger/5 px-3 py-2 text-sm text-brand-danger">{submitError}</p>}
 
-              <div className="sticky bottom-0 z-10 -mx-3 mt-6 flex justify-end gap-2 border-t border-brand-border bg-white/95 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur dark:border-border dark:bg-card/95 sm:-mx-6 sm:px-6">
+            </div>
+
+            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-brand-border bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-border dark:bg-card sm:px-5">
                 {canSubmitReports && detailContent?.id === detailReport.id && detailStatus === "Needs Revision" && (
                   <button
                     onClick={() => {
@@ -1222,10 +1276,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                 {canSubmitReports && detailStatus === "Draft" && (
                   <button
                     onClick={submitStoredDraft}
-                    disabled={submitting || detailLoading || !hasSnapshot(detailContent?.content)}
+                    disabled={!canSubmitStoredDraft}
                     className="mr-auto rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {submitting ? "Submitting…" : submitError ? `Retry submission to ${submitTarget}` : `Submit to ${submitTarget}`}
+                    {submitting ? "Submitting…" : submitError ? `Retry submission to ${storedRecipient}` : `Submit to ${storedRecipient}`}
                   </button>
                 )}
                 <button
@@ -1235,8 +1289,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                 >
                   Close
                 </button>
-              </div>
-            </div>
+            </footer>
           </Card>
         </div>
       )}

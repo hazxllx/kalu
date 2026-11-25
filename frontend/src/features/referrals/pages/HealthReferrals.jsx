@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import FormModal from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
@@ -29,10 +28,17 @@ import {
   referralDateTimeMinimum,
   toLocalDateTimeInput,
 } from "@/features/referrals/lib/referralDateValidation";
-import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Download, AlertTriangle, MoreVertical, CalendarClock, Ban, CheckCircle2 } from "lucide-react";
+import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Download, AlertTriangle, CalendarClock, Ban, CheckCircle2 } from "lucide-react";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { validateConsultationVitals } from "../../../../../shared/consultationClinical.js";
 import { formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
+import {
+  ActionMenu,
+  ActionMenuContent,
+  ActionMenuItem,
+  ActionMenuMessage,
+  ActionMenuTrigger,
+} from "@/components/ui/action-menu";
 
 /**
  * Referral coordination page backed by the real API (`/api/referrals` ->
@@ -943,9 +949,6 @@ export default function HealthReferrals() {
   const detailDialogRef = useRef(null);
   const detailCloseButtonRef = useRef(null);
   const [openActionMenu, setOpenActionMenu] = useState(null);
-  const [actionMenuPosition, setActionMenuPosition] = useState(null);
-  const actionMenuTriggerRef = useRef(null);
-  const actionMenuRef = useRef(null);
   const [statusTarget, setStatusTarget] = useState(null);
   const [newStatus, setNewStatus] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
@@ -1465,80 +1468,6 @@ export default function HealthReferrals() {
     return () => { detailRequest.current += 1; };
   }, [requestedReferralId, openDetail]);
 
-  const toggleActionMenu = (event, recordId) => {
-    if (openActionMenu === recordId) {
-      setOpenActionMenu(null);
-      setActionMenuPosition(null);
-      return;
-    }
-    actionMenuTriggerRef.current = event.currentTarget;
-    setActionMenuPosition(null);
-    setOpenActionMenu(recordId);
-  };
-
-  useLayoutEffect(() => {
-    if (!openActionMenu) {
-      setActionMenuPosition(null);
-      return undefined;
-    }
-
-    const updatePosition = () => {
-      const trigger = actionMenuTriggerRef.current;
-      const menu = actionMenuRef.current;
-      if (!trigger || !menu) return;
-
-      const triggerRect = trigger.getBoundingClientRect();
-      const menuRect = menu.getBoundingClientRect();
-      const margin = 8;
-      const left = Math.max(
-        margin,
-        Math.min(triggerRect.right - menuRect.width, window.innerWidth - menuRect.width - margin),
-      );
-      const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
-      const spaceAbove = triggerRect.top - margin;
-      const preferredTop = spaceBelow >= menuRect.height || spaceBelow >= spaceAbove
-        ? triggerRect.bottom + 4
-        : triggerRect.top - menuRect.height - 4;
-      const top = Math.max(
-        margin,
-        Math.min(preferredTop, window.innerHeight - menuRect.height - margin),
-      );
-      setActionMenuPosition({ left, top });
-    };
-
-    updatePosition();
-    window.addEventListener("resize", updatePosition);
-    document.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.removeEventListener("resize", updatePosition);
-      document.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [openActionMenu]);
-
-  useEffect(() => {
-    if (!openActionMenu) return undefined;
-    const onPointerDown = (event) => {
-      if (
-        !actionMenuTriggerRef.current?.contains(event.target) &&
-        !actionMenuRef.current?.contains(event.target)
-      ) {
-        setOpenActionMenu(null);
-      }
-    };
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        setOpenActionMenu(null);
-        actionMenuTriggerRef.current?.focus();
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [openActionMenu]);
-
   const showReferralTypeFilter = canWrite && canCreate;
   const columns = isResident
     ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Referral Status", "Actions"]
@@ -1703,16 +1632,64 @@ export default function HealthReferrals() {
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center justify-center">
-                      <button
-                        type="button"
-                        onClick={(event) => toggleActionMenu(event, r.id)}
-                        className="clinical-action inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-                        aria-label={`Actions for ${r.residentName}`}
-                        aria-haspopup="menu"
-                        aria-expanded={openActionMenu === r.id}
+                      <ActionMenu
+                        open={openActionMenu === r.id}
+                        onOpenChange={(open) => setOpenActionMenu(open ? r.id : null)}
                       >
-                        <MoreVertical className="h-4 w-4" aria-hidden="true" />
-                      </button>
+                        <ActionMenuTrigger label={`Actions for ${r.residentName}`} />
+                        <ActionMenuContent aria-label={`Actions for ${r.residentName}`}>
+                          <ActionMenuItem icon={Eye} onSelect={() => void openDetail(r)}>View Details</ActionMenuItem>
+                          {isResident && canResidentRespondToReferral(r) && !pendingRequestForReferral(r) && (
+                            <>
+                              {r.scheduleResponseStatus !== "Attendance Confirmed" && (
+                                <ActionMenuItem
+                                  icon={CheckCircle2}
+                                  disabled={residentRequestBusy}
+                                  onSelect={() => void submitResidentScheduleRequest({ record: r, requestType: "attendance" })}
+                                >
+                                  Confirm Attendance
+                                </ActionMenuItem>
+                              )}
+                              <ActionMenuItem
+                                icon={CalendarClock}
+                                disabled={residentRequestBusy}
+                                onSelect={() => setScheduleRequestTarget({ record: r, requestType: "reschedule" })}
+                              >
+                                Request Reschedule
+                              </ActionMenuItem>
+                              <ActionMenuItem
+                                icon={Ban}
+                                danger
+                                disabled={residentRequestBusy}
+                                onSelect={() => setScheduleRequestTarget({ record: r, requestType: "cancellation" })}
+                              >
+                                Request Cancellation
+                              </ActionMenuItem>
+                            </>
+                          )}
+                          {isResident && pendingRequestForReferral(r) && (
+                            <ActionMenuMessage>Your schedule request is awaiting staff review.</ActionMenuMessage>
+                          )}
+                          {isResident && !canResidentRespondToReferral(r) && !["Completed", "Rejected", "Cancelled"].includes(r.status) && (
+                            <ActionMenuMessage>Schedule changes for this destination must be arranged directly with the facility.</ActionMenuMessage>
+                          )}
+                          {!isResident && shouldShowReferralDownloadAction(user) && (
+                            <ActionMenuItem
+                              icon={Download}
+                              disabled={exportingId === r.id}
+                              onSelect={() => handleDownloadPdf(r)}
+                            >
+                              Download / Print
+                            </ActionMenuItem>
+                          )}
+                          {!isResident && canAssignReferral(r, can) && (
+                            <ActionMenuItem icon={Edit2} onSelect={() => openEdit(r)}>Edit</ActionMenuItem>
+                          )}
+                          {!isResident && allowedReferralStatuses(r, can).length > 0 && (
+                            <ActionMenuItem icon={RefreshCw} onSelect={() => openStatus(r)}>Update Status</ActionMenuItem>
+                          )}
+                        </ActionMenuContent>
+                      </ActionMenu>
                     </div>
                   </td>
                 </tr>
@@ -1737,88 +1714,6 @@ export default function HealthReferrals() {
         </div>
         <TablePagination total={filtered.length} page={referralPage} pageSize={referralPageSize} onPageChange={setReferralPage} onPageSizeChange={(size) => { setReferralPageSize(size); setReferralPage(1); }} className="m-3" />
       </Card>
-
-      {openActionMenu && typeof document !== "undefined" && createPortal(
-        (() => {
-          const record = filtered.find((item) => item.id === openActionMenu);
-          if (!record) return null;
-
-          const menuItemClass = "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg focus-visible:bg-brand-bg focus-visible:outline-none dark:text-foreground dark:hover:bg-hover dark:focus-visible:bg-hover";
-          const closeMenu = () => {
-            setOpenActionMenu(null);
-            setActionMenuPosition(null);
-          };
-          const selectAction = (action) => {
-            closeMenu();
-            action();
-          };
-
-          return (
-            <div
-              ref={actionMenuRef}
-              role="menu"
-              aria-label={`Actions for ${record.residentName}`}
-              className="fixed z-[90] max-h-[calc(100vh-1rem)] w-56 overflow-y-auto rounded-lg border border-brand-border bg-white py-1 shadow-lg dark:border-border dark:bg-card"
-              style={{
-                left: actionMenuPosition?.left ?? 0,
-                top: actionMenuPosition?.top ?? 0,
-                visibility: actionMenuPosition ? "visible" : "hidden",
-              }}
-            >
-              <button type="button" role="menuitem" onClick={() => selectAction(() => void openDetail(record))} className={menuItemClass}>
-                <Eye className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-                View Details
-              </button>
-              {isResident && canResidentRespondToReferral(record) && !pendingRequestForReferral(record) && (
-                <>
-                  {record.scheduleResponseStatus !== "Attendance Confirmed" && (
-                    <button type="button" role="menuitem" disabled={residentRequestBusy} onClick={() => selectAction(() => void submitResidentScheduleRequest({ record, requestType: "attendance" }))} className={`${menuItemClass} disabled:opacity-50`}>
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-green" aria-hidden="true" /> Confirm Attendance
-                    </button>
-                  )}
-                  <button type="button" role="menuitem" disabled={residentRequestBusy} onClick={() => selectAction(() => setScheduleRequestTarget({ record, requestType: "reschedule" }))} className={`${menuItemClass} disabled:opacity-50`}>
-                    <CalendarClock className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" /> Request Reschedule
-                  </button>
-                  <button type="button" role="menuitem" disabled={residentRequestBusy} onClick={() => selectAction(() => setScheduleRequestTarget({ record, requestType: "cancellation" }))} className={`${menuItemClass} disabled:opacity-50`}>
-                    <Ban className="h-4 w-4 shrink-0 text-brand-danger" aria-hidden="true" /> Request Cancellation
-                  </button>
-                </>
-              )}
-              {isResident && pendingRequestForReferral(record) && (
-                <p className="px-3 py-2 text-xs leading-snug text-brand-gray">Your schedule request is awaiting staff review.</p>
-              )}
-              {isResident && !canResidentRespondToReferral(record) && !["Completed", "Rejected", "Cancelled"].includes(record.status) && (
-                <p className="px-3 py-2 text-xs leading-snug text-brand-gray">Schedule changes for this destination must be arranged directly with the facility.</p>
-              )}
-              {!isResident && shouldShowReferralDownloadAction(user) && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={exportingId === record.id}
-                  onClick={() => selectAction(() => handleDownloadPdf(record))}
-                  className={`${menuItemClass} disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  <Download className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-                  Download / Print
-                </button>
-              )}
-              {!isResident && canAssignReferral(record, can) && (
-                <button type="button" role="menuitem" onClick={() => selectAction(() => openEdit(record))} className={menuItemClass}>
-                  <Edit2 className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-                  Edit
-                </button>
-              )}
-              {!isResident && allowedReferralStatuses(record, can).length > 0 && (
-                <button type="button" role="menuitem" onClick={() => selectAction(() => openStatus(record))} className={menuItemClass}>
-                  <RefreshCw className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-                  Update Status
-                </button>
-              )}
-            </div>
-          );
-        })(),
-        document.body,
-      )}
 
       {/* Detail modal */}
       {detail && (

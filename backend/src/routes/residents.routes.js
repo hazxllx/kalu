@@ -28,6 +28,7 @@ import ApiError from '../utils/apiError.js';
  *   POST  /residents                    Register resident + optional login account (`residents.create`, idempotent)
  *   PATCH /residents/me                 Resident self-service profile update (`residentSelf`)
  *   GET   /residents/me/health-records  Resident self-service clinical records (`residentSelf`)
+ *   GET   /residents/risk-summary/:id/clinical-details  Scoped assessment history (`reports.analytics.view`)
  *   GET   /residents/:id                Single resident profile & risk summary (`residents.profile.view`)
  *   POST  /residents/:id/account        Invite & link login account to existing resident (`accounts.create`)
  *   POST  /residents/:id/resend-invitation Resend setup link for its linked pending account (`accounts.create`)
@@ -53,6 +54,12 @@ router.get(
   '/risk-summary',
   authorize(['health_supervisor', 'phn', 'mho'], { permission: 'reports.analytics.view' }),
   asyncHandler(residentsController.getResidentRiskSummary),
+);
+
+router.get(
+  '/risk-summary/:id/clinical-details',
+  authorize(['health_supervisor', 'phn', 'mho'], { permission: 'reports.analytics.view' }),
+  asyncHandler(residentsController.getResidentRiskClinicalDetails),
 );
 
 // Enforces `accounts.create` in addition to `residents.create` when a staff

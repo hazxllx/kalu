@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, MoreVertical, Users } from "lucide-react";
+import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, Users } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import FormModal from "@/components/common/FormModal";
 import DataTable from "@/components/tables/DataTable";
@@ -10,6 +10,7 @@ import RiskBadge from "@/components/common/RiskBadge";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { ButtonSelectGroup } from "@/components/system";
 import { Card } from "@/components/common/Card";
+import { ActionMenu, ActionMenuContent, ActionMenuItem, ActionMenuTrigger } from "@/components/ui/action-menu";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
@@ -19,6 +20,7 @@ import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { residentsApi } from "@/services/api";
 import {
   createResidentOffline,
+  getResidentOffline,
   listResidentsOffline,
   updateResidentOffline,
 } from "@/services/offline/residentOfflineService";
@@ -406,6 +408,9 @@ export default function ResidentsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [selected, setSelected] = useState(/** @type {ResidentRow|null} */ (null));
   const [selectedOwner, setSelectedOwner] = useState(/** @type {string|null|undefined} */ (null));
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewError, setViewError] = useState(/** @type {string|null} */ (null));
+  const viewRequest = useRef(0);
   const [editTarget, setEditTarget] = useState(/** @type {ResidentRow|null} */ (null));
   const [form, setForm] = useState(/** @type {ResidentForm} */ (initialFromUser(user)));
   const [errors, setErrors] = useState(/** @type {ValidationErrors} */ ({}));
@@ -435,15 +440,6 @@ export default function ResidentsPage() {
     setToast(message);
     setTimeout(() => setToast(null), 3200);
   };
-
-  useEffect(() => {
-    if (!openActionMenu) return undefined;
-    const close = (event) => {
-      if (!event.target.closest("[data-resident-actions]")) setOpenActionMenu(null);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [openActionMenu]);
 
   const role = String(user?.role || "").toLowerCase();
   const barangayAssignmentLocked = role === "health_supervisor" || role === "bhw";
@@ -610,12 +606,21 @@ export default function ResidentsPage() {
 
   useEffect(() => {
     setShowAddModal(false);
+    setShowViewModal(false);
     setShowEditModal(false);
+    setSelected(null);
+    setSelectedOwner(null);
     setEditTarget(null);
+    setViewLoading(false);
+    setViewError(null);
+    viewRequest.current += 1;
   }, [user?.id, assignedBarangay]);
 
   const closeView = () => {
+    viewRequest.current += 1;
     setShowViewModal(false);
+    setViewLoading(false);
+    setViewError(null);
     if (residentParam) {
       const next = new URLSearchParams(searchParams);
       next.delete("residentId");
@@ -632,14 +637,35 @@ export default function ResidentsPage() {
   };
 
   /** @param {ResidentRow} resident */
-  const openView = (resident) => {
-    if (supervisor && (!canViewProfile || !assignedBarangay)) return;
+  const openView = async (resident) => {
+    if (!user?.id || (supervisor && (!canViewProfile || !assignedBarangay))) return;
+    const requestId = ++viewRequest.current;
+    const ownerId = user.id;
     setSelected(resident);
-    setSelectedOwner(user?.id);
+    setSelectedOwner(ownerId);
     setLinkPanelOpen(false);
     setLinkEmail("");
     setLinkError(null);
     setShowViewModal(true);
+    setViewLoading(true);
+    setViewError(null);
+    try {
+      const record = await getResidentOffline({ ownerId, residentId: resident.id });
+      if (requestId !== viewRequest.current || ownerId !== user?.id) return;
+      if (!record || String(record.id) !== String(resident.id)) {
+        throw new Error("The requested resident record was not returned.");
+      }
+      if (supervisor && String(record.barangay || "").trim().toLowerCase() !== assignedBarangay.toLowerCase()) {
+        throw new Error("This resident is not available in your assigned barangay.");
+      }
+      setSelected(mapRecord(record));
+    } catch (error) {
+      if (requestId === viewRequest.current && ownerId === user?.id) {
+        setViewError(error?.message || "Could not load the resident profile.");
+      }
+    } finally {
+      if (requestId === viewRequest.current && ownerId === user?.id) setViewLoading(false);
+    }
   };
 
   /**
@@ -1166,26 +1192,31 @@ export default function ResidentsPage() {
               if (key === "status") return <StatusBadge value={row.status} />;
               if (key === "riskLevel") return <RiskBadge level={row.riskLevel} assessmentStatus={row.riskAssessmentStatus} />;
               if (key === "account") return <AccountStatusPill status={row.accountStatus} />;
-              if (key === "actions")
+              if (key === "actions") {
+                const menuId = `table:${row.id}`;
                 return (
-                  <div className="relative flex justify-end" data-resident-actions>
-                    <button
-                      type="button"
-                      onClick={() => setOpenActionMenu((current) => current === row.id ? null : row.id)}
-                      className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-2.5 py-1.5 text-sm font-medium text-brand-blue hover:border-brand-blue"
-                      aria-haspopup="menu"
-                      aria-expanded={openActionMenu === row.id}
+                  <div className="flex justify-end">
+                    <ActionMenu
+                      open={openActionMenu === menuId}
+                      onOpenChange={(open) => setOpenActionMenu(open ? menuId : null)}
                     >
-                      <MoreVertical className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                    {openActionMenu === row.id && (
-                      <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-[9rem] rounded-btn border border-brand-border bg-white p-1 shadow-lg">
-                        {(!supervisor || canViewProfile) && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openView(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>}
-                        {canEdit && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openEdit(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Pencil className="h-4 w-4 text-brand-gray" /> Edit Resident</button>}
-                      </div>
-                    )}
+                      <ActionMenuTrigger label={`Actions for ${row.name}`} />
+                      <ActionMenuContent aria-label={`Actions for ${row.name}`}>
+                        {(!supervisor || canViewProfile) && (
+                          <ActionMenuItem icon={Eye} onSelect={() => { setOpenActionMenu(null); openView(row); }}>
+                            View Details
+                          </ActionMenuItem>
+                        )}
+                        {canEdit && (
+                          <ActionMenuItem icon={Pencil} onSelect={() => { setOpenActionMenu(null); openEdit(row); }}>
+                            Edit Resident
+                          </ActionMenuItem>
+                        )}
+                      </ActionMenuContent>
+                    </ActionMenu>
                   </div>
                 );
+              }
               return row[/** @type {keyof ResidentRow} */ (key)] || "—";
             }}
           />
@@ -1200,12 +1231,30 @@ export default function ResidentsPage() {
                       <p className="truncate text-xs text-brand-gray">{row.cellphoneNo || "Contact not recorded"}</p>
                     </div>
                   </div>
-                  <div className="relative shrink-0" data-resident-actions>
-                    <button type="button" onClick={() => setOpenActionMenu((current) => current === row.id ? null : row.id)} className="inline-flex h-8 w-8 items-center justify-center rounded-btn text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" aria-label={`Actions for ${row.name}`} aria-haspopup="menu" aria-expanded={openActionMenu === row.id}><MoreVertical className="h-4 w-4" aria-hidden="true" /></button>
-                    {openActionMenu === row.id && <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-[9rem] rounded-btn border border-brand-border bg-white p-1 shadow-lg">
-                      {(!supervisor || canViewProfile) && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openView(row); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>}
-                      {canEdit && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openEdit(row); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Pencil className="h-4 w-4 text-brand-gray" /> Edit Resident</button>}
-                    </div>}
+                  <div className="shrink-0">
+                    {(() => {
+                      const menuId = `mobile:${row.id}`;
+                      return (
+                        <ActionMenu
+                          open={openActionMenu === menuId}
+                          onOpenChange={(open) => setOpenActionMenu(open ? menuId : null)}
+                        >
+                          <ActionMenuTrigger label={`Actions for ${row.name}`} />
+                          <ActionMenuContent aria-label={`Actions for ${row.name}`}>
+                            {(!supervisor || canViewProfile) && (
+                              <ActionMenuItem icon={Eye} onSelect={() => { setOpenActionMenu(null); openView(row); }}>
+                                View Details
+                              </ActionMenuItem>
+                            )}
+                            {canEdit && (
+                              <ActionMenuItem icon={Pencil} onSelect={() => { setOpenActionMenu(null); openEdit(row); }}>
+                                Edit Resident
+                              </ActionMenuItem>
+                            )}
+                          </ActionMenuContent>
+                        </ActionMenu>
+                      );
+                    })()}
                   </div>
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
@@ -1432,6 +1481,17 @@ export default function ResidentsPage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {viewLoading && <p role="status" className="mb-3 text-sm text-brand-gray">Loading the authorized resident profile…</p>}
+              {viewError && (
+                <ErrorState
+                  compact
+                  className="mb-3"
+                  title="Resident profile unavailable"
+                  message={viewError}
+                  onRetry={() => openView(selected)}
+                />
+              )}
 
               <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-border dark:bg-card">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Demographics</p>

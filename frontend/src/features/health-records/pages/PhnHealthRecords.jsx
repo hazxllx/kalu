@@ -22,7 +22,8 @@ import { filterRowsByScope } from "@/lib/phnScope";
 import { manilaDateKey, followUpNeedsAttention, isHighRiskResident } from "@/lib/phnDashboard";
 import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupWorkbench";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
-import { Search, Plus, Eye, Edit2, Trash2, X, ClipboardCheck, MoreVertical } from "lucide-react";
+import { Search, Plus, Eye, Edit2, Trash2, X, ClipboardCheck } from "lucide-react";
+import { ActionMenu, ActionMenuContent, ActionMenuItem, ActionMenuTrigger } from "@/components/ui/action-menu";
 import { formatStatusLabel, getStatusColor, getRiskColor } from "@/lib/statusFormatter";
 import TablePagination from "@/components/tables/TablePagination";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
@@ -211,10 +212,10 @@ export default function PhnHealthRecords() {
   }, [records, registry, resource.data]);
   const modalOpen = Boolean(editor || viewing || policy || checkup || pendingView);
   useEffect(() => {
-    if (!modalOpen && !openMenuId) return;
+    if (!modalOpen) return;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = ""; };
-  }, [modalOpen, openMenuId]);
+  }, [modalOpen]);
   useEffect(() => { setEditor(null); setOriginal(null); setViewing(null); setPendingView(null); setPolicy(false); setCheckup(null); setForm(consultationForm()); setContextState(null); setErrors({}); setFailure(""); setBusy(false); setNotice(null); setQuery(""); }, [user?.id]);
 
   const openRecord = async (record, edit) => {
@@ -441,7 +442,8 @@ export default function PhnHealthRecords() {
                   const resident = record.resident || {};
                   const initials = (resident.name || "??").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
                   const riskLevel = consultationRiskLevel(record);
-                  const isMenuOpen = openMenuId === record.id;
+                  const menuId = `table:${record.id}`;
+                  const isMenuOpen = openMenuId === menuId;
                   
                   return (
                     <tr key={record.id}>
@@ -481,77 +483,30 @@ export default function PhnHealthRecords() {
                         </span>
                       </td>
                       <td className="relative align-middle text-center" style={{ width: '17%' }}>
-                        <button
-                          disabled={busy}
-                          onClick={() => setOpenMenuId(isMenuOpen ? null : record.id)}
-                          className="clinical-action inline-flex items-center justify-center disabled:opacity-50"
-                          title="Actions"
-                          type="button"
+                        <ActionMenu
+                          open={isMenuOpen}
+                          onOpenChange={(open) => setOpenMenuId(open ? menuId : null)}
                         >
-                          <MoreVertical className="h-4 w-4 text-718096" />
-                        </button>
-                        {isMenuOpen && (
-                          <>
-                            <div 
-                              className="fixed inset-0 z-30" 
-                              onClick={() => setOpenMenuId(null)}
-                            />
-                            <div className="absolute z-40 min-w-[160px] rounded border border-e2e8f0 bg-white shadow-md py-1" 
-                              style={{
-                                top: '100%',
-                                right: 0,
-                                marginTop: '0.5rem',
-                              }}
-                            >
-                              <button
-                                disabled={busy}
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  openRecord(record, false);
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-25364a hover:bg-f5f8fc disabled:opacity-50 transition-colors text-left"
-                              >
-                                <Eye className="h-4 w-4 flex-shrink-0 text-315f91" />
-                                <span>View Record</span>
-                              </button>
-                              {!consultationDateIsPast(record) && <button
-                                disabled={busy}
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  openRecord(record, true);
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-25364a hover:bg-f5f8fc disabled:opacity-50 transition-colors text-left"
-                              >
-                                <Edit2 className="h-4 w-4 flex-shrink-0 text-315f91" />
-                                <span>Edit Record</span>
-                              </button>}
-                              {patientsByVisit.has(String(record.id)) && (
-                                <button
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    setCheckup(patientsByVisit.get(String(record.id)));
-                                  }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-25364a hover:bg-f5f8fc transition-colors text-left"
-                                  type="button"
-                                >
-                                  <ClipboardCheck className="h-4 w-4 flex-shrink-0 text-16a34a" />
-                                  <span>Open PHN Workflow</span>
-                                </button>
-                              )}
-                              <button
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  setPolicy(true);
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-718096 hover:bg-f5f8fc transition-colors text-left"
-                                type="button"
-                              >
-                                <Trash2 className="h-4 w-4 flex-shrink-0" />
-                                <span>Deletion Policy</span>
-                              </button>
-                            </div>
-                          </>
-                        )}
+                          <ActionMenuTrigger label={`Actions for ${resident.name || "resident"}`} disabled={busy} />
+                          <ActionMenuContent aria-label={`Actions for ${resident.name || "resident"}`}>
+                            <ActionMenuItem icon={Eye} disabled={busy} onSelect={() => { setOpenMenuId(null); openRecord(record, false); }}>
+                              View Record
+                            </ActionMenuItem>
+                            {!consultationDateIsPast(record) && (
+                              <ActionMenuItem icon={Edit2} disabled={busy} onSelect={() => { setOpenMenuId(null); openRecord(record, true); }}>
+                                Edit Record
+                              </ActionMenuItem>
+                            )}
+                            {patientsByVisit.has(String(record.id)) && (
+                              <ActionMenuItem icon={ClipboardCheck} onSelect={() => { setOpenMenuId(null); setCheckup(patientsByVisit.get(String(record.id))); }}>
+                                Open PHN Workflow
+                              </ActionMenuItem>
+                            )}
+                            <ActionMenuItem icon={Trash2} onSelect={() => { setOpenMenuId(null); setPolicy(true); }}>
+                              Deletion Policy
+                            </ActionMenuItem>
+                          </ActionMenuContent>
+                        </ActionMenu>
                       </td>
                     </tr>
                   );
@@ -570,6 +525,7 @@ export default function PhnHealthRecords() {
             {pageRecords.map((record) => {
               const resident = record.resident || {};
               const riskLevel = consultationRiskLevel(record);
+              const menuId = `mobile:${record.id}`;
               return (
                 <article key={record.id} className="p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -577,12 +533,23 @@ export default function PhnHealthRecords() {
                       <p className="break-words text-base font-semibold text-brand-ink">{resident.name || "Name not recorded"}</p>
                       <p className="mt-0.5 break-words text-xs text-brand-gray">{resident.gender || resident.sex || "Unknown"} · {resident.age ? `${resident.age}y` : "Age unknown"}</p>
                     </div>
-                    <button type="button" disabled={busy} onClick={() => setOpenMenuId(openMenuId === record.id ? null : record.id)} className="clinical-action flex shrink-0 items-center justify-center" aria-label={`Actions for ${resident.name || "resident"}`}><MoreVertical className="h-4 w-4" /></button>
+                    <ActionMenu
+                      open={openMenuId === menuId}
+                      onOpenChange={(open) => setOpenMenuId(open ? menuId : null)}
+                    >
+                      <ActionMenuTrigger label={`Actions for ${resident.name || "resident"}`} disabled={busy} />
+                      <ActionMenuContent aria-label={`Actions for ${resident.name || "resident"}`}>
+                        <ActionMenuItem icon={Eye} disabled={busy} onSelect={() => { setOpenMenuId(null); openRecord(record, false); }}>
+                          View Record
+                        </ActionMenuItem>
+                        {!consultationDateIsPast(record) && (
+                          <ActionMenuItem icon={Edit2} disabled={busy} onSelect={() => { setOpenMenuId(null); openRecord(record, true); }}>
+                            Edit Record
+                          </ActionMenuItem>
+                        )}
+                      </ActionMenuContent>
+                    </ActionMenu>
                   </div>
-                  {openMenuId === record.id && <div className="mt-3 grid grid-cols-1 gap-2 border-t border-brand-border pt-3">
-                    <button type="button" onClick={() => { setOpenMenuId(null); openRecord(record, false); }} className="text-left text-sm font-medium text-brand-blue">View Record</button>
-                    {!consultationDateIsPast(record) && <button type="button" onClick={() => { setOpenMenuId(null); openRecord(record, true); }} className="text-left text-sm font-medium text-brand-blue">Edit Record</button>}
-                  </div>}
                   <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3">
                     <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Barangay</dt><dd className="mt-1 break-words text-sm text-brand-ink">{resident.barangay || "Not recorded"}</dd></div>
                     <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Resident ID</dt><dd className="mt-1 break-words text-sm text-brand-ink">{resident.id || record.residentId || "Not recorded"}</dd></div>

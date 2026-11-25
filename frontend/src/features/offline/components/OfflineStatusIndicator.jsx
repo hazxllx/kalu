@@ -1,11 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  CheckCircle2,
-  CloudOff,
-  GitMerge,
   Loader2,
-  RefreshCw,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -29,31 +25,31 @@ import { useNavigate } from 'react-router-dom';
  * consistent offline state: connection, last successful sync, pending change
  * count, live progress, failed operations with reasons, conflicts needing
  * review, and a manual retry action. Styling follows the KALUSAGAP blue design
- * system and stays responsive (icon-only on narrow screens).
+ * system and stays responsive.
  */
 
-const formatRelative = (timestamp) => {
-  if (!timestamp) return 'Never';
-  const diff = Date.now() - timestamp;
-  if (diff < 45_000) return 'Just now';
-  const minutes = Math.round(diff / 60_000);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return new Date(timestamp).toLocaleDateString();
+const formatTimestamp = (timestamp, initialized) => {
+  if (!initialized) return 'Loading...';
+  if (timestamp == null) return 'Not recorded';
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? 'Not available' : date.toLocaleString();
 };
+
+const formatCount = (value, initialized) =>
+  initialized && Number.isFinite(value) ? value : '—';
 
 const Stat = ({ label, value, tone = 'default' }) => {
   const tones = {
-    default: 'text-slate-700 dark:text-slate-200',
-    warn: 'text-amber-700',
-    danger: 'text-brand-danger',
-    success: 'text-brand-green',
+    neutral: 'text-[#475569] dark:text-slate-300',
+    info: 'text-[#2563EB] dark:text-blue-400',
+    warning: 'text-[#B45309] dark:text-amber-400',
+    danger: 'text-[#DC2626] dark:text-red-400',
+    success: 'text-[#059669] dark:text-emerald-400',
   };
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-border bg-brand-bg/50 px-3 py-2">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-0.5 text-lg font-semibold ${tones[tone] || tones.default}`}>{value}</p>
+    <div className="flex min-w-0 flex-col items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-center dark:border-border dark:bg-brand-bg/50">
+      <p className="whitespace-nowrap text-xs font-medium text-slate-600">{label}</p>
+      <p className={`mt-1 text-xl font-semibold leading-none tabular-nums ${tones[tone] || tones.neutral}`}>{value}</p>
     </div>
   );
 };
@@ -100,26 +96,40 @@ const OfflineStatusIndicator = () => {
     lastSyncedAt,
     serverAvailable,
     lastError,
+    initialized,
   } = status;
   const attention = (counts.pending || 0) + (counts.failed || 0) + (counts.conflict || 0) + (counts.offlineDraft || 0);
   const hasProblems = (counts.failed || 0) + (counts.conflict || 0) > 0;
   const canRetry = (counts.pending || 0) > 0 || failed.some((item) => item.retryable);
   const waitingCount = (counts.pending || 0) + (counts.syncing || 0) + (counts.offlineDraft || 0);
+  const metricsAvailable = initialized && !(lastError && !lastError.code) && [
+    counts.synced,
+    counts.pending,
+    counts.syncing,
+    counts.failed,
+    counts.conflict,
+    counts.offlineDraft,
+  ].every(Number.isFinite);
+  const noPendingChanges = metricsAvailable && waitingCount === 0 && !hasProblems && !lastError && serverAvailable !== false;
 
   const connectionLabel = online ? 'Online' : 'Offline';
   const summary = useMemo(() => {
+    if (!initialized) return 'Loading synchronization status...';
+    if (!metricsAvailable) return 'Synchronization status unavailable';
     if (upgradeBlocked) return 'Close other tabs to finish device storage upgrade';
     if (syncing) {
       const total = progress?.total || 0;
       return total ? `Synchronizing changes (${progress?.processed || 0}/${total})` : 'Synchronizing changes...';
     }
-    if (counts.failed > 0 || counts.conflict > 0) return 'Synchronization needs attention';
-    if (waitingCount > 0) return 'Changes waiting to synchronize';
-    if (!online) return 'Working offline';
+    if (counts.failed > 0) return 'Synchronization failed';
     if (lastError?.code === 'auth') return 'Sign in again to synchronize';
     if (serverAvailable === false) return 'Backend unavailable — retrying automatically';
-    return lastSyncedAt ? 'All changes are synchronized' : 'No pending changes';
-  }, [syncing, progress, counts.failed, counts.conflict, waitingCount, online, upgradeBlocked, serverAvailable, lastError, lastSyncedAt]);
+    if (lastError) return 'Synchronization failed';
+    if (counts.conflict > 0) return 'Changes need review';
+    if (waitingCount > 0) return 'Changes waiting to synchronize';
+    if (!online) return 'Working offline';
+    return 'No pending sync';
+  }, [initialized, metricsAvailable, syncing, progress, counts.failed, counts.conflict, waitingCount, online, upgradeBlocked, serverAvailable, lastError]);
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -167,18 +177,16 @@ const OfflineStatusIndicator = () => {
         <div
           role="dialog"
           aria-label="Connection and synchronization status"
-          className="fixed inset-x-3 top-16 z-50 max-h-[calc(100vh-5rem)] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-soft sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[22rem] sm:max-w-[calc(100vw-2rem)] dark:border-border dark:bg-popover"
+          className="absolute right-0 top-full z-50 mt-2 max-h-[calc(100vh-5rem)] w-[min(24rem,calc(100vw-1.5rem))] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-soft dark:border-border dark:bg-popover"
         >
-          <div className="border-b border-slate-200 bg-brand-bg/60 px-4 py-3 dark:border-border">
+          <div className="border-b border-slate-200 px-4 py-3 dark:border-border">
             <div className="flex items-center gap-2">
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${online ? 'bg-brand-green' : 'bg-amber-500'}`}
-                aria-hidden="true"
-              />
               <p className="text-sm font-semibold text-brand-ink dark:text-foreground">
-                {connectionLabel}
+                Synchronization
               </p>
-              <span className="ml-auto text-xs text-slate-500">{summary}</span>
+              <span className="ml-auto max-w-[65%] text-right text-xs text-slate-500">
+                {noPendingChanges ? 'No pending sync' : summary}
+              </span>
             </div>
             {syncing && (
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
@@ -203,8 +211,7 @@ const OfflineStatusIndicator = () => {
           )}
 
           {upgradeBlocked && (
-            <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
               <p>
                 Device storage is waiting for another KALUSAGAP tab to close before it can
                 finish the upgrade. Close the other tab; your saved offline data will be kept.
@@ -214,7 +221,6 @@ const OfflineStatusIndicator = () => {
 
           {updateReady && (
             <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
-              <RefreshCw className="h-4 w-4 shrink-0" />
               <span className="flex-1">A new version of KALUSAGAP is available.</span>
               <button
                 type="button"
@@ -226,18 +232,13 @@ const OfflineStatusIndicator = () => {
             </div>
           )}
 
-          <div className="space-y-3 p-4">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Stat label="Successful" value={counts.synced || 0} tone="success" />
-              <Stat label="Pending" value={counts.pending || 0} tone={counts.pending ? 'warn' : 'success'} />
-              <Stat label="Failed" value={counts.failed || 0} tone={counts.failed ? 'danger' : 'success'} />
-              <Stat label="Conflicts" value={counts.conflict || 0} tone={counts.conflict ? 'danger' : 'success'} />
+          <div className="space-y-3 p-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Stat label="Successful" value={formatCount(counts.synced, initialized)} tone="success" />
+              <Stat label="Pending" value={formatCount(counts.pending, initialized)} tone="info" />
+              <Stat label="Failed" value={formatCount(counts.failed, initialized)} tone="danger" />
+              <Stat label="Conflicts" value={formatCount(counts.conflict, initialized)} tone="warning" />
             </div>
-
-            <p className="flex items-center gap-1.5 text-xs text-slate-500">
-              <CheckCircle2 className="h-3.5 w-3.5 text-brand-green" />
-              Last successful synchronization: <span className="font-medium">{formatRelative(lastSyncedAt)}</span>
-            </p>
 
             {counts.pending > 0 && (
               <p className="rounded-lg border border-brand-blue/20 bg-brand-light px-3 py-2 text-xs text-brand-dark">
@@ -253,8 +254,8 @@ const OfflineStatusIndicator = () => {
 
             {failed.length > 0 && (
               <div className="space-y-1.5">
-                <p className="flex items-center gap-1.5 text-xs font-semibold text-brand-danger">
-                  <AlertTriangle className="h-3.5 w-3.5" /> Failed operations
+                <p className="text-xs font-semibold text-[#DC2626]">
+                  Failed operations
                 </p>
                 <ul className="max-h-32 space-y-1 overflow-y-auto">
                   {failed.map((item) => (
@@ -270,8 +271,8 @@ const OfflineStatusIndicator = () => {
 
             {conflicts.length > 0 && (
               <div className="space-y-1.5">
-                <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-700">
-                  <GitMerge className="h-3.5 w-3.5" /> Conflicts needing review
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Conflicts needing review
                 </p>
                 <ul className="max-h-32 space-y-1 overflow-y-auto">
                   {conflicts.map((item) => (
@@ -289,16 +290,8 @@ const OfflineStatusIndicator = () => {
               </div>
             )}
 
-            {!hasProblems && attention === 0 && (
-              <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                <CloudOff className="h-3.5 w-3.5" />
-                No changes are waiting to synchronize.
-              </p>
-            )}
-
             {syncing ? (
-              <button type="button" disabled className="inline-flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue/70 px-4 py-2 text-sm font-medium text-white">
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <button type="button" disabled className="inline-flex w-full items-center justify-center rounded-btn bg-brand-blue/70 px-4 py-2 text-sm font-medium text-white">
                 Synchronizing changes...
               </button>
             ) : canRetry ? (
@@ -306,21 +299,29 @@ const OfflineStatusIndicator = () => {
                 type="button"
                 onClick={handleRetry}
                 disabled={retrying || !online}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex w-full items-center justify-center rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                {online ? 'Sync Now' : 'Offline — retry when connected'}
+                {retrying ? 'Synchronizing...' : online ? 'Sync Now' : 'Offline — retry when connected'}
               </button>
             ) : hasProblems ? (
               (counts.conflict || 0) > 0
                 ? null
                 : <p className="text-xs text-slate-500">A retry may be available automatically.</p>
-            ) : (
-              <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-brand-green">
-                <CheckCircle2 className="h-4 w-4" />
-                All changes are synchronized
-              </p>
-            )}
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-t border-slate-200 bg-slate-50/70 px-3 py-2.5 text-xs dark:border-border dark:bg-brand-bg/40">
+            <p className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-200">
+              <span className={`h-2 w-2 rounded-full ${online ? 'bg-brand-green' : 'bg-amber-500'}`} aria-hidden="true" />
+              {connectionLabel}
+              <span className="font-normal text-slate-500">· Pending: {formatCount(counts.pending, initialized)}</span>
+            </p>
+            <p className="w-full text-slate-500">
+              Last synchronized:{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-200">
+                {formatTimestamp(lastSyncedAt, initialized)}
+              </span>
+            </p>
           </div>
         </div>
       )}
