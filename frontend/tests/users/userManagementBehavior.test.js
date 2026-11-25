@@ -238,7 +238,7 @@ for (const [status, expected] of [["failed", /email definitively failed before a
   });
 }
 
-test("BHW account creation requires and submits the separately recorded first name", async () => {
+test("BHW account creation uses the full name without a separate first-name field", async () => {
   const page = await mount({
     roleOptions: {
       ...options,
@@ -249,13 +249,13 @@ test("BHW account creation requires and submits the separately recorded first na
     await page.click("Create Account");
     await page.change("account-role", "bhw");
     await page.change("account-name", "Juan Dela Cruz");
-    await page.change("account-first-name", "Juan");
     await page.change("account-email", "juan.bhw@example.test");
     await page.change("account-contact", "09123456789");
     await page.change("account-barangay", "barangay-1");
     await page.submit();
     assert.equal(page.calls.create.length, 1);
-    assert.equal(page.calls.create[0][0].firstName, "Juan");
+    assert.equal(page.calls.create[0][0].name, "Juan Dela Cruz");
+    assert.equal("firstName" in page.calls.create[0][0], false);
   } finally { page.close(); }
 });
 

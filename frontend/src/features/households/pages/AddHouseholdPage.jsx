@@ -11,10 +11,10 @@ import {
   Pencil,
   Search,
   Users,
-  X,
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
 import HouseholdDialog from "../components/HouseholdDialog";
+import { FormModalHeader } from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
 import PageHeader from "@/components/common/PageHeader";
 import { ButtonSelectGroup } from "@/components/system";
@@ -222,24 +222,11 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
 
   return (
     <HouseholdDialog label={isEdit ? "Edit household member" : "Add household member"} onClose={onClose}>
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border bg-brand-bg/70 px-4 py-2 sm:px-6">
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
-                Household Member
-              </p>
-              <h3 className="text-lg font-semibold text-brand-ink">
-                {isEdit ? "Edit Household Member" : "Add Household Member"}
-              </h3>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg"
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
+          <FormModalHeader
+            title={isEdit ? "Edit Household Member" : "Add Household Member"}
+            description="Enter the household member's identity, contact, and visit information."
+            onClose={onClose}
+          />
 
           <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere] sm:p-6">
             {!isEdit && (
@@ -480,18 +467,18 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-brand-border px-4 py-2 sm:px-6 [&>button]:min-h-11">
+          <div className="flex shrink-0 flex-col gap-2 border-t border-brand-border bg-white px-4 py-3 dark:border-border dark:bg-card sm:flex-row sm:justify-end sm:px-6 [&>button]:min-h-11">
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex items-center justify-center rounded-btn border border-brand-border bg-white px-5 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:bg-brand-bg"
+              className="inline-flex w-full items-center justify-center rounded-btn border border-brand-border bg-white px-5 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:text-foreground dark:hover:bg-hover sm:w-auto"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={onSubmit}
-              className="inline-flex items-center justify-center rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+              className="inline-flex w-full items-center justify-center rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark sm:w-auto"
             >
               {isEdit ? "Save Changes" : "Add Member"}
             </button>

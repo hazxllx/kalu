@@ -31,6 +31,68 @@ const SMTP_ERROR_CODES = new Set([
   'ESOCKET', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN',
   'EPIPE', 'EENVELOPE', 'EMESSAGE', 'ESTREAM', 'EPROTOCOL', 'ECONFIG', 'EPROXY',
 ]);
+const SMTP_PHASES = new Set(['auth', 'handshake', 'starttls', 'mail_from', 'rcpt_to', 'data', 'after_send', 'connect', 'unknown']);
+const SMTP_CONNECTION_CODES = new Set(['EDNS', 'ECONNECTION', 'ESOCKET', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE']);
+
+export const emailSender = (address) => ({ name: 'Kalusagap', address });
+
+export const getSmtpFailureDetails = (error) => {
+  const smtpCode = SMTP_ERROR_CODES.has(error?.originalCode) ? error.originalCode
+    : SMTP_ERROR_CODES.has(error?.code) ? error.code : null;
+  const smtpPhase = SMTP_PHASES.has(error?.smtpPhase) ? error.smtpPhase : 'unknown';
+  const responseCode = Number.isInteger(error?.responseCode)
+    && error.responseCode >= 100 && error.responseCode <= 599 ? error.responseCode : null;
+
+  let failureClass = 'unknown';
+  let code = 'SMTP_OUTCOME_UNKNOWN';
+  if (error?.code === 'SMTP_NOT_CONFIGURED') {
+    failureClass = 'configuration_failure';
+    code = 'SMTP_NOT_CONFIGURED';
+  } else if (error?.code === 'SMTP_RECIPIENT_REJECTED') {
+    failureClass = 'recipient_rejection';
+    code = 'SMTP_RECIPIENT_REJECTED';
+  } else if (['EAUTH', 'ENOAUTH', 'EOAUTH2'].includes(smtpCode)) {
+    failureClass = 'authentication_failure';
+    code = responseCode === 535 ? 'SMTP_AUTH_CREDENTIALS_REJECTED' : 'SMTP_AUTHENTICATION_FAILED';
+  } else if (smtpPhase === 'mail_from' && [550, 553].includes(responseCode)) {
+    failureClass = 'sender_rejection';
+    code = 'SMTP_SENDER_REJECTED';
+  } else if (['ETLS', 'EREQUIRETLS'].includes(smtpCode) || smtpPhase === 'starttls') {
+    failureClass = 'tls_failure';
+    code = 'SMTP_TLS_FAILURE';
+  } else if (smtpCode === 'ETIMEDOUT' || error?.originalCode === 'ETIMEDOUT') {
+    failureClass = 'connection_timeout';
+    code = 'SMTP_CONNECTION_TIMEOUT';
+  } else if (responseCode >= 400 && responseCode <= 599) {
+    failureClass = 'provider_rejection';
+    code = 'SMTP_PROVIDER_REJECTED';
+  } else if (SMTP_CONNECTION_CODES.has(smtpCode)) {
+    failureClass = 'connection_failure';
+    code = 'SMTP_CONNECTION_FAILED';
+  } else if (smtpCode) {
+    code = `SMTP_${smtpCode}`;
+  }
+
+  return { code, failureClass, smtpCode, smtpPhase, responseCode };
+};
+
+const responseCodeFromInfo = (info) => {
+  const finalReply = String(info?.response || '').trim().split(/\r?\n/).at(-1);
+  const responseCode = Number(finalReply.match(/^(\d{3})(?:\s|$)/)?.[1]);
+  return Number.isInteger(responseCode) && responseCode >= 100 && responseCode <= 599 ? responseCode : null;
+};
+
+const assertRecipientAccepted = (info, email, message) => {
+  const includesRecipient = (list) => Array.isArray(list)
+    && list.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
+  if (!includesRecipient(info?.accepted) || includesRecipient(info?.rejected)) {
+    throw Object.assign(new Error(message), {
+      code: 'SMTP_RECIPIENT_REJECTED',
+      smtpPhase: 'rcpt_to',
+      responseCode: responseCodeFromInfo(info),
+    });
+  }
+};
 
 /**
  * Return the singleton Nodemailer SMTP transporter, creating it on first use.
@@ -103,12 +165,15 @@ export const sendSmtpMail = async (message, { transport = getEmailTransporter() 
     return await transport.sendMail({ ...message, personnelSmtpProgress: progress });
   } catch (error) {
     const command = String(error?.command || '').trim().toUpperCase();
-    const smtpPhase = /^(MAIL FROM|RCPT TO)\b/.test(command) ? 'envelope'
-      : /^(AUTH|EHLO|HELO|LHLO|STARTTLS)\b/.test(command) ? 'handshake'
-        : command === 'DATA' ? 'data'
-          : /^(QUIT|RSET)\b/.test(command) ? 'after_send'
-            : /^(CONN|CONNECT|CONNECTION)$/.test(command) ? 'connect'
-              : 'unknown';
+    const smtpPhase = /^MAIL FROM\b/.test(command) ? 'mail_from'
+      : /^RCPT TO\b/.test(command) ? 'rcpt_to'
+        : /^AUTH\b/.test(command) ? 'auth'
+          : /^STARTTLS\b/.test(command) ? 'starttls'
+            : /^(EHLO|HELO|LHLO)\b/.test(command) ? 'handshake'
+              : command === 'DATA' ? 'data'
+                : /^(QUIT|RSET)\b/.test(command) ? 'after_send'
+                  : /^(CONN|CONNECT|CONNECTION)$/.test(command) ? 'connect'
+                    : 'unknown';
     const responseCode = Number(error?.responseCode);
     const safeOriginalCode = [error?.originalCode, error?.cause?.code, error?.errno]
       .find((candidate) => SMTP_ERROR_CODES.has(candidate)) || null;
@@ -167,19 +232,19 @@ export const sendTransferOtp = async ({ email, otp }) => {
     </div>
   `;
 
-  await getEmailTransporter().sendMail({
-    from: env.smtpFrom,
+  const result = await sendSmtpMail({
+    from: emailSender(env.smtpFrom),
     to: email,
     subject: 'KALUSAGAP Transfer of Residency Verification Code',
     text,
     html,
   });
+  assertRecipientAccepted(result, email, 'Transfer verification email was not accepted.');
 };
 
 /**
  * Send a one-time password reset email with HTML-escaped link markup and verify
- * that the SMTP server explicitly accepted the target recipient address
- * (throwing `code: 'SMTP_RECIPIENT_REJECTED'` otherwise).
+ * that the SMTP server explicitly accepted the target recipient address.
  *
  * @param {Object} params - Email parameters (`email`, `resetUrl`).
  * @returns {Promise<void>}
@@ -187,7 +252,7 @@ export const sendTransferOtp = async ({ email, otp }) => {
 export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
   const safeUrl = String(resetUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const message = {
-    from: env.smtpFrom,
+    from: emailSender(env.smtpFrom),
     to: { address: email },
     subject: 'KALUSAGAP Password Reset',
     text: [
@@ -207,11 +272,7 @@ export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
     </div>`,
   };
   const result = await sendSmtpMail(message);
-  const accepted = Array.isArray(result?.accepted)
-    && result.accepted.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
-  const rejected = Array.isArray(result?.rejected)
-    && result.rejected.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
-  if (!accepted || rejected) throw Object.assign(new Error('Password reset email was not accepted.'), { code: 'SMTP_RECIPIENT_REJECTED' });
+  assertRecipientAccepted(result, email, 'Password reset email was not accepted.');
 };
 
 /**
@@ -225,7 +286,7 @@ export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
 export const sendPasswordSetupEmail = async ({ email, setupUrl }) => {
   const safeUrl = String(setupUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const message = {
-    from: env.smtpFrom,
+    from: emailSender(env.smtpFrom),
     to: { address: email },
     subject: 'KALUSAGAP Password Setup',
     text: [
@@ -245,11 +306,7 @@ export const sendPasswordSetupEmail = async ({ email, setupUrl }) => {
     </div>`,
   };
   const result = await sendSmtpMail(message);
-  const accepted = Array.isArray(result?.accepted)
-    && result.accepted.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
-  const rejected = Array.isArray(result?.rejected)
-    && result.rejected.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
-  if (!accepted || rejected) throw Object.assign(new Error('Password setup email was not accepted.'), { code: 'SMTP_RECIPIENT_REJECTED' });
+  assertRecipientAccepted(result, email, 'Password setup email was not accepted.');
 };
 
 /**
@@ -263,7 +320,7 @@ export const sendResidentInvitationEmail = async ({ email, invitationUrl }) => {
     throw Object.assign(new Error('Resident invitation template is missing its Auth confirmation URL.'), { code: 'INVITATION_TEMPLATE_INVALID' });
   }
   const message = {
-    from: env.smtpFrom,
+    from: emailSender(env.smtpFrom),
     to: { address: email },
     subject: 'Welcome to KALUSAGAP',
     text: [
@@ -286,11 +343,10 @@ export const sendResidentInvitationEmail = async ({ email, invitationUrl }) => {
     html: template.replaceAll('{{ .ConfirmationURL }}', safeUrl),
   };
   const result = await sendSmtpMail(message);
-  const accepted = Array.isArray(result?.accepted)
-    && result.accepted.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
-  const rejected = Array.isArray(result?.rejected)
-    && result.rejected.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
-  if (!accepted || rejected) throw Object.assign(new Error('Resident invitation email was not accepted.'), { code: 'SMTP_RECIPIENT_REJECTED' });
+  assertRecipientAccepted(result, email, 'Resident invitation email was not accepted.');
 };
 
-export default { sendTransferOtp, sendPasswordResetEmail, sendPasswordSetupEmail, sendResidentInvitationEmail, getEmailTransporter, sendSmtpMail };
+export default {
+  sendTransferOtp, sendPasswordResetEmail, sendPasswordSetupEmail, sendResidentInvitationEmail,
+  getEmailTransporter, sendSmtpMail, getSmtpFailureDetails, emailSender,
+};

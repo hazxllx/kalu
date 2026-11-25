@@ -41,7 +41,7 @@ import { getRiskConfig } from './riskConfig.service.js';
 import { withHistoryLinks } from './consultations.service.js';
 import { classifyBloodPressure } from '../config/bpThresholds.js';
 import { notifyHealthSupervisorsOnce } from './notifications.service.js';
-import { sendResidentInvitationEmail } from './email.service.js';
+import { getSmtpFailureDetails, sendResidentInvitationEmail } from './email.service.js';
 import { consultationAssessmentReasons, getManilaDateTime, isConsultationDate, normalizeConsultationRiskLevel, savedConsultationAssessment } from '../../../shared/consultationClinical.js';
 
 const SELF_ROLES = ['resident', 'resident-limited'];
@@ -1884,7 +1884,11 @@ export const resendResidentInvitation = async ({ id, user } = {}) => {
       email: authUser.email,
       invitationUrl: invitationUrl.href,
     });
-  } catch {
+  } catch (error) {
+    console.error('smtp_email_delivery_failed', {
+      operation: 'resident_invitation',
+      ...getSmtpFailureDetails(error),
+    });
     throw new ApiError(503, 'The resident account exists, but invitation delivery was not confirmed. Do not create another account; retry Resend invitation after checking the mail service.')
       .withCode('ACCOUNT_CREATED_EMAIL_FAILED');
   }

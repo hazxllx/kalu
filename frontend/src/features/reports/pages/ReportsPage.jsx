@@ -1129,9 +1129,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       {/* Report Details Modal (View a persisted submission) */}
       {detailReport && canLoadOutgoing && detailOwner === user?.id && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Saved Report Details" className={`min-w-0 w-full max-w-4xl max-h-[calc(100dvh-2rem)] overflow-y-auto break-words ${supervisor ? "supervisor-modal" : ""}`}>
+          <Card role="dialog" aria-modal="true" aria-label="Saved Report Details" className={`min-w-0 w-[calc(100vw-1.5rem)] max-w-[1000px] max-h-[88dvh] overflow-y-auto overscroll-contain break-words ${supervisor ? "supervisor-modal" : ""}`}>
             <div className="p-3 sm:p-6">
-              <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="sticky top-0 z-20 -mx-3 -mt-3 mb-4 flex items-start justify-between gap-3 border-b border-brand-border bg-white px-3 pt-3 pb-3 dark:border-border dark:bg-card sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6">
                 <div>
                   <h3 className="text-lg font-semibold text-brand-ink">{detailReport.name}</h3>
                   <p className="mt-0.5 text-sm text-brand-gray">{detailReport.type}{detailReport.period ? ` · ${detailReport.period}` : ""}</p>
@@ -1144,7 +1144,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               {supervisor && (detailContent?.remarks || detailReport.remarks) && <section className="mt-4 rounded border border-amber-300 bg-amber-50 p-3"><h4 className="text-ui font-semibold text-amber-900">{["Needs Revision", "Rejected"].includes(detailContent?.status || detailReport.status) ? "Reviewer Explanation" : "Reviewer Remarks"}</h4><p className="mt-1 whitespace-pre-wrap text-ui text-amber-900">{detailContent?.remarks || detailReport.remarks}</p>{(detailContent?.reviewedByName || detailReport.reviewedByName) && <p className="mt-2 text-caption text-amber-900">{detailContent?.reviewedByName || detailReport.reviewedByName}{(detailContent?.reviewedAt || detailReport.reviewedAt) ? ` · ${reportDateTime(detailContent?.reviewedAt || detailReport.reviewedAt)}` : ""}</p>}</section>}
               {supervisor && detailContent?.receivedAt && <section className="mt-4 rounded border border-brand-green/30 bg-brand-green/5 p-3"><h4 className="text-ui font-semibold text-brand-ink">Received by RHU</h4><p className="mt-1 text-caption text-brand-gray">{detailContent.receivedByName || "Receiving personnel"} · {reportDateTime(detailContent.receivedAt)}</p></section>}
               {supervisor && Array.isArray(detailContent?.history) && detailContent.history.length > 0 && <section className="mt-4"><h4 className="mb-2 text-ui font-semibold text-brand-ink">Persisted Report History</h4><ol className="divide-y divide-brand-border rounded border border-brand-border px-3">{detailContent.history.map((event, index) => <li key={`${event.at}-${index}`} className="py-2"><p className="text-ui font-medium text-brand-ink">{event.previousStatus ? `${event.previousStatus} → ` : ""}{event.status || event.action}</p><p className="text-caption text-brand-gray">{reportDateTime(event.at)}{event.actorName ? ` · ${event.actorName}` : ""}{event.actorRole ? ` (${event.actorRole.replaceAll("_", " ")})` : ""}</p>{event.explanation && <p className="mt-1 whitespace-pre-wrap text-ui text-brand-gray">{event.explanation}</p>}</li>)}</ol></section>}
-              <div className="space-y-2 rounded-btn border border-brand-border bg-brand-bg/50 p-4">
+              <div className="grid min-w-0 grid-cols-1 gap-x-5 gap-y-3 rounded-btn border border-brand-border bg-brand-bg/50 p-3 sm:grid-cols-2 sm:p-4">
                 {[
                   ["Type", detailReport.type || "—"],
                   ["Period", detailReport.period || "—"],
@@ -1154,9 +1154,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   ["Date Generated", detailReport.date || "—"],
                   ["Submitted", detailReport.submittedDate || "—"],
                 ].map(([label, value]) => (
-                  <div key={label} className="flex items-start justify-between gap-3 text-sm">
-                    <span className="shrink-0 text-brand-gray">{label}</span>
-                    <span className="min-w-0 text-right font-medium text-brand-ink">{value}</span>
+                  <div key={label} className="min-w-0 [overflow-wrap:anywhere]">
+                    <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</p>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-brand-ink">{value}</p>
                   </div>
                 ))}
               </div>
@@ -1185,7 +1185,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
 
               {submitError && <p role="alert" className="mt-4 rounded border border-brand-danger/30 bg-brand-danger/5 px-3 py-2 text-ui text-brand-danger">{submitError}</p>}
 
-              <div className="mt-6 flex justify-end">
+              <div className="sticky bottom-0 z-10 -mx-3 mt-6 flex justify-end gap-2 border-t border-brand-border bg-white/95 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur dark:border-border dark:bg-card/95 sm:-mx-6 sm:px-6">
                 {canSubmitReports && detailContent?.id === detailReport.id && detailStatus === "Needs Revision" && (
                   <button
                     onClick={() => {

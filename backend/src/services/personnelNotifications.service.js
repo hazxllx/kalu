@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
-import { getEmailTransporter, sendSmtpMail } from './email.service.js';
+import { emailSender, getEmailTransporter, getSmtpFailureDetails, sendSmtpMail } from './email.service.js';
 import { decryptTemporaryPassword } from '../utils/temporaryPassword.js';
 import { digestInvitationRecoverySecret } from '../utils/personnelInvitationRecovery.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
@@ -18,6 +18,16 @@ const WORKER_ERROR_CODES = new Set([
   'SMTP_NOT_CONFIGURED', 'CLIENT_URL_NOT_CONFIGURED', 'CLIENT_URL_INVALID', 'TEMPORARY_PASSWORD_INVALID',
   'NOTIFICATION_BEGIN_FAILED', 'NOTIFICATION_RECOVERY_PROOF_FAILED', 'NOTIFICATION_LINK_PREPARE_FAILED',
 ]);
+const SMTP_FAILURE_CLASSES = new Set([
+  'authentication_failure', 'sender_rejection', 'tls_failure', 'connection_timeout',
+  'provider_rejection', 'recipient_rejection', 'connection_failure', 'configuration_failure', 'unknown',
+]);
+const SMTP_CODES = new Set([
+  'EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ETLS', 'EREQUIRETLS', 'ECONNECTION',
+  'ESOCKET', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN',
+  'EPIPE', 'EENVELOPE', 'EMESSAGE', 'ESTREAM', 'EPROTOCOL', 'ECONFIG', 'EPROXY',
+]);
+const SMTP_PHASES = new Set(['auth', 'handshake', 'starttls', 'mail_from', 'rcpt_to', 'data', 'after_send', 'connect', 'unknown']);
 let activeBatch = null;
 let stopCurrentWorker = null;
 
@@ -27,13 +37,18 @@ const validEmail = (value) => /^[^\s@<>,;]+@[^\s@<>,;]+$/.test(value);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]);
-const log = (logger, level, job, code) => {
+const log = (logger, level, job, code, diagnostics = {}) => {
   // Codes are application-owned constants; no raw provider errors or PII.
   try {
     logger[level]?.('personnel_notification', {
       notificationId: UUID.test(job?.id || '') ? job.id : null,
       accountId: UUID.test(job?.account_id || '') ? job.account_id : null,
       code,
+      ...(SMTP_FAILURE_CLASSES.has(diagnostics.failureClass) ? { failureClass: diagnostics.failureClass } : {}),
+      ...(SMTP_CODES.has(diagnostics.smtpCode) ? { smtpCode: diagnostics.smtpCode } : {}),
+      ...(SMTP_PHASES.has(diagnostics.smtpPhase) ? { smtpPhase: diagnostics.smtpPhase } : {}),
+      ...(Number.isInteger(diagnostics.responseCode) && diagnostics.responseCode >= 100 && diagnostics.responseCode <= 599
+        ? { smtpResponseCode: diagnostics.responseCode } : {}),
     });
   } catch { /* Logging must not turn an accepted send into a retry. */ }
 };
@@ -88,7 +103,7 @@ const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, auth
       'For your security, do not forward or share this email.',
     ].join('\n');
     return {
-      from: config.smtpFrom,
+      from: emailSender(config.smtpFrom),
       to: { address: profile.email.trim() },
       messageId: `<personnel-${job.id}@notifications.kalusagap.local>`,
       subject: 'Your KALUSAGAP account is ready.',
@@ -192,7 +207,7 @@ const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, auth
     : 'If you did not expect this notice, contact your KALUSAGAP administrator.';
   // A fixed Message-ID is for traceability only, not SMTP idempotence.
   return {
-    from: config.smtpFrom,
+    from: emailSender(config.smtpFrom),
     to: { address: profile.email.trim() },
     messageId: `<personnel-${job.id}@notifications.kalusagap.local>`,
     subject: `KALUSAGAP ${titles[job.event_type]}`,
@@ -207,18 +222,15 @@ const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, auth
 };
 
 const smtpFailure = (error) => {
-  const rejected = error.responseCode >= 400 && error.responseCode <= 599 && error.smtpPhase !== 'after_send';
+  const diagnostics = getSmtpFailureDetails(error);
+  const rejected = diagnostics.responseCode >= 400 && diagnostics.responseCode <= 599 && diagnostics.smtpPhase !== 'after_send';
   const knownBeforeData = ['EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ENOTFOUND', 'EAI_AGAIN'].includes(error.code)
-    || ['handshake', 'envelope'].includes(error.smtpPhase)
-    || (error.beforeData && error.code !== 'SMTP_ERROR' && !['data', 'after_send'].includes(error.smtpPhase));
-  const socketDetail = error.code === 'ESOCKET'
-    ? (error.originalCode || error.smtpPhase?.toUpperCase() || 'UNKNOWN')
-    : error.code;
+    || ['auth', 'handshake', 'starttls', 'mail_from', 'rcpt_to'].includes(diagnostics.smtpPhase)
+    || (error.beforeData && error.code !== 'SMTP_ERROR' && !['data', 'after_send'].includes(diagnostics.smtpPhase));
   return {
     status: rejected || knownBeforeData ? 'failed' : 'delivery_unknown',
-    code: error.code === 'SMTP_ERROR' ? 'SMTP_OUTCOME_UNKNOWN'
-      : error.code === 'ESOCKET' ? `SMTP_ESOCKET_${socketDetail}`
-        : `SMTP_${error.code}`,
+    code: diagnostics.code,
+    diagnostics,
     providerId: null,
   };
 };
@@ -235,7 +247,16 @@ const smtpResult = (info, message) => {
     return { status: 'sent', code: 'SMTP_ACCEPTED', providerId: info.messageId };
   }
   if (Array.isArray(info?.accepted) && info.accepted.length === 0 && rejected) {
-    return { status: 'failed', code: 'SMTP_RECIPIENT_REJECTED', providerId: null };
+    return {
+      status: 'failed',
+      code: 'SMTP_RECIPIENT_REJECTED',
+      diagnostics: {
+        failureClass: 'recipient_rejection',
+        smtpPhase: 'rcpt_to',
+        responseCode: Number.isInteger(responseCode) && responseCode >= 100 && responseCode <= 599 ? responseCode : null,
+      },
+      providerId: null,
+    };
   }
   return { status: 'delivery_unknown', code: 'SMTP_ACCEPTANCE_UNVERIFIED', providerId: null };
 };
@@ -279,7 +300,7 @@ export const processPersonnelNotifications = ({
         return;
       }
       seen.add(job.id);
-      const finish = async (status, code, providerId = null) => {
+      const finish = async (status, code, providerId = null, diagnostics = {}) => {
         try {
           const { data, error } = await client.rpc('finish_personnel_notification', {
             p_notification_id: job.id, p_claim_token: job.claim_token,
@@ -290,7 +311,7 @@ export const processPersonnelNotifications = ({
           if (status === 'failed') result.failed += 1;
           if (status === 'delivery_unknown') result.deliveryUnknown += 1;
           if (status === 'cancelled') result.cancelled += 1;
-          log(logger, status === 'sent' || status === 'cancelled' ? 'info' : 'warn', job, code);
+          log(logger, status === 'sent' || status === 'cancelled' ? 'info' : 'warn', job, code, diagnostics);
         } catch {
           result.unfinalized += 1;
           // In particular, NEVER turn an accepted send into a failed/retry job.
@@ -421,7 +442,7 @@ export const processPersonnelNotifications = ({
         outcome = smtpFailure(error);
       }
       if (outcome.status === 'sent') result.mailServerAccepted += 1;
-      await finish(outcome.status, outcome.code, outcome.providerId);
+      await finish(outcome.status, outcome.code, outcome.providerId, outcome.diagnostics);
     }));
     return result;
   })().catch(() => {

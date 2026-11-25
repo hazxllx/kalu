@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle, FileText, Pill } from "lucide-react";
 import { Card } from "@/components/common/Card";
+import { FormModalHeader } from "@/components/common/FormModal";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -278,10 +279,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4" onClick={() => { if (!submitting) onClose(); }}>
-      <div className="w-full max-w-4xl min-w-0" onClick={(e) => e.stopPropagation()}>
-        <Card role="dialog" aria-modal="true" aria-label={`PHN check-up for ${patient?.patient}`} className="flex h-[min(90dvh,820px)] min-h-0 flex-col overflow-hidden sm:max-h-[90dvh]">
-          {/* Header */}
-          <div className="flex shrink-0 items-start gap-3 border-b border-brand-border px-4 py-3 sm:items-center sm:px-6 sm:py-4">
+      <div className={`w-full min-w-0 ${completed ? "max-w-4xl" : "max-w-5xl"}`} onClick={(e) => e.stopPropagation()}>
+        <Card role="dialog" aria-modal="true" aria-label={`PHN check-up for ${patient?.patient}`} className={`flex h-[min(90dvh,820px)] min-h-0 flex-col overflow-hidden ${completed ? "" : "border-brand-border bg-white dark:border-border dark:bg-card"} sm:max-h-[90dvh]`}>
+          {completed ? (
+            <div className="flex shrink-0 items-start gap-3 border-b border-brand-border px-4 py-3 sm:items-center sm:px-6 sm:py-4">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-blue text-white text-sm font-semibold">
                 {(patient?.patient || "?")
@@ -305,7 +306,15 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                 <X className="w-4 h-4" />
               </button>
             </div>
-          </div>
+            </div>
+          ) : (
+            <FormModalHeader
+              title="PHN Check-up"
+              description={`${patient?.patient || "Resident"} · In progress · ${patient?.status || "Pending"}`}
+              onClose={onClose}
+              closeDisabled={submitting}
+            />
+          )}
 
           <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-4">
             {submitError && <p className="mb-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3 py-2.5 text-sm text-brand-danger" role="alert">{submitError}</p>}
@@ -572,7 +581,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
               <button
                 onClick={handleComplete}
                 disabled={submitting}
-                className="flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-green px-3 py-2 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:cursor-wait disabled:opacity-60 sm:px-4 sm:text-sm"
+                className={`flex min-h-10 items-center justify-center gap-2 rounded-btn px-3 py-2 text-xs font-medium text-white transition-colors disabled:cursor-wait disabled:opacity-60 sm:px-4 sm:text-sm ${completed ? "bg-brand-green hover:opacity-90" : "bg-brand-blue hover:bg-brand-dark"}`}
               >
                 {submitting ? <Activity className="h-4 w-4 animate-pulse" /> : <CheckCircle2 className="w-4 h-4" />}
                 {submitting ? "Saving…" : "Complete Check-up"}

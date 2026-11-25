@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X, CheckCircle2, Pencil, Trash2, Printer, Calendar, Baby } from "lucide-react";
 import { Card } from "@/components/common/Card";
+import { FormModalHeader } from "@/components/common/FormModal";
 import { ButtonSelectGroup as SelectButtonGroup } from "@/components/system";
 import StatusBadge from "@/components/common/StatusBadge";
 import {
@@ -330,7 +331,13 @@ function MaternalRecordEditor({
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
       <Card className="flex w-full max-w-4xl flex-col overflow-hidden rounded-2xl !p-0 shadow-2xl max-h-[90vh]">
         {/* Fixed Header */}
-        <div className="border-b border-gray-200 bg-white px-6 py-4">
+        {isEditing ? (
+          <FormModalHeader
+            title="Edit Maternal Record"
+            description={[detail.residentName, detail.barangay].filter(Boolean).join(" · ")}
+            onClose={handleCancel}
+          />
+        ) : <div className="border-b border-gray-200 bg-white px-6 py-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               <h2 className="text-xl font-semibold text-gray-900">{detail.residentName}</h2>
@@ -350,7 +357,7 @@ function MaternalRecordEditor({
               </button>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto">
@@ -864,26 +871,28 @@ function MaternalRecordEditor({
         </div>
 
         {/* Fixed Footer */}
-        <div className="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between gap-3">
+        <div className={isEditing
+          ? "flex shrink-0 flex-col gap-2 border-t border-brand-border bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-border dark:bg-card sm:flex-row sm:items-center sm:px-6"
+          : "border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between gap-3"}>
           <button
             onClick={() => onDelete?.(detail)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/10 rounded-lg transition-colors"
+            className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/10 rounded-lg transition-colors ${isEditing ? "min-h-10 w-full sm:mr-auto sm:w-auto" : ""}`}
           >
             <Trash2 className="h-4 w-4" /> Delete
           </button>
-          <div className="flex items-center gap-2">
+          <div className={isEditing ? "flex flex-col-reverse gap-2 sm:flex-row" : "flex items-center gap-2"}>
             {isEditing ? (
               <>
                 <button
                   onClick={handleCancel}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="min-h-10 w-full rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover sm:w-auto"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-5 py-2 text-sm font-medium text-white bg-brand-blue hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-60"
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60 sm:w-auto"
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   {saving ? "Saving..." : "Save Changes"}

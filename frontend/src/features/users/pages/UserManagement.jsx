@@ -93,14 +93,14 @@ function LifecyclePill({ account }) {
   );
 }
 
-function AccountDialog({ title, description, busy = false, onClose, children, wide = false, header = null }) {
+function AccountDialog({ title, description, busy = false, onClose, children, wide = false, header = null, formDesign = false }) {
   const returnFocus = useRef(typeof document !== "undefined" ? document.activeElement : null);
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/50" />
         <Dialog.Content
-          className={`fixed left-1/2 top-1/2 z-[85] flex max-h-[92dvh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg focus:outline-none dark:border-border dark:bg-card ${wide ? "max-w-2xl" : "max-w-lg"}`}
+          className={`modal-responsive ${wide ? "modal-lg" : "modal-md"} fixed left-1/2 top-1/2 z-[85] -translate-x-1/2 -translate-y-1/2 flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg focus:outline-none dark:border-border dark:bg-card`}
           onEscapeKeyDown={(event) => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={(event) => { if (busy) event.preventDefault(); }}
           onCloseAutoFocus={(event) => {
@@ -108,18 +108,22 @@ function AccountDialog({ title, description, busy = false, onClose, children, wi
             if (returnFocus.current instanceof HTMLElement && returnFocus.current.isConnected) returnFocus.current.focus();
           }}
         >
-          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-border sm:px-6">
+          <div className={`relative isolate flex shrink-0 items-start justify-between gap-3 overflow-hidden border-b px-4 py-3 sm:px-5 ${formDesign ? "border-brand-border bg-[#EFF6FF] dark:border-border dark:bg-[#14263A]" : "border-slate-100 dark:border-border"}`}>
+            {formDesign && <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-44 w-44 rounded-full border-[22px] border-brand-blue/10 dark:border-blue-300/10" />}
             {header || (
-              <div className="min-w-0">
-                <Dialog.Title className="break-words text-lg font-semibold text-brand-ink">{title}</Dialog.Title>
-                <Dialog.Description className="mt-1 break-words text-sm text-brand-gray">{description}</Dialog.Description>
+              <div className={`relative z-10 min-w-0 ${formDesign ? "flex items-start gap-3" : ""}`}>
+                {formDesign && <span aria-hidden="true" className="mt-0.5 h-10 w-1 shrink-0 rounded-full bg-brand-blue" />}
+                <div className="min-w-0">
+                  <Dialog.Title className={`break-words text-lg ${formDesign ? "font-bold text-brand-ink dark:text-foreground" : "font-semibold text-brand-ink"}`}>{title}</Dialog.Title>
+                  <Dialog.Description className={`mt-1 break-words text-sm ${formDesign ? "text-brand-gray dark:text-muted-foreground" : "text-brand-gray"}`}>{description}</Dialog.Description>
+                </div>
               </div>
             )}
             <Dialog.Close asChild>
-              <button type="button" disabled={busy} className="shrink-0 rounded p-1 text-brand-gray hover:bg-brand-bg disabled:opacity-60" aria-label="Close dialog"><X className="h-5 w-5" /></button>
+              <button type="button" disabled={busy} className={formDesign ? "relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-white/70 hover:text-brand-ink disabled:opacity-60 dark:text-muted-foreground dark:hover:bg-card/70 dark:hover:text-foreground" : "shrink-0 rounded p-1 text-brand-gray hover:bg-brand-bg disabled:opacity-60"} aria-label="Close dialog"><X className="h-5 w-5" /></button>
             </Dialog.Close>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-5 sm:py-4">
             {children}
           </div>
         </Dialog.Content>
@@ -367,9 +371,9 @@ function DeleteDialog({ target, busy, error, onConfirm, onClose }) {
 
 function DetailRow({ label, value }) {
   return (
-    <div className="flex flex-col gap-0.5 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+    <div className="grid min-w-0 gap-0.5 py-2 first:pt-0 last:pb-0 sm:grid-cols-[minmax(9rem,0.38fr)_minmax(0,1fr)] sm:items-baseline sm:gap-4">
       <dt className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-brand-gray">{label}</dt>
-      <dd className="break-words text-[13px] font-medium text-brand-ink sm:max-w-[62%] sm:text-right">{value}</dd>
+      <dd className="min-w-0 break-words text-[13px] font-medium text-brand-ink">{value}</dd>
     </div>
   );
 }
@@ -512,9 +516,9 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
     <div className="flex min-w-0 items-center gap-3">
       <InitialsAvatar name={target.name} size="lg" />
       <div className="min-w-0 flex-1">
-        <Dialog.Title className="truncate text-[15px] font-semibold leading-5 text-brand-ink">{target.name || "Account details"}</Dialog.Title>
-        <Dialog.Description className="mt-0.5 flex items-center gap-2 truncate text-xs text-brand-gray">
-          <span className="truncate">{target.email || "No email on record"}</span>
+        <Dialog.Title className="break-words text-[15px] font-semibold leading-5 text-brand-ink">{target.name || "Account details"}</Dialog.Title>
+        <Dialog.Description className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-brand-gray">
+          <span className="min-w-0 break-all">{target.email || "No email on record"}</span>
           <CopyEmailButton email={target.email} notify={notify} />
           <LifecyclePill account={target} />
         </Dialog.Description>
@@ -523,7 +527,7 @@ function DetailsModal({ target: initialTarget, options, onClose, notify }) {
   );
 
   return (
-    <AccountDialog title={target.name || "Account details"} description={target.email || "Account profile and history"} onClose={onClose} wide={personnel} header={dialogHeader}>
+    <AccountDialog title={target.name || "Account details"} description={target.email || "Account profile and history"} onClose={onClose} wide header={dialogHeader}>
       {!personnel && historyError && <p role="alert" className="rounded-btn bg-brand-danger/10 p-3 text-sm text-brand-danger">{historyError}</p>}
       <InfoSection title="Account Overview">
         <DetailRow label={personnel ? "Account status" : "Status"} value={<LifecyclePill account={target} />} />
@@ -725,7 +729,6 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
   const isNew = !initial;
   const [form, setForm] = useState(() => ({
     name: initial?.name || "",
-    firstName: initial?.firstName || "",
     email: initial?.email || "",
     contact: initial?.contact || "",
     position: initial?.position || "",
@@ -797,7 +800,6 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     const coveragePatch = coverageAssignmentPatch(role, details, initial);
     const assignmentChanged = isNew || role !== initial.roleId || Object.keys(coveragePatch).length > 0;
     if (!form.name.trim() || form.name.trim().length > 120) next.name = "Enter a name of 1–120 characters.";
-    if (role === "bhw" && !form.firstName.trim() && (isNew || initial?.roleId !== "bhw")) next.firstName = "Enter the BHW's first name.";
     if (isNew && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) next.email = "Enter a valid email address.";
     if (personnel && !/^09\d{9}$/.test(form.contact)) next.contact = "Enter exactly 11 digits starting with 09.";
     if (isNew && personnel && !selectedMunicipalityId) next.municipalityId = "Your municipality assignment is unavailable.";
@@ -820,7 +822,6 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
         ...stationPatch,
         email: form.email.trim(),
         name: form.name.trim(),
-        ...(role === "bhw" ? { firstName: form.firstName.trim() } : {}),
         contact: form.contact.trim(),
         position: form.position.trim(),
         licenseNo: form.licenseNo.trim(),
@@ -855,7 +856,6 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
       contact: form.contact.trim(),
       position: form.position.trim(),
       licenseNo: form.licenseNo.trim(),
-      ...(role === "bhw" ? { firstName: form.firstName.trim() } : {}),
       ...stationPatch,
       ...coveragePatch,
     };
@@ -877,6 +877,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
       busy={busy || preparing}
       onClose={onClose}
       wide
+      formDesign
     >
         <form onSubmit={(event) => { event.preventDefault(); validate(); }}>
           {(error || errors.form) && (
@@ -887,13 +888,10 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
           {isNew && error && <p className="mb-3 text-xs leading-relaxed text-brand-gray">Retry with the same details to resume the saved creation request. Changing the details starts a different request; an existing email is never automatically adopted.</p>}
           {creationWarning && <p role="status" className="mb-4 break-words rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">{creationWarning}</p>}
 
-          <fieldset disabled={busy || preparing} className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+          <fieldset disabled={busy || preparing} className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
             <Field label="Full name" htmlFor="account-name" required error={errors.name}>
               <input id="account-name" value={form.name} onChange={(event) => change("name", event.target.value)} className={inputCls(errors.name)} autoComplete="name" />
             </Field>
-            {role === "bhw" && <Field label="BHW first name" htmlFor="account-first-name" required={isNew || initial?.roleId !== "bhw"} error={errors.firstName}>
-              <input id="account-first-name" value={form.firstName} onChange={(event) => change("firstName", event.target.value)} maxLength={80} className={inputCls(errors.firstName)} autoComplete="given-name" />
-            </Field>}
             <Field label="Email" htmlFor="account-email" required={isNew} hint={isNew ? "Account notifications and password-setup invitations use this address." : "Managed by Supabase Auth; read-only here."} error={errors.email}>
               <input id="account-email" type="email" value={form.email} onChange={(event) => change("email", event.target.value)} disabled={!isNew} className={`${inputCls(errors.email)} disabled:cursor-not-allowed disabled:opacity-70`} autoComplete="email" />
             </Field>
@@ -972,7 +970,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
               {options.rhuStations.length === 0 && <p className="mt-1 text-xs text-brand-gray">Station choices have not been supplied by the server.</p>}
               {errors.rhuStations && <p id="account-stations-error" role="alert" className="mt-1 text-xs text-brand-danger">{errors.rhuStations}</p>}
             </fieldset>}
-            {isNew && personnel && <section className="space-y-3 rounded-xl border border-slate-200 p-4 sm:col-span-2" aria-labelledby="initial-account-password-title">
+            {isNew && personnel && <section className="space-y-2 rounded-xl border border-slate-200 p-3 sm:col-span-2" aria-labelledby="initial-account-password-title">
               <div>
                 <h3 id="initial-account-password-title" className="text-sm font-semibold text-brand-ink">Temporary Password</h3>
                 <p className="mt-1 text-xs leading-relaxed text-brand-gray">A secure temporary password will be generated automatically on the server and emailed to the registered address. The user must create a new password immediately upon first login.</p>
@@ -981,9 +979,9 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
             {role === "admin" && <p className="sm:col-span-2 text-xs text-brand-gray">Administrator accounts have system-wide scope.</p>}
           </fieldset>
 
-          <div className="mt-6 flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-border">
-            <button type="button" onClick={onClose} disabled={busy || preparing} className="rounded-btn px-3 py-2 text-sm text-brand-gray hover:bg-brand-bg disabled:opacity-60">Cancel</button>
-            <button type="submit" disabled={busy || preparing || !canEdit} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
+          <div className="-mx-4 sticky bottom-0 z-10 mt-4 flex flex-col-reverse gap-2 border-t border-slate-200 bg-white/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:-mx-5 sm:flex-row sm:justify-end sm:px-5 dark:border-border dark:bg-card/95">
+            <button type="button" onClick={onClose} disabled={busy || preparing} className="min-h-11 w-full rounded-btn px-3 py-2 text-sm text-brand-gray hover:bg-brand-bg disabled:opacity-60 sm:w-auto">Cancel</button>
+            <button type="submit" disabled={busy || preparing || !canEdit} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
               {isNew ? <Plus className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
               {busy ? "Saving..." : preparing ? "Preparing secure request..." : isNew ? "Create Account" : "Save changes"}
             </button>

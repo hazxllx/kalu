@@ -33,7 +33,7 @@ test('P0-4: MidwifeFollowUp has no undefined STATUS_COLORS or PRIORITY_COLORS re
   assert.match(src, /import FollowUpStatusBadge, \{ STATUS_DOTS \} from/);
   assert.match(src, /<FollowUpStatusBadge\s+value=\{deriveStatus\(scheduleForm\.date\)\}/);
   assert.match(src, /<PriorityBadge\s+value=\{selectedFollowUp\.priority\}\s*\/>/);
-  assert.match(src, /<FollowUpStatusBadge\s+value=\{selectedFollowUp\.status\}\s*\/>/);
+  assert.match(src, /<FollowUpStatusBadge\s+value=\{isOverdue\(selectedFollowUp\)\s*\?\s*"Overdue"\s*:\s*selectedFollowUp\.status\}\s*\/>/);
   assert.match(src, /STATUS_DOTS\[status\]/);
 });
 

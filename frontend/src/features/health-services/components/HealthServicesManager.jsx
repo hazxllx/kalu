@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
+import FormModal from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -1144,29 +1145,28 @@ export default function HealthServicesManager({ subtitle }) {
 
       {/* Create / Edit service — ONE shared form */}
       {showForm && form && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={editingId ? "Edit Health Service" : "Add Health Service"}>
-          <Card className={`flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden ${isSupervisor ? "supervisor-modal supervisor-form" : ""}`}>
-            {/* Header — stays visible while the body scrolls */}
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-6 py-4 dark:border-border">
-              <div className="min-w-0">
-                <h3 className="text-lg font-semibold text-brand-ink">{editingId ? "Edit Health Service" : "Add Health Service"}</h3>
-                <p className="mt-0.5 text-sm text-brand-gray">
-                  {editingId
-                    ? "Update this service's details, schedule, coverage and assigned personnel."
-                    : "Create a health service and configure its facility, coverage, and assigned personnel."}
-                </p>
-              </div>
-              <button
-                onClick={() => { setShowForm(false); setEditingId(null); }}
-                className="shrink-0 rounded-btn p-1 text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink dark:hover:bg-hover"
-                aria-label="Close"
-              >
-                <X className="h-5 w-5" />
+        <FormModal
+          title={editingId ? "Edit Health Service" : "Add Health Service"}
+          description={editingId
+            ? "Update this service's details, schedule, coverage and assigned personnel."
+            : "Create a health service and configure its facility, coverage, and assigned personnel."}
+          onClose={() => { setShowForm(false); setEditingId(null); }}
+          size="large"
+          dialogClassName={isSupervisor ? "supervisor-modal supervisor-form" : ""}
+          bodyClassName="px-4 py-4 sm:px-6 sm:py-5"
+          footer={
+            <>
+              <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} disabled={saving} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60 dark:border-border dark:bg-input dark:hover:bg-hover">
+                Cancel
               </button>
-            </div>
-
-            {/* Single primary scroll area for the form content */}
-            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <button type="button" onClick={saveService} disabled={saving || (isSupervisor && referencesUnavailable)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+                {editingId
+                  ? <><CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Changes"}</>
+                  : <><Plus className="h-4 w-4" /> {saving ? "Creating..." : "Create Health Service"}</>}
+              </button>
+            </>
+          }
+        >
               <div className="space-y-5">
                 {isSupervisor && referencesUnavailable && <div role={referenceState.errors.length ? "alert" : "status"} className="rounded border border-amber-300 bg-amber-50 p-3 text-ui text-amber-900"><p>{referenceState.loading ? "Loading saved category, facility and personnel references..." : referenceState.errors.join(" ")}</p>{!referenceState.loading && <button type="button" onClick={loadReference} className="supervisor-button mt-2">Retry references</button>}</div>}
                 {/* Service details */}
@@ -1427,29 +1427,7 @@ export default function HealthServicesManager({ subtitle }) {
                   <div className="rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">{formError}</div>
                 )}
               </div>
-            </div>
-
-            {/* Footer — stays visible at the bottom of the modal */}
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-brand-border px-6 py-4 dark:border-border sm:flex-row sm:justify-end sm:gap-3">
-              <button
-                onClick={() => { setShowForm(false); setEditingId(null); }}
-                disabled={saving}
-                className="rounded-btn px-4 py-2.5 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60 dark:hover:bg-hover"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveService}
-                disabled={saving || (isSupervisor && referencesUnavailable)}
-                className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
-              >
-                {editingId
-                  ? <><CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Changes"}</>
-                  : <><Plus className="h-4 w-4" /> {saving ? "Creating..." : "Create Health Service"}</>}
-              </button>
-            </div>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {/* Manage assignments */}
@@ -2056,18 +2034,18 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
     } : { ...form, follow_up_date: form.follow_up_required ? form.follow_up_date : null });
   };
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Record service delivery">
-      <Card className="flex h-dvh max-h-dvh w-full max-w-2xl flex-col overflow-hidden rounded-none sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-lg">
-        <form onSubmit={submit} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Service delivery</p>
-              <h3 className="mt-1 text-lg font-semibold text-brand-ink">{registration.attendance?.serviceProvided ? "Update service record" : "Record delivered service"}</h3>
-              <p className="mt-1 text-sm text-brand-gray">{service.name} · {registration.residentName} · {registration.plannedDate ? formatDate(registration.plannedDate) : "Scheduled visit"}</p>
-            </div>
-            <button type="button" onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
-          </div>
-          <p className="rounded-btn bg-brand-bg p-3 text-xs text-brand-gray">{isImmunization ? "This uses the existing Immunization record workflow. The vaccine record will also appear in Immunization and M1; the provider is taken from your signed-in account." : "Saving records the completed service in the resident's Health Records. The logged-in staff account is recorded automatically."}</p>
+    <FormModal
+      title={registration.attendance?.serviceProvided ? "Update service record" : "Record delivered service"}
+      description={`${service.name} · ${registration.residentName} · ${registration.plannedDate ? formatDate(registration.plannedDate) : "Scheduled visit"}`}
+      onClose={onClose}
+      dialogClassName="sm:max-w-2xl"
+      footer={<>
+        <button type="button" form="service-delivery-form" onClick={onClose} className="rounded-btn border border-brand-border px-4 py-2 text-sm text-brand-ink hover:bg-brand-bg">Cancel</button>
+        <button type="submit" form="service-delivery-form" disabled={busy} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:brightness-95 disabled:opacity-60">{busy ? "Saving…" : "Save service record"}</button>
+      </>}
+    >
+      <p className="mb-4 rounded-btn bg-brand-bg p-3 text-xs text-brand-gray">{isImmunization ? "This uses the existing Immunization record workflow. The vaccine record will also appear in Immunization and M1; the provider is taken from your signed-in account." : "Saving records the completed service in the resident's Health Records. The logged-in staff account is recorded automatically."}</p>
+      <form id="service-delivery-form" onSubmit={submit} className="space-y-4">
           {isImmunization ? (
             <div className="grid gap-4 sm:grid-cols-2">
               <DeliveryField label="Vaccine" required><select value={form.vaccine} onChange={set("vaccine")} className={fieldClass}>{["BCG", "Hepatitis B", "Pentavalent (DPT-HepB-Hib)", "OPV", "IPV", "PCV", "MMR", "Measles", "Tetanus Toxoid", "COVID-19", "Influenza", "Other"].map((vaccine) => <option key={vaccine}>{vaccine}</option>)}</select></DeliveryField>
@@ -2090,13 +2068,8 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
           )}
           <DeliveryField label="Additional notes"><textarea rows={2} maxLength={2000} value={form.notes} onChange={set("notes")} className={fieldClass} placeholder="Optional notes" /></DeliveryField>
           {error && <p role="alert" className="text-sm text-brand-danger">{error}</p>}
-          <div className="flex justify-end gap-2 border-t border-brand-border pt-4 dark:border-border">
-            <button type="button" onClick={onClose} className="rounded-btn border border-brand-border px-4 py-2 text-sm text-brand-ink hover:bg-brand-bg">Cancel</button>
-            <button type="submit" disabled={busy} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:brightness-95 disabled:opacity-60">{busy ? "Saving…" : "Save service record"}</button>
-          </div>
-        </form>
-      </Card>
-    </div>
+      </form>
+    </FormModal>
   );
 }
 

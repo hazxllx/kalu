@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import * as Dialog from "@radix-ui/react-dialog";
 import StatCard from "@/components/common/StatCard";
 import DataTable from "@/components/tables/DataTable";
 import TablePagination from "@/components/tables/TablePagination";
@@ -1778,67 +1779,77 @@ export default function TreatmentConsultation() {
           </>
         )}
       </Card>
-      {detailRecord && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Consultation details">
-          <Card className="max-h-[90vh] w-full max-w-3xl overflow-hidden p-5">
-            <div className="flex items-start justify-between gap-3 border-b border-brand-border pb-3">
-              <div>
-                <h3 className="text-lg font-semibold text-brand-ink">Consultation Details</h3>
-                <p className="mt-0.5 text-sm text-brand-gray">{detailRecord.resident?.name || "Resident"} · {formatDate(detailRecord.consultationDate)}</p>
-              </div>
-              <button type="button" onClick={() => setDetailRecord(null)} className="rounded-btn p-1 text-brand-gray hover:bg-brand-bg" aria-label="Close consultation details"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="max-h-[calc(90vh-5rem)] overflow-y-auto pr-1">
-              {[
-                ["Consultation Information", [
-                  ["Resident Name", detailRecord.resident?.name],
-                   ["Consultation Date", formatDate(detailRecord.consultationDate)],
-                   ["Consultation Time", detailRecord.consultationTime ? `${detailRecord.consultationTime} (Asia/Manila)` : "Not recorded"],
-                   ["Health Service", consultationServiceName(detailRecord)],
-                  ["Chief Complaint", detailRecord.chiefComplaint],
-                ]],
-                ["Clinical Information", [
-                    ["Clinical Findings", detailRecord.findings],
-                    ["Diagnosis", detailRecord.diagnosis],
+      <Dialog.Root open={Boolean(detailRecord)} onOpenChange={(open) => { if (!open) setDetailRecord(null); }}>
+        {detailRecord && (
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+            <Dialog.Content className="fixed left-1/2 top-1/2 z-[55] flex max-h-[88dvh] w-[calc(100vw-1rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-brand-border bg-white shadow-2xl focus:outline-none dark:border-border dark:bg-card sm:w-[min(94vw,1000px)]">
+              <header className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-3 dark:border-border sm:px-6">
+                <div className="min-w-0">
+                   <Dialog.Title className="break-words text-lg font-semibold text-brand-ink dark:text-foreground">Consultation Details</Dialog.Title>
+                   <p className="mt-0.5 break-words text-sm text-brand-gray dark:text-muted-foreground">{detailRecord.resident?.name || "Resident"} · {formatDate(detailRecord.consultationDate)}</p>
+                   <Dialog.Description className="sr-only">Consultation information for {detailRecord.resident?.name || "Resident"}</Dialog.Description>
+                </div>
+                <Dialog.Close asChild>
+                   <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:hover:bg-hover" aria-label="Close consultation details"><X className="h-5 w-5" /></button>
+                </Dialog.Close>
+              </header>
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 pb-6 sm:space-y-5 sm:px-6">
+                {[
+                   ["Consultation Information", [
+                     ["Resident Name", detailRecord.resident?.name],
+                     ["Consultation Date", formatDate(detailRecord.consultationDate)],
+                     ["Consultation Time", detailRecord.consultationTime ? `${detailRecord.consultationTime} (Asia/Manila)` : "Not recorded"],
+                     ["Health Service", consultationServiceName(detailRecord)],
+                     ["Chief Complaint", detailRecord.chiefComplaint],
+                   ]],
+                   ["Clinical Information", [
+                     ["Clinical Findings", detailRecord.findings],
+                     ["Diagnosis", detailRecord.diagnosis],
                      ["Risk Level", consultationRisk(detailRecord)],
-                    ["Risk Reasons", consultationRiskReasons(detailRecord)],
-                    ["Risk Review", consultationAssessment(detailRecord)?.review?.reason],
-                   ["Vital Signs", parseVitals(detailRecord.vitals)],
-                ]],
-                ["Treatment and Care", [
-                  ["Treatment", detailRecord.treatmentGiven],
-                   ["Medicines", (detailRecord.medications || []).length ? detailRecord.medications.map((medicine) => typeof medicine === "string" ? medicine : [medicine.genericName || medicine.name, medicine.strength, medicine.dose || medicine.dosage, medicine.frequency, medicine.route, medicine.duration, medicine.quantity != null && medicine.quantity !== "" ? `Quantity: ${medicine.quantity}` : "", medicine.instructions].filter(Boolean).join(" / ")).join("\n") : detailRecord.medicationPrescribed],
-                  ["Recommendations", [detailRecord.adviceGiven, ...(detailRecord.referrals || []).map((referral) => ["Referral:", referral.destination_facility || referral.receiving_facility, referral.reason, referral.status, referral.resolution_notes].filter(Boolean).join(" "))].filter(Boolean).join("\n")],
-                  ["Follow-up", [consultationFollowUp(detailRecord).status, ...(detailRecord.followUps || []).map((followUp) => [followUp.scheduled_date || followUp.scheduledDate, followUp.status, followUp.outcome, followUp.notes].filter(Boolean).join(" / "))].join("\n")],
-                ]],
-                ["Recording Information", [
-                  ["Recording Personnel", [detailRecord.recordedByName || detailRecord.personnelName, detailRecord.consultingPersonnel && `Attending: ${detailRecord.consultingPersonnel}`].filter(Boolean).join("\n")],
-                ]],
-              ].map(([section, fields]) => (
-                <section key={section} className="mt-4 first:mt-4">
-                  <h4 className="border-b border-brand-border pb-2 text-sm font-semibold text-brand-ink">{section}</h4>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    {fields.map(([label, value]) => {
-                      const entries = label === "Vital Signs" && value && typeof value === "object"
-                        ? Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== "")
-                        : [];
-                      return (
-                        <div key={label} className="min-w-0 rounded-btn border border-brand-border bg-brand-bg/30 p-3">
-                          <p className="text-xs font-medium text-brand-gray">{label}</p>
-                          {label === "Vital Signs" ? (
-                            entries.length ? <dl className="mt-2 space-y-1.5">{entries.map(([key, item]) => <div key={key} className="flex flex-wrap justify-between gap-2 text-sm"><dt className="text-brand-gray">{formatVitalLabel(key)}</dt><dd className="font-medium text-brand-ink">{String(item)}{["temperature"].includes(key) ? " °C" : ["heightCm", "height"].includes(key) ? " cm" : ["weightKg", "weight"].includes(key) ? " kg" : ["o2sat", "oxygenSaturation"].includes(key) ? "%" : ""}</dd></div>)}</dl> : <p className="mt-1 text-sm text-brand-gray">Not recorded</p>
-                          ) : <p className="mt-1 whitespace-pre-wrap break-words text-sm text-brand-ink">{value || "Not recorded"}</p>}
-                        </div>
-                      );
-                    })}
-                  </div>
+                     ["Risk Reasons", consultationRiskReasons(detailRecord)],
+                     ["Risk Review", consultationAssessment(detailRecord)?.review?.reason],
+                   ]],
+                   ["Vital Signs", [["Vital Signs", parseVitals(detailRecord.vitals)]]],
+                   ["Treatment and Care", [
+                     ["Treatment", detailRecord.treatmentGiven],
+                     ["Medicines", (detailRecord.medications || []).length ? detailRecord.medications.map((medicine) => typeof medicine === "string" ? medicine : [medicine.genericName || medicine.name, medicine.strength, medicine.dose || medicine.dosage, medicine.frequency, medicine.route, medicine.duration, medicine.quantity != null && medicine.quantity !== "" ? `Quantity: ${medicine.quantity}` : "", medicine.instructions].filter(Boolean).join(" / ")).join("\n") : detailRecord.medicationPrescribed],
+                     ["Recommendations", [detailRecord.adviceGiven, ...(detailRecord.referrals || []).map((referral) => ["Referral:", referral.destination_facility || referral.receiving_facility, referral.reason, referral.status, referral.resolution_notes].filter(Boolean).join(" "))].filter(Boolean).join("\n")],
+                     ["Follow-up", [consultationFollowUp(detailRecord).status, ...(detailRecord.followUps || []).map((followUp) => [followUp.scheduled_date || followUp.scheduledDate, followUp.status, followUp.outcome, followUp.notes].filter(Boolean).join(" / "))].join("\n")],
+                   ]],
+                   ["Recording Information", [
+                     ["Recording Personnel", [detailRecord.recordedByName || detailRecord.personnelName, detailRecord.consultingPersonnel && `Attending: ${detailRecord.consultingPersonnel}`].filter(Boolean).join("\n")],
+                   ]],
+                ].map(([section, fields]) => (
+                   <section key={section} aria-label={section}>
+                     <h4 className="border-b border-brand-border pb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue dark:border-border">{section}</h4>
+                     <div className="mt-3 grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
+                       {fields.map(([label, value]) => {
+                         const entries = label === "Vital Signs" && value && typeof value === "object"
+                           ? Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== "")
+                           : [];
+                         const fullWidth = ["Chief Complaint", "Clinical Findings", "Risk Reasons", "Risk Review", "Treatment", "Medicines", "Recommendations", "Follow-up", "Recording Personnel"].includes(label);
+                         return (
+                           <div key={label} className={`min-w-0 rounded-lg border border-brand-border bg-brand-bg/30 p-3 dark:border-border dark:bg-background ${fullWidth ? "sm:col-span-2" : ""}`}>
+                             <p className="text-xs font-medium text-brand-gray dark:text-muted-foreground">{label}</p>
+                             {label === "Vital Signs" ? (
+                               entries.length ? <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">{entries.map(([key, item]) => <div key={key} className="flex min-w-0 flex-wrap justify-between gap-x-3 text-sm"><dt className="text-brand-gray dark:text-muted-foreground">{formatVitalLabel(key)}</dt><dd className="font-medium text-brand-ink dark:text-foreground">{String(item)}{["temperature"].includes(key) ? " °C" : ["heightCm", "height"].includes(key) ? " cm" : ["weightKg", "weight"].includes(key) ? " kg" : ["o2sat", "oxygenSaturation"].includes(key) ? "%" : ""}</dd></div>)}</dl> : <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Not recorded</p>
+                             ) : <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-relaxed text-brand-ink dark:text-foreground">{value || "Not recorded"}</p>}
+                           </div>
+                         );
+                       })}
+                     </div>
+                   </section>
+                ))}
+                <section aria-label="Laboratory Results">
+                   <h4 className="border-b border-brand-border pb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue dark:border-border">Laboratory Results</h4>
+                   <LabResultsPanel residentId={detailRecord.resident?.id || detailRecord.residentId} consultationId={detailRecord.offline ? undefined : detailRecord.id} compact hideHeading />
                 </section>
-              ))}
-              <LabResultsPanel residentId={detailRecord.resident?.id || detailRecord.residentId} consultationId={detailRecord.offline ? undefined : detailRecord.id} compact />
-            </div>
-          </Card>
-        </div>
-      )}
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        )}
+      </Dialog.Root>
     </>
   );
 

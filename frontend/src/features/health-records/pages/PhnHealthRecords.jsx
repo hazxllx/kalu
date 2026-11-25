@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { FormModalHeader } from "@/components/common/FormModal";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonStatGrid } from "@/components/common/Skeleton";
@@ -61,8 +62,8 @@ const compactRiskFindings = (assessment = {}) => {
   return findings;
 };
 
-function Modal({ title, onClose, busy = false, footer = null, children }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4"><Card role="dialog" aria-label={title} aria-modal="true" className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[92vh]"><div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6"><h2 className="min-w-0 break-words text-base font-semibold text-brand-ink sm:text-lg">{title}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray disabled:opacity-40"><X className="h-5 w-5" /></button></div><div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">{children}</div>{footer && <div className="shrink-0 border-t border-brand-border bg-white px-4 py-3 sm:px-6">{footer}</div>}</Card></div>;
+function Modal({ title, description, onClose, busy = false, footer = null, children, formDesign = false }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4"><Card role="dialog" aria-label={title} aria-modal="true" className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[92vh]">{formDesign ? <FormModalHeader title={title} description={description} onClose={onClose} closeDisabled={busy} /> : <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6"><h2 className="min-w-0 break-words text-base font-semibold text-brand-ink sm:text-lg">{title}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray disabled:opacity-40"><X className="h-5 w-5" /></button></div>}<div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5 ${formDesign ? "bg-white dark:bg-card" : ""}`}>{children}</div>{footer && <div className="shrink-0 border-t border-brand-border bg-white px-4 py-3 sm:px-6">{footer}</div>}</Card></div>;
 }
 
 export default function PhnHealthRecords() {
@@ -593,7 +594,7 @@ export default function PhnHealthRecords() {
           className="clinical-pagination mt-4"
         />
     </>}
-    {editor && <Modal title={editor === "edit" ? "Edit Persisted Consultation" : "New Clinical Consultation"} onClose={() => setEditor(null)} busy={busy} footer={<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button disabled={busy} onClick={() => setEditor(null)} className="min-h-11 rounded-btn border border-brand-border px-4 py-2 text-sm sm:min-h-10">Cancel</button><button disabled={busy || (editor === "edit" && !online)} onClick={save} className="min-h-11 rounded-btn bg-brand-blue px-5 py-2 text-sm text-white disabled:opacity-50 sm:min-h-10">{busy ? "Saving..." : "Save Clinical Record"}</button></div>}>
+    {editor && <Modal title={editor === "edit" ? "Edit Persisted Consultation" : "New Clinical Consultation"} description="Record the resident's clinical consultation, assessment, and follow-up plan." formDesign onClose={() => setEditor(null)} busy={busy} footer={<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button disabled={busy} onClick={() => setEditor(null)} className="min-h-11 rounded-btn border border-brand-border px-4 py-2 text-sm sm:min-h-10">Cancel</button><button disabled={busy || (editor === "edit" && !online)} onClick={save} className="min-h-11 rounded-btn bg-brand-blue px-5 py-2 text-sm text-white disabled:opacity-50 sm:min-h-10">{busy ? "Saving..." : "Save Clinical Record"}</button></div>}>
       {failure && <p role="alert" className="mb-4 text-sm text-brand-danger">{failure}</p>}
       <section aria-labelledby="phn-resident-section" className="mb-5">
         <h3 id="phn-resident-section" className="mb-2 text-sm font-semibold">Resident Information</h3>

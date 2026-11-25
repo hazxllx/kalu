@@ -118,6 +118,19 @@ export default function HealthRecord() {
   const [selectedReferral, setSelectedReferral] = useState(null);
   const [selectedReferralPdf, setSelectedReferralPdf] = useState("");
   const [selectedFollowUp, setSelectedFollowUp] = useState(null);
+  useEffect(() => {
+    if (!selectedFollowUp) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setSelectedFollowUp(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [selectedFollowUp]);
   const [referralDetailLoading, setReferralDetailLoading] = useState(false);
   const [referralDownloadId, setReferralDownloadId] = useState("");
   const [referralActionError, setReferralActionError] = useState("");
@@ -514,12 +527,12 @@ export default function HealthRecord() {
       )}
       {selectedReferral && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Referral details">
-          <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-brand-border bg-white shadow-float">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-brand-border bg-white px-5 py-3">
+          <div className="flex max-h-[88dvh] w-[calc(100vw-1.5rem)] max-w-[1000px] flex-col overflow-hidden rounded-xl border border-brand-border bg-white shadow-float dark:border-border dark:bg-card">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border bg-white px-4 py-3 dark:border-border dark:bg-card sm:px-6">
               <h3 className="text-sm font-semibold text-brand-ink">Referral Details</h3>
-              <button type="button" onClick={() => setSelectedReferral(null)} className="grid h-8 w-8 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close referral details"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setSelectedReferral(null)} className="grid h-9 w-9 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg dark:hover:bg-hover" aria-label="Close referral details"><X className="h-4 w-4" /></button>
             </div>
-            <div className="space-y-5 p-5">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4 pb-6 sm:px-6 sm:py-5">
               <section>
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Referral Overview</h4>
                 <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
@@ -531,19 +544,19 @@ export default function HealthRecord() {
                     ["Assigned recipient", selectedReferral.recipient?.full_name || selectedReferral.external_recipient_name || "Not assigned"],
                     ["Priority", selectedReferral.priority || "Not recorded"],
                     ["Status", selectedReferral.status || "Pending"],
-                  ].map(([label, value]) => <div key={label}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink">{value || "Not recorded"}</dd></div>)}
+                  ].map(([label, value]) => <div key={label} className="min-w-0 [overflow-wrap:anywhere]"><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink dark:text-foreground">{value || "Not recorded"}</dd></div>)}
                 </dl>
               </section>
               <section className="border-t border-brand-border pt-4">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Clinical Information</h4>
-                <dl className="mt-3 grid gap-3 text-sm">
+                <dl className="mt-3 grid min-w-0 gap-3 text-sm sm:grid-cols-2">
                   {[
                     ["Referral reason", selectedReferral.reason],
                     ["Clinical history", selectedReferral.medicalHistory || selectedReferral.medical_history || selectedReferral.encounter?.clinical_history],
                     ["Working diagnosis", selectedReferral.impression || selectedReferral.encounter?.phn_assessment],
                     ["Laboratory requirements", selectedReferral.laboratory_test_required ? selectedReferral.laboratory_test : "Not required"],
                     ["Clinical notes", selectedReferral.additional_instructions || selectedReferral.notes],
-                  ].map(([label, value]) => <div key={label}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-brand-ink">{value || "Not recorded"}</dd></div>)}
+                  ].map(([label, value]) => <div key={label} className={`min-w-0 [overflow-wrap:anywhere] ${["Referral reason", "Clinical history", "Clinical notes"].includes(label) ? "sm:col-span-2" : ""}`}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-brand-ink dark:text-foreground">{value || "Not recorded"}</dd></div>)}
                 </dl>
               </section>
               <section className="border-t border-brand-border pt-4">
@@ -554,10 +567,12 @@ export default function HealthRecord() {
                     ["Scheduled appointment", selectedReferral.scheduled_at ? new Date(selectedReferral.scheduled_at).toLocaleString() : "Not scheduled"],
                     ["Status updates", selectedReferral.stage || selectedReferral.status || "Pending"],
                     ["Date completed", formatDate(selectedReferral.completed_at)],
-                  ].map(([label, value]) => <div key={label}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink">{value || "Not recorded"}</dd></div>)}
+                  ].map(([label, value]) => <div key={label} className="min-w-0 [overflow-wrap:anywhere]"><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink dark:text-foreground">{value || "Not recorded"}</dd></div>)}
                 </dl>
               </section>
-              <button type="button" onClick={() => downloadReferral(selectedReferral)} disabled={referralDownloadId === selectedReferral.id} className="inline-flex h-9 items-center justify-center gap-2 rounded-btn bg-brand-blue px-3 text-sm font-semibold text-white disabled:opacity-60">
+            </div>
+            <div className="flex shrink-0 justify-end border-t border-brand-border bg-white px-4 py-3 dark:border-border dark:bg-card sm:px-6">
+              <button type="button" onClick={() => downloadReferral(selectedReferral)} disabled={referralDownloadId === selectedReferral.id} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue px-3 text-sm font-semibold text-white disabled:opacity-60">
                 {referralDownloadId === selectedReferral.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Referral
               </button>
             </div>
@@ -1077,13 +1092,13 @@ export default function HealthRecord() {
             </div>
           )}
           {selectedFollowUp && (
-            <div className="fixed inset-0 z-[90] flex h-[100dvh] items-stretch bg-black/50 sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true" aria-label="Follow-up details">
-              <div className="flex max-h-[100dvh] w-full flex-col bg-white sm:h-auto sm:max-h-[85dvh] sm:max-w-2xl sm:rounded-xl sm:border sm:border-brand-border sm:shadow-2xl">
-                <div className="flex items-start justify-between gap-4 border-b border-brand-border px-5 py-4">
+            <div className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden bg-black/50 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label="Follow-up details">
+              <div className="flex max-h-[85dvh] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-brand-border bg-white shadow-2xl dark:border-border dark:bg-card sm:w-[92vw] sm:max-w-[840px]">
+                <div className="flex shrink-0 items-start justify-between gap-4 border-b border-brand-border px-4 py-3 dark:border-border sm:px-5">
                   <div><p className="text-[11px] font-semibold uppercase tracking-wide text-brand-blue">Follow-up</p><h3 className="mt-1 text-lg font-semibold text-brand-ink">{selectedFollowUp.purpose || "Follow-up Details"}</h3></div>
                   <button type="button" onClick={() => setSelectedFollowUp(null)} className="grid h-9 w-9 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close follow-up details"><X className="h-4 w-4" /></button>
                 </div>
-                <dl className="grid min-h-0 flex-1 gap-x-6 gap-y-4 overflow-y-auto px-5 py-5 sm:grid-cols-2">
+                <dl className="grid min-h-0 flex-1 gap-x-5 gap-y-3 overflow-y-auto overscroll-contain px-4 py-4 pb-6 sm:grid-cols-2 sm:px-5">
                   {[
                     ["Follow-up reference", selectedFollowUp.id],
                     ["Scheduled date", formatDate(selectedFollowUp.date)],
@@ -1098,7 +1113,7 @@ export default function HealthRecord() {
                     <div key={label} className="min-w-0"><dt className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-brand-ink">{value}</dd></div>
                   ))}
                 </dl>
-                <div className="flex justify-end border-t border-brand-border px-5 py-3"><button type="button" onClick={() => setSelectedFollowUp(null)} className="h-10 rounded-btn border border-brand-border px-4 text-sm font-semibold text-brand-gray">Close</button></div>
+                <div className="flex shrink-0 justify-end border-t border-brand-border px-4 py-3 dark:border-border sm:px-5"><button type="button" onClick={() => setSelectedFollowUp(null)} className="h-10 rounded-btn border border-brand-border px-4 text-sm font-semibold text-brand-gray">Close</button></div>
               </div>
             </div>
           )}

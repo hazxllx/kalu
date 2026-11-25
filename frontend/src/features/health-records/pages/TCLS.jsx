@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
+import FormModal from "@/components/common/FormModal";
 import TablePagination from "@/components/tables/TablePagination";
 import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope, RefreshCw, ChevronRight, Microscope, Eye, Pill, Heart, Baby, Leaf, Users } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -107,7 +108,7 @@ function CategorySection({ category, programs, rowsByProgram, onViewRecord }) {
   );
 }
 
-function ModalShell({ title, subtitle, onClose, children }) {
+function ModalShell({ title, subtitle, onClose, children, formDesign = false, footer = null }) {
   useEffect(() => {
     document.body.style.overflow = "hidden";
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -117,6 +118,10 @@ function ModalShell({ title, subtitle, onClose, children }) {
       document.removeEventListener("keydown", onKey);
     };
   }, [onClose]);
+
+  if (formDesign) {
+    return <FormModal title={title} description={subtitle} onClose={onClose} footer={footer}>{children}</FormModal>;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -579,7 +584,18 @@ function TclRegister({ user }) {
 
       {/* Add TCL */}
       {showAdd && (
-        <ModalShell title="Add Target Client" subtitle="Enroll an existing resident into a community health program." onClose={closeAdd}>
+        <ModalShell
+          title="Add Target Client"
+          subtitle="Enroll an existing resident into a community health program."
+          onClose={closeAdd}
+          formDesign
+          footer={<>
+            <button type="button" onClick={closeAdd} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+            <button type="button" onClick={saveTcl} disabled={saving} className="min-h-10 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-50">
+              <Plus className="mr-1 inline h-4 w-4" /> {saving ? "Saving..." : "Save Target Client"}
+            </button>
+          </>}
+        >
           <div className="space-y-4">
             {/* Resident selection */}
             <div>
@@ -690,12 +706,6 @@ function TclRegister({ user }) {
               <div className="rounded-btn border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{submitError}</div>
             )}
 
-            <div className="flex justify-end gap-3 border-t border-brand-border pt-4">
-              <button onClick={closeAdd} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Cancel</button>
-              <button onClick={saveTcl} disabled={saving} className="flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors disabled:opacity-50">
-                <Plus className="w-4 h-4" /> {saving ? "Saving..." : "Save Target Client"}
-              </button>
-            </div>
           </div>
         </ModalShell>
       )}
@@ -811,6 +821,13 @@ function TclRegister({ user }) {
           title={`Schedule Next Visit · ${scheduleRecord.resident?.name || scheduleRecord.residentId}`}
           subtitle={`${scheduleRecord.program} · Assigned BHW: ${scheduleRecord.bhw || "—"}`}
           onClose={() => setShowSchedule(null)}
+          formDesign
+          footer={<>
+            <button type="button" onClick={() => setShowSchedule(null)} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+            <button type="button" onClick={saveSchedule} disabled={saving} className="min-h-10 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-50">
+              <Calendar className="mr-1 inline h-4 w-4" /> {saving ? "Saving..." : "Save Schedule"}
+            </button>
+          </>}
         >
           <div className="space-y-4">
             {submitError && <p role="alert" className="text-sm text-brand-danger">{submitError}</p>}
@@ -832,12 +849,6 @@ function TclRegister({ user }) {
             <div>
               <label className={labelCls}>Visit Notes</label>
               <textarea rows={3} value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} className={`${inputCls()} resize-none`} />
-            </div>
-            <div className="flex justify-end gap-3 border-t border-brand-border pt-4">
-              <button onClick={() => setShowSchedule(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Cancel</button>
-              <button onClick={saveSchedule} disabled={saving} className="flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors disabled:opacity-50">
-                <Calendar className="w-4 h-4" /> {saving ? "Saving..." : "Save Schedule"}
-              </button>
             </div>
           </div>
         </ModalShell>

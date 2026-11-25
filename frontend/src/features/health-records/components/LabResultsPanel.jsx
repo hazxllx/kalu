@@ -19,7 +19,7 @@ export default function LabResultsPanel(props) {
   return <LaboratoryContent key={`${user.id}:${user.role || ""}:${user.barangayId || user.barangay_id || ""}:${user.municipalityId || user.municipality_id || ""}:${props.residentId || "own"}:${props.consultationId || ""}`} {...props} ownerId={user.id} />;
 }
 
-function LaboratoryContent({ ownerId, residentId, consultationId, canUpload = false, compact = false }) {
+function LaboratoryContent({ ownerId, residentId, consultationId, canUpload = false, compact = false, hideHeading = false }) {
   const { can } = usePermissions();
   const mounted = useRef(true);
   const [results, setResults] = useState([]);
@@ -101,8 +101,8 @@ function LaboratoryContent({ ownerId, residentId, consultationId, canUpload = fa
 
   if (!canUpload && !residentId) return null;
 
-  return <section className={compact ? "mt-5 border-t border-brand-border pt-4" : ""} aria-label="Laboratory results">
-    <div className="mb-4 flex items-center gap-2"><FlaskConical className="h-4 w-4 text-brand-blue" aria-hidden="true" /><h3 className={`${compact ? "text-sm " : ""}font-semibold text-brand-ink`}>Laboratory Results</h3></div>
+  return <section className={compact && !hideHeading ? "mt-3 border-t border-brand-border pt-3 dark:border-border" : ""} aria-label="Laboratory results">
+    {!hideHeading && <div className={`${compact ? "mb-2" : "mb-4"} flex items-center gap-2`}><FlaskConical className="h-4 w-4 text-brand-blue" aria-hidden="true" /><h3 className={`${compact ? "text-sm " : ""}font-semibold text-brand-ink`}>Laboratory Results</h3></div>}
     {canUpload && <form onSubmit={upload} className="mb-4 grid gap-2">
       <label className="sr-only" htmlFor="lab-category">Test category</label>
       <select id="lab-category" value={category} onChange={(event) => setCategory(event.target.value)} className="h-9 rounded-btn border border-brand-border bg-white px-2 text-sm text-brand-ink">
@@ -112,7 +112,7 @@ function LaboratoryContent({ ownerId, residentId, consultationId, canUpload = fa
       <button type="submit" disabled={!file || busy} className="inline-flex h-9 items-center justify-center gap-2 rounded-btn bg-brand-blue px-3 text-sm font-medium text-white disabled:opacity-50"><Upload className="h-4 w-4" /> Upload</button>
     </form>}
     {error && <p role="alert" className="mb-2 text-xs text-brand-danger">{error}</p>}
-    {loading ? <p className="flex items-center gap-2 py-3 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Loading laboratory results...</p> : results.length === 0 ? !error && <p className="py-2 text-sm text-brand-gray">No laboratory results recorded yet.</p> : <ul className="divide-y divide-brand-border">
+    {loading ? <p className="flex items-center gap-2 py-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Loading laboratory results...</p> : results.length === 0 ? !error && <p className="py-1 text-sm text-brand-gray">No laboratory results recorded yet.</p> : <ul className="divide-y divide-brand-border">
       {results.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0">
         <div className="min-w-0"><p className="break-words text-sm font-medium text-brand-ink">{item.fileName || categoryLabels[item.category] || "Laboratory result"}</p><p className="mt-0.5 text-xs text-brand-gray">{categoryLabels[item.category] || item.category} · {dateLabel(item.uploadedAt)} · Requires clinical review</p></div>
         {!canUpload && consultationId && !item.consultationId && can("consultation.records.update") && can("consultation.history.view") && <button type="button" onClick={() => linkResult(item)} disabled={busy} className="shrink-0 text-sm font-medium text-brand-blue hover:underline disabled:opacity-50">Link to consultation</button>}

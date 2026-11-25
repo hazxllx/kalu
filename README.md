@@ -195,13 +195,17 @@ put a service-role key in a `VITE_` variable. Redeploy after adding or changing
 these settings. The dashboard configuration is not available to verify from
 this repository.
 
-Supabase Auth invitations use the checked-in `supabase/templates/invite.html`
-template. Production Auth SMTP is configured for Brevo in
-`supabase/config.production.toml`; provide `SMTP_USER`, `SMTP_PASSWORD`, and
-`SMTP_FROM` as deployment secrets/environment values (with `SMTP_FROM` set to
-the verified sender email address). Apply that configuration to the hosted
-Supabase project as well as configuring the backend's matching SMTP variables.
-Do not store SMTP credentials in source control.
+Supabase Auth invitations and Auth-generated verification emails use the
+project's own Auth SMTP settings. Configure those settings in the hosted
+Supabase project's Auth SMTP configuration; local `.env` values and
+`supabase/config.production.toml` do not update a hosted project. The TOML file
+is an ignored local preservation copy and is not loaded by the Supabase CLI.
+For KALUSAGAP, use Brevo's SMTP host `smtp-relay.brevo.com`, port `587`, the
+Brevo SMTP login and SMTP key, and the verified sender `kalusagap@gmail.com`
+with sender name `Kalusagap`. Use the same host, port, SMTP login/key, and
+verified sender in the backend hosting environment as `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM`. Port 587 requires STARTTLS.
+Never store SMTP credentials in source control or expose them to the frontend.
 
 ### Database Setup
 

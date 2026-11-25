@@ -2204,23 +2204,30 @@ a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 
 
 /* Modal container - constrained width on desktop, full-width on mobile */
 .modal-responsive {
-  @apply w-full max-w-full mx-4;
+  --modal-max-width: 40rem;
+  width: min(calc(100vw - 2rem), 40rem);
+  max-width: 40rem;
+  max-height: min(85dvh, calc(100dvh - 2rem));
 }
 
 .modal-responsive.modal-sm {
-  @apply sm:max-w-md;
+  --modal-max-width: 28rem;
+  max-width: 28rem;
 }
 
 .modal-responsive.modal-md {
-  @apply sm:max-w-lg md:max-w-2xl;
+  --modal-max-width: 40rem;
+  max-width: 40rem;
 }
 
 .modal-responsive.modal-lg {
-  @apply sm:max-w-2xl md:max-w-4xl;
+  --modal-max-width: 56rem;
+  max-width: 56rem;
 }
 
 .modal-responsive.modal-xl {
-  @apply sm:max-w-4xl md:max-w-6xl;
+  --modal-max-width: 62.5rem;
+  max-width: 62.5rem;
 }
 
 /* Modal content with responsive padding */
@@ -3168,6 +3175,12 @@ body,
   overscroll-behavior: contain;
 }
 
+.fixed.inset-0[role="dialog"] {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+}
+
 [role="dialog"] :is(input, textarea, select, button) {
   max-width: 100%;
 }
@@ -3244,6 +3257,17 @@ body,
     max-height: calc(100dvh - 1.5rem);
   }
 
+  .modal-responsive {
+    width: calc(100vw - 1.5rem);
+    max-height: min(92dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem));
+  }
+
+  .fixed.inset-0[role="dialog"] {
+    width: 100%;
+    max-width: none;
+    max-height: none;
+  }
+
   [role="dialog"] footer,
   [role="dialog"] [class*="footer"],
   [role="dialog"] [class*="Footer"] {
@@ -3254,6 +3278,13 @@ body,
 
   .app-main :is(.table-scroll, [class*="overflow-x-auto"]) table {
     max-width: none;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .modal-responsive {
+    width: 90vw;
+    max-height: 90dvh;
   }
 }
 
@@ -3273,5 +3304,54 @@ body,
 
   .ui-page-header-body {
     padding-inline: 1rem;
+  }
+}
+
+body:has([aria-modal="true"]) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+[role="dialog"].modal-responsive {
+  width: min(calc(100vw - 2rem), var(--modal-max-width, 40rem));
+  max-width: var(--modal-max-width, 40rem);
+  max-height: min(85dvh, calc(100dvh - 2rem));
+}
+
+[aria-modal="true"][role="dialog"].max-w-5xl,
+[aria-modal="true"][role="dialog"].max-w-6xl,
+[aria-modal="true"][role="dialog"].max-w-7xl {
+  max-width: min(62.5rem, calc(100vw - 2rem));
+}
+
+[aria-modal="true"][role="dialog"]:not(.fixed.inset-0):not(aside) {
+  max-height: min(85dvh, calc(100dvh - 2rem));
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  [role="dialog"].modal-responsive {
+    width: 90vw;
+    max-height: 90dvh;
+  }
+
+  [aria-modal="true"][role="dialog"]:not(.fixed.inset-0):not(aside) {
+    max-height: 90dvh;
+  }
+}
+
+@media (max-width: 767px) {
+  [role="dialog"].modal-responsive {
+    width: calc(100vw - 1.5rem);
+    max-height: min(92dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem));
+  }
+
+  [aria-modal="true"][role="dialog"].max-w-5xl,
+  [aria-modal="true"][role="dialog"].max-w-6xl,
+  [aria-modal="true"][role="dialog"].max-w-7xl {
+    max-width: calc(100vw - 1.5rem);
+  }
+
+  [aria-modal="true"][role="dialog"]:not(.fixed.inset-0):not(aside) {
+    max-height: min(92dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem));
   }
 }

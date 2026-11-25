@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Card } from "@/components/common/Card";
+import { FormModalHeader } from "@/components/common/FormModal";
 import { useCertificateMeta } from "@/features/certificates/hooks/useCertificateRegister";
 import {
   canPrintOfficialMedicalCertificate,
@@ -260,12 +261,62 @@ const [savedId, setSavedId] = useState(null);
     }
   };
 
+  const formActions = (
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+      <button type="button" onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+      <button
+        type="button"
+        onClick={() => setShowPreview(true)}
+        className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-bg dark:bg-card dark:hover:bg-hover"
+      >
+        <Eye className="h-4 w-4" /> Preview Certificate
+      </button>
+      {isEdit ? (
+        <button
+          type="button"
+          onClick={() => handleSave(false)}
+          disabled={Boolean(busy)}
+          className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+        >
+          {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Changes
+        </button>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => handleSave(false)}
+            disabled={Boolean(busy)}
+            className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
+          >
+            {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Draft
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSave(true)}
+            disabled={Boolean(busy)}
+            className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+          >
+            <Send className="h-4 w-4" /> Submit for Review
+          </button>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className={`flex max-h-[92dvh] w-full flex-col overflow-hidden ${isFormMode ? "max-w-2xl" : "max-w-4xl"}`}>
+      <Card className={`flex max-h-[90dvh] w-full flex-col overflow-hidden ${isFormMode ? "max-w-2xl" : "max-w-4xl"}`}>
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="shrink-0 border-b border-slate-200 px-4 py-4 dark:border-border sm:px-6">
-          <div className="mb-1 flex items-start justify-between gap-3">
+          {isFormMode ? (
+            <FormModalHeader
+              title={isCreate ? "Medical Certificate" : "Edit Medical Certificate"}
+              description={isCreate
+                ? `${patient.patient} (${patient.patientId}) · ${patient.age} · ${patient.sex} · ${patient.barangay}`
+                : `${view?.reference || certificate?.reference || "Certificate"} · ${view?.patient || certificate?.patient || ""}`}
+              onClose={onClose}
+            />
+          ) : <div className="shrink-0 border-b border-slate-200 px-4 py-4 dark:border-border sm:px-6">
+            <div className="mb-1 flex items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold text-brand-ink">
                 {isCreate ? "Medical Certificate" : `Medical Certificate · ${view.reference}`}
@@ -283,7 +334,7 @@ const [savedId, setSavedId] = useState(null);
               </button>
             </div>
           </div>
-          </div>
+          </div>}
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 sm:px-6 sm:pb-6">
           {brandingError && <p role="alert" className="mt-3 text-sm text-brand-danger">{brandingError}</p>}
           {detailError && <p role="alert" className="mt-3 rounded-btn bg-brand-danger/5 px-3 py-2 text-sm text-brand-danger">{detailError}</p>}
@@ -292,6 +343,7 @@ const [savedId, setSavedId] = useState(null);
 
           {isFormMode ? (
             <div className="mt-4 space-y-4">
+              <h3 className="border-b border-brand-border pb-2 text-sm font-semibold text-brand-ink">Certificate information</h3>
               <div>
                 <Field label="Purpose of Certificate" required error={errors.purpose}>
                   <select value={form.purpose} onChange={(e) => set("purpose")(e.target.value)} className={`${inputCls(errors.purpose)} cursor-pointer`}>
@@ -337,42 +389,6 @@ const [savedId, setSavedId] = useState(null);
                 </p>
               )}
               {errors.submit && <p className="text-xs text-brand-danger">{errors.submit}</p>}
-              <div className="flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
-                <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-                <button
-                  type="button"
-                  onClick={() => setShowPreview(true)}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-bg dark:bg-card dark:hover:bg-hover"
-                >
-                  <Eye className="h-4 w-4" /> Preview Certificate
-                </button>
-                {isEdit ? (
-                  <button
-                    onClick={() => handleSave(false)}
-                    disabled={Boolean(busy)}
-                    className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-                  >
-                    {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Changes
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => handleSave(false)}
-                      disabled={Boolean(busy)}
-                      className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
-                    >
-                      {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Draft
-                    </button>
-                    <button
-                      onClick={() => handleSave(true)}
-                      disabled={Boolean(busy)}
-                      className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-                    >
-                      <Send className="h-4 w-4" /> Submit for Review
-                    </button>
-                  </>
-                )}
-              </div>
             </div>
           ) : (
             <div className="mt-4 space-y-5">
@@ -544,6 +560,7 @@ const [savedId, setSavedId] = useState(null);
             </div>
           )}
           </div>
+          {isFormMode && <div className="shrink-0 border-t border-brand-border bg-white px-4 py-3 dark:bg-card sm:px-6">{formActions}</div>}
         </div>
       </Card>
       {showPreview && (

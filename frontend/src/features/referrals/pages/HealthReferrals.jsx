@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
+import FormModal from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import TablePagination from "@/components/tables/TablePagination";
@@ -530,18 +531,27 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4">
-      <Card className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6 sm:py-4">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">{routingOnly ? "Reassign Referral" : isEdit ? "Edit Referral" : "New Referral"}</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">{routingOnly ? "The new recipient must accept again. Clinical details and history are retained." : "Assign an authorized KALUSAGAP recipient for tracking, and optionally add an outside facility or contact."}</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
-          </div>
-
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+    <FormModal
+      title={routingOnly ? "Reassign Referral" : isEdit ? "Edit Referral" : "New Referral"}
+      description={routingOnly ? "The new recipient must accept again. Clinical details and history are retained." : "Assign an authorized KALUSAGAP recipient for tracking, and optionally add an outside facility or contact."}
+      onClose={onClose}
+      size="large"
+      bodyClassName="px-4 py-4 sm:px-6"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+          <button
+            type="button"
+            disabled={saving || (!form.externalReceivingEnabled && (routesLoading || Boolean(routesError)))}
+            onClick={() => { if (validate()) onSave(form); }}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+          >
+            <Check className="h-4 w-4" /> {saving ? "Saving..." : isEdit ? "Save Changes" : "Save Referral"}
+          </button>
+        </>
+      }
+    >
+          <div className="space-y-4">
             {isEdit ? (
               <section className="rounded-btn border border-brand-border p-4">
                 <h4 className="text-sm font-semibold text-brand-ink">Select Patient</h4>
@@ -890,20 +900,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
             )}
             </fieldset>
           </div>
-
-          <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border px-4 py-3 sm:px-6 sm:py-4">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-            <button
-              disabled={saving || (!form.externalReceivingEnabled && (routesLoading || Boolean(routesError)))}
-              onClick={() => { if (validate()) onSave(form); }}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-            >
-              <Check className="h-4 w-4" /> {saving ? "Saving..." : isEdit ? "Save Changes" : "Save Referral"}
-            </button>
-          </div>
-        </div>
-      </Card>
-    </div>
+    </FormModal>
   );
 }
 
@@ -2047,25 +2044,25 @@ function ResidentReferralScheduleRequestModal({ target, busy, onClose, onSubmit 
     onSubmit({ requestType: target.requestType, proposedSchedule: isReschedule ? dateTime : null, reason: reason.trim() });
   };
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <Card className="w-full max-w-md p-5 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="resident-referral-request-title">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 id="resident-referral-request-title" className="text-lg font-semibold text-brand-ink">{title}</h2>
-            <p className="mt-1 text-sm text-brand-gray">{target.record.reason} · {target.record.destinationFacility}</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="rounded p-1 text-brand-gray hover:bg-brand-bg"><X className="h-5 w-5" /></button>
-        </div>
-        <p className="mt-3 text-sm text-brand-gray">Your current referral schedule stays active until the responsible health team reviews the request.</p>
-        {isReschedule && <label className="mt-4 block text-sm font-medium text-brand-ink">Proposed date and time<input type="datetime-local" min={minimumDateTime} value={dateTime} onChange={(event) => setDateTime(event.target.value)} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm text-brand-ink dark:bg-input dark:text-foreground" /></label>}
-        <label className="mt-4 block text-sm font-medium text-brand-ink">Reason<textarea rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Tell the health team why you need this change." className="mt-1.5 w-full resize-y rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm text-brand-ink dark:bg-input dark:text-foreground" /></label>
-        {error && <p role="alert" className="mt-2 text-sm text-brand-danger">{error}</p>}
-        <div className="mt-5 flex flex-col-reverse gap-2 border-t border-brand-border pt-4 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} disabled={busy} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink disabled:opacity-60">Keep schedule</button>
-          <button type="button" onClick={submit} disabled={busy} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{busy ? "Sending…" : "Send request"}</button>
-        </div>
-      </Card>
-    </div>
+    <FormModal
+      title={title}
+      description={`${target.record.reason} · ${target.record.destinationFacility}`}
+      onClose={onClose}
+      closeDisabled={busy}
+      closeOnBackdrop
+      footer={<>
+        <button type="button" onClick={onClose} disabled={busy} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink disabled:opacity-60">Keep schedule</button>
+        <button type="button" onClick={submit} disabled={busy} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{busy ? "Sending…" : "Send request"}</button>
+      </>}
+    >
+      <p className="text-sm text-brand-gray">Your current referral schedule stays active until the responsible health team reviews the request.</p>
+      <section className="mt-4 space-y-4">
+        <h3 className="border-b border-brand-border pb-2 text-sm font-semibold text-brand-ink">Schedule request</h3>
+        {isReschedule && <label className="block text-sm font-medium text-brand-ink">Proposed date and time<input type="datetime-local" min={minimumDateTime} value={dateTime} onChange={(event) => setDateTime(event.target.value)} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm text-brand-ink dark:bg-input dark:text-foreground" /></label>}
+        <label className="block text-sm font-medium text-brand-ink">Reason<textarea rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Tell the health team why you need this change." className="mt-1.5 w-full resize-y rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm text-brand-ink dark:bg-input dark:text-foreground" /></label>
+        {error && <p role="alert" className="text-sm text-brand-danger">{error}</p>}
+      </section>
+    </FormModal>
   );
 }
 

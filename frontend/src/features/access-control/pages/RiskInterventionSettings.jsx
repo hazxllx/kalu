@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import FormModal from "@/components/common/FormModal";
 import ErrorState from "@/components/common/ErrorState";
 import { riskConfigApi } from "@/services/api";
 import {
@@ -168,16 +169,19 @@ function IndicatorEditModal({ indicator, onSave, onClose }) {
 
   if (!indicator) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="text-sm font-semibold text-slate-900">Edit indicator</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mt-1 text-xs text-slate-500">Key: {indicator.key}</p>
-        <div className="mt-4 space-y-3">
+    <FormModal
+      title="Edit Indicator"
+      description={`Update indicator details. Key: ${indicator.key}`}
+      onClose={onClose}
+      size="standard"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+          <button type="button" onClick={handleSave} className="min-h-10 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark">Save</button>
+        </>
+      }
+    >
+        <div className="space-y-3">
           <div>
             <label className={labelClass}>Indicator name</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)} className={inputClass} />
@@ -195,16 +199,7 @@ function IndicatorEditModal({ indicator, onSave, onClose }) {
             Active
           </label>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button onClick={handleSave} className="rounded-md bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormModal>
   );
 }
 
@@ -1058,15 +1053,18 @@ export default function RiskInterventionSettings() {
 
       {/* Criterion modal (Section B) */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-          <Card className="max-h-[90vh] w-full max-w-xl overflow-y-auto">
-            <div className="p-5 sm:p-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">{editing ? "Edit criterion" : "Add criterion"}</h3>
-                <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
+        <FormModal
+          title={editing ? "Edit Risk Criterion" : "Add Risk Criterion"}
+          description="Configure the health data condition and scoring used for resident risk classification."
+          onClose={() => setShowModal(false)}
+          size="standard"
+          footer={
+            <>
+              <button type="button" onClick={() => setShowModal(false)} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+              <button type="button" onClick={saveCriterion} disabled={busy} className="min-h-10 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-50">{busy ? "Saving…" : "Save criterion"}</button>
+            </>
+          }
+        >
               {formError && (
                 <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{formError}</div>
               )}
@@ -1137,21 +1135,7 @@ export default function RiskInterventionSettings() {
                   Active
                 </label>
               </div>
-              <div className="mt-6 flex justify-end gap-2">
-                <button onClick={() => setShowModal(false)} className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-                  Cancel
-                </button>
-                <button
-                  onClick={saveCriterion}
-                  disabled={busy}
-                  className="rounded-md bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
-                >
-                  {busy ? "Saving…" : "Save criterion"}
-                </button>
-              </div>
-            </div>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {/* Indicator edit modal */}

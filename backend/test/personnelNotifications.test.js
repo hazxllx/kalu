@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import nodemailer from 'nodemailer';
 
-import { sendSmtpMail } from '../src/services/email.service.js';
+import { getSmtpFailureDetails, sendSmtpMail } from '../src/services/email.service.js';
 import { processPersonnelNotifications, startPersonnelNotificationWorker } from '../src/services/personnelNotifications.service.js';
 import { encryptTemporaryPassword } from '../src/utils/temporaryPassword.js';
 
@@ -21,7 +21,7 @@ const CONFIG = {
   clientUrl: 'https://app.example.test',
   smtpHost: 'smtp.example.test', smtpPort: 587,
   smtpUser: 'test-smtp-user', smtpPassword: 'test-smtp-password',
-  smtpFrom: 'KALUSAGAP <notices@example.test>',
+  smtpFrom: 'notices@example.test',
   supabaseServiceRoleKey: 'personnel-test-service-key',
   personnelNotificationIntervalMs: 60_000,
 };
@@ -225,6 +225,7 @@ test('new health personnel email includes the generated password and 10-minute e
   const message = f.state.messages[0];
   assert.equal(result.mailServerAccepted, 1);
   assert.equal(f.state.jobs[0].status, 'sent');
+  assert.deepEqual(message.from, { name: 'Kalusagap', address: CONFIG.smtpFrom });
   assert.equal(message.subject, 'Your KALUSAGAP account is ready.');
   assert.match(message.text, /Hello, Nurse Example/);
   assert.match(message.text, new RegExp(EMAIL));
@@ -558,7 +559,22 @@ test('definitive SMTP auth rejection retries only when the database claims it du
     return accepted(message);
   } });
   assert.equal((await f.run()).failed, 1);
-  assert.equal(f.state.jobs[0].last_error_code, 'SMTP_EAUTH');
+  assert.equal(f.state.jobs[0].last_error_code, 'SMTP_AUTH_CREDENTIALS_REJECTED');
+  const diagnostic = f.state.logs.find(([, event, data]) => event === 'personnel_notification'
+    && data.failureClass === 'authentication_failure')?.[2];
+  assert.deepEqual({
+    code: diagnostic.code,
+    failureClass: diagnostic.failureClass,
+    smtpCode: diagnostic.smtpCode,
+    smtpPhase: diagnostic.smtpPhase,
+    smtpResponseCode: diagnostic.smtpResponseCode,
+  }, {
+    code: 'SMTP_AUTH_CREDENTIALS_REJECTED',
+    failureClass: 'authentication_failure',
+    smtpCode: 'EAUTH',
+    smtpPhase: 'auth',
+    smtpResponseCode: 535,
+  });
   await f.run();
   assert.equal(f.state.messages.length, 1);
   f.state.jobs[0].due = true;
@@ -568,6 +584,27 @@ test('definitive SMTP auth rejection retries only when the database claims it du
   assert.equal(f.state.messages[0].messageId, f.state.messages[1].messageId);
 });
 
+test('SMTP diagnostics classify provider failures without retaining raw response text', () => {
+  for (const [error, expected] of [
+    [{ code: 'EAUTH', smtpPhase: 'auth', responseCode: 535, message: `${TOKEN} ${EMAIL}` },
+      ['SMTP_AUTH_CREDENTIALS_REJECTED', 'authentication_failure']],
+    [{ code: 'EENVELOPE', smtpPhase: 'mail_from', responseCode: 553 },
+      ['SMTP_SENDER_REJECTED', 'sender_rejection']],
+    [{ code: 'ETLS', smtpPhase: 'starttls' },
+      ['SMTP_TLS_FAILURE', 'tls_failure']],
+    [{ code: 'ETIMEDOUT', smtpPhase: 'connect' },
+      ['SMTP_CONNECTION_TIMEOUT', 'connection_timeout']],
+    [{ code: 'EMESSAGE', smtpPhase: 'data', responseCode: 451 },
+      ['SMTP_PROVIDER_REJECTED', 'provider_rejection']],
+  ]) {
+    const details = getSmtpFailureDetails(error);
+    assert.deepEqual([details.code, details.failureClass], expected);
+    assert.equal(JSON.stringify(details).includes(TOKEN), false);
+    assert.equal(JSON.stringify(details).includes(EMAIL), false);
+    assert.equal(JSON.stringify(details).includes('message'), false);
+  }
+});
+
 test('a monitored pre-DATA connection failure is definitively unsent and retryable', async () => {
   const f = fixture({ send: (message) => {
     message.personnelSmtpProgress.monitored = true;
@@ -575,7 +612,7 @@ test('a monitored pre-DATA connection failure is definitively unsent and retryab
   } });
   await f.run();
   assert.equal(f.state.jobs[0].status, 'failed');
-  assert.equal(f.state.jobs[0].last_error_code, 'SMTP_ESOCKET_CONNECT');
+  assert.equal(f.state.jobs[0].last_error_code, 'SMTP_CONNECTION_FAILED');
 });
 
 for (const code of ['ETIMEDOUT', 'ECONNECTION', 'ESOCKET']) {

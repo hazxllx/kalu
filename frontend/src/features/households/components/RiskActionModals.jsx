@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { Card } from "@/components/common/Card";
-import { X, PhoneCall, UserPlus, ArrowUpRight } from "lucide-react";
+import FormModal from "@/components/common/FormModal";
+import { PhoneCall, UserPlus, ArrowUpRight } from "lucide-react";
 import { RISK_WORKFLOW_STATUSES } from "@/lib/householdRisk";
 import useHouseholdWorkers from "@/hooks/useHouseholdWorkers";
 
@@ -11,25 +11,8 @@ const inputCls = (error) =>
     error ? "border-brand-danger" : "border-slate-200 dark:border-border"
   }`;
 
-function ModalShell({ title, subtitle, onClose, busy = false, children }) {
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-start justify-between gap-3 mb-1">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">{title}</h3>
-              {subtitle && <p className="text-sm text-brand-gray mt-0.5">{subtitle}</p>}
-            </div>
-            <button disabled={busy} onClick={onClose} className="text-brand-gray hover:text-brand-ink disabled:opacity-50" aria-label="Close">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          {children}
-        </div>
-      </Card>
-    </div>
-  );
+function ModalShell({ title, subtitle, onClose, busy = false, children, footer }) {
+  return <FormModal title={title} description={subtitle} onClose={onClose} closeDisabled={busy} footer={footer}>{children}</FormModal>;
 }
 
 /** Create-follow-up modal shared by the risk overview + detail pages. */
@@ -47,7 +30,12 @@ export function FollowUpModal({ household, onClose, onSave }) {
     finally { setSaving(false); }
   };
   return (
-    <ModalShell title="Record Household Follow-up" subtitle={`${household.head} Household · ${household.barangay}`} busy={saving} onClose={onClose}>
+    <ModalShell title="Record Household Follow-up" subtitle={`${household.head} Household · ${household.barangay}`} busy={saving} onClose={onClose} footer={<>
+      <button type="button" disabled={saving} onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+      <button type="button" disabled={saving} onClick={save} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
+        <PhoneCall className="h-4 w-4" /> {saving ? 'Saving...' : 'Save Follow-up'}
+      </button>
+    </>}>
       <div className="mt-4 space-y-4">
         <div>
           <label className="text-sm font-medium text-brand-ink">Follow-up Status</label>
@@ -60,12 +48,6 @@ export function FollowUpModal({ household, onClose, onSave }) {
           <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Assessment notes from the household visit..." className={`${inputCls()} resize-none`} />
         </div>
         {error && <p role="alert" className="text-sm text-brand-danger">{error}</p>}
-        <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-border pt-4">
-          <button disabled={saving} onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-          <button disabled={saving} onClick={save} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
-            <PhoneCall className="h-4 w-4" /> {saving ? 'Saving...' : 'Save Follow-up'}
-          </button>
-        </div>
       </div>
     </ModalShell>
   );
@@ -96,7 +78,12 @@ export function AssignWorkerModal({ household, onClose, onSave }) {
     }
   };
   return (
-    <ModalShell title="Assign Health Worker" subtitle={`${household.head} Household · ${household.barangay}`} busy={saving} onClose={onClose}>
+    <ModalShell title="Assign Health Worker" subtitle={`${household.head} Household · ${household.barangay}`} busy={saving} onClose={onClose} footer={<>
+      <button type="button" onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+      <button type="button" onClick={save} disabled={saving || directory.loading || Boolean(directory.error) || !selectedWorker} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
+        <UserPlus className="h-4 w-4" /> {saving ? "Saving..." : "Assign Worker"}
+      </button>
+    </>}>
       <div className="mt-4 space-y-4">
         <div>
           <label className="text-sm font-medium text-brand-ink">Health Worker</label>
@@ -114,16 +101,6 @@ export function AssignWorkerModal({ household, onClose, onSave }) {
           <label className="text-sm font-medium text-brand-ink">Role</label>
           <input readOnly value={selectedWorker ? workerRoles[selectedWorker.role] || selectedWorker.role : "Select a worker to view their role"} className={inputCls()} />
           <p className="mt-1 text-xs text-brand-gray">The worker's role and assignment scope are verified by the server.</p>
-        </div>
-        <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-border pt-4">
-          <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-          <button
-            onClick={save}
-            disabled={saving || directory.loading || Boolean(directory.error) || !selectedWorker}
-            className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
-          >
-            <UserPlus className="h-4 w-4" /> {saving ? "Saving..." : "Assign Worker"}
-          </button>
         </div>
       </div>
     </ModalShell>
@@ -145,7 +122,12 @@ export function EscalateModal({ household, onClose, onSave }) {
     finally { setSaving(false); }
   };
   return (
-    <ModalShell title="Escalate Case" subtitle={`${household.head} Household`} busy={saving} onClose={onClose}>
+    <ModalShell title="Escalate Case" subtitle={`${household.head} Household`} busy={saving} onClose={onClose} footer={<>
+      <button type="button" disabled={saving} onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+      <button type="button" disabled={saving} onClick={save} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-50">
+        <ArrowUpRight className="h-4 w-4" /> {saving ? 'Saving...' : 'Escalate Case'}
+      </button>
+    </>}>
       <div className="mt-4 space-y-4">
         <div className="rounded-btn border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-400">
           <span className="font-semibold">Reason:</span> {household.followUpCount} follow-up attempt(s) have not fully resolved the identified concerns.
@@ -163,12 +145,6 @@ export function EscalateModal({ household, onClose, onSave }) {
           <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe why this case should be escalated..." className={`${inputCls()} resize-none`} />
         </div>
         {error && <p role="alert" className="text-sm text-brand-danger">{error}</p>}
-        <div className="flex justify-end gap-3 border-t border-slate-200 dark:border-border pt-4">
-          <button disabled={saving} onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-          <button disabled={saving} onClick={save} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-50">
-            <ArrowUpRight className="h-4 w-4" /> {saving ? 'Saving...' : 'Escalate Case'}
-          </button>
-        </div>
       </div>
     </ModalShell>
   );

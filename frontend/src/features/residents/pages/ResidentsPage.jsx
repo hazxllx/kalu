@@ -2,6 +2,7 @@
 import { useSearchParams } from "react-router-dom";
 import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, MoreVertical, Users } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
+import FormModal from "@/components/common/FormModal";
 import DataTable from "@/components/tables/DataTable";
 import TablePagination from "@/components/tables/TablePagination";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -1226,40 +1227,25 @@ export default function ResidentsPage() {
 
       {/* Add Resident Modal */}
       {showAddModal && canCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-2 sm:p-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-resident-title"
-            aria-describedby="add-resident-description"
-            className="flex min-h-0 max-h-[80dvh] w-full max-w-[900px] flex-col overflow-hidden rounded-card bg-white shadow-xl dark:bg-card"
-            style={{ maxWidth: "900px" }}
-          >
-            <header className="relative isolate flex-shrink-0 overflow-hidden border-b border-brand-border bg-[#EFF6FF] px-4 py-3 dark:border-border dark:bg-[#14263A] sm:px-5">
-              <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-44 w-44 rounded-full border-[22px] border-brand-blue/10 dark:border-blue-300/10" />
-              <div className="relative z-10 flex items-start justify-between gap-4">
-                <div className="flex min-w-0 items-start gap-3">
-                  <span aria-hidden="true" className="mt-0.5 h-10 w-1 shrink-0 rounded-full bg-brand-blue" />
-                  <div className="min-w-0">
-                    <h2 id="add-resident-title" className="text-lg font-bold text-brand-ink dark:text-foreground">Add Resident</h2>
-                    <p id="add-resident-description" className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
-                      Register a new resident in the directory.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={closeAdd}
-                  disabled={submitting}
-                  className="relative z-10 -mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-white/70 hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-muted-foreground dark:hover:bg-card/70 dark:hover:text-foreground"
-                  aria-label="Close resident registration"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </header>
-
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-card">
+        <FormModal
+          title="Add Resident"
+          description="Register a new resident in the directory."
+          onClose={closeAdd}
+          closeDisabled={submitting}
+          size="large"
+          labelledBy="add-resident-title"
+          bodyClassName="!p-0"
+          footer={
+            <>
+              <button type="button" onClick={closeAdd} disabled={submitting} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:cursor-not-allowed disabled:opacity-60 dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">
+                Cancel
+              </button>
+              <button type="button" onClick={handleSubmit} disabled={submitting} className="min-h-10 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
+                {submitting ? "Saving..." : "Add Resident"}
+              </button>
+            </>
+          }
+        >
               <div className="grid grid-cols-1 gap-y-2 px-4 py-3 sm:px-5 sm:py-4">
                 {formError && (
                   <div role="alert" className="rounded-card border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300">
@@ -1421,25 +1407,7 @@ export default function ResidentsPage() {
                   </div>
                 )}
               </div>
-            </div>
-
-            <footer className="flex-shrink-0 border-t border-brand-border bg-white px-4 py-2.5 dark:border-border dark:bg-card sm:px-5">
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={closeAdd} disabled={submitting} className="rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:cursor-not-allowed disabled:opacity-60 dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                  className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submitting ? "Saving..." : "Add Resident"}
-                </button>
-              </div>
-            </footer>
-          </div>
-        </div>
+        </FormModal>
       )}
       {/* View Resident Modal */}
       {showViewModal && selected && selectedOwner === user?.id && (!supervisor || (canViewProfile && assignedBarangay)) && (
@@ -1680,41 +1648,24 @@ export default function ResidentsPage() {
           Edits are limited to the fields the API permits for correction —
           identity fields (name, birth date, sex) are locked by design. */}
       {showEditModal && editTarget && canEdit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4">
-          <Card
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="edit-resident-title"
-            aria-describedby="edit-resident-description"
-            className={`flex w-full max-w-3xl min-h-0 max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden sm:max-h-[calc(100dvh-2rem)] ${supervisor ? "supervisor-modal" : ""}`}
-          >
-            <header className="relative isolate flex-shrink-0 overflow-hidden border-b border-brand-border bg-[#EFF6FF] px-5 py-4 dark:border-border dark:bg-[#14263A] sm:px-6 sm:py-5">
-              <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-44 w-44 rounded-full border-[22px] border-brand-blue/10 dark:border-blue-300/10" />
-              <div className="relative z-10 flex items-start justify-between gap-4">
-                <div className="flex min-w-0 items-start gap-3">
-                  <span aria-hidden="true" className="mt-0.5 h-10 w-1 shrink-0 rounded-full bg-brand-blue" />
-                  <div className="min-w-0">
-                    <h2 id="edit-resident-title" className="text-lg font-bold text-brand-ink dark:text-foreground">Edit Resident</h2>
-                    <p id="edit-resident-description" className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
-                      <span className="font-medium text-brand-ink dark:text-foreground">{editTarget.id}</span>
-                      <span aria-hidden="true"> · </span>
-                      updates are limited to your assigned barangay.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="relative z-10 -mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-white/70 hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-muted-foreground dark:hover:bg-card/70 dark:hover:text-foreground"
-                  aria-label="Close edit resident dialog"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </header>
-
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-card">
-              <div className="grid grid-cols-1 gap-x-5 gap-y-4 py-5 pl-5 pr-8 md:grid-cols-2 sm:py-6 sm:pl-6 sm:pr-10">
+        <FormModal
+          title="Edit Resident"
+          description={`${editTarget.id} · Updates are limited to your assigned barangay.`}
+          onClose={() => setShowEditModal(false)}
+          size="standard"
+          labelledBy="edit-resident-title"
+          bodyClassName="!p-0"
+          dialogClassName={supervisor ? "supervisor-modal" : ""}
+          footer={
+            <>
+              <button type="button" onClick={() => setShowEditModal(false)} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">Cancel</button>
+              <button type="button" onClick={handleEditSave} disabled={editSubmitting} className="inline-flex min-h-10 items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+                <CheckCircle2 className="w-4 h-4" /> {editSubmitting ? "Saving..." : "Save Changes"}
+              </button>
+            </>
+          }
+        >
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 px-4 py-4 sm:px-6 sm:py-5 md:grid-cols-2">
                 {editError && (
                   <div role="alert" className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3.5 py-3 text-sm text-brand-danger dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300 md:col-span-2">
                     {editError}
@@ -1747,25 +1698,7 @@ export default function ResidentsPage() {
                   <Field label="Address" value={editForm.currentAddress} onChange={(v) => setEditForm((p) => ({ ...p, currentAddress: v }))} placeholder="House no., street, purok, barangay" optional />
                 </div>
               </div>
-            </div>
-
-            <footer className="flex-shrink-0 border-t border-brand-border bg-white px-5 py-3.5 dark:border-border dark:bg-card sm:px-6">
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={() => setShowEditModal(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:text-muted-foreground dark:hover:bg-hover">
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleEditSave}
-                  disabled={editSubmitting}
-                  className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> {editSubmitting ? "Saving..." : "Save Changes"}
-                </button>
-              </div>
-            </footer>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {/* Toast */}

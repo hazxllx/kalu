@@ -3,16 +3,16 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
+import FormModal from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
 import TablePagination from "@/components/tables/TablePagination";
 import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
-import StatusBadge from "@/components/common/StatusBadge";
 import PriorityBadge from "@/features/follow-ups/components/PriorityBadge";
 import FollowUpStatusBadge, { STATUS_DOTS } from "@/features/follow-ups/components/FollowUpStatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
-import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2, MoreVertical, AlertTriangle, Loader2 } from "lucide-react";
+import { Search, Plus, Calendar, MapPin, X, CheckCircle2, MoreVertical, AlertTriangle, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
@@ -465,17 +465,28 @@ export default function MidwifeFollowUp() {
 
   // Escape closes the modal; lock background scrolling while it is open.
   useEffect(() => {
-    if (!showScheduleModal) return undefined;
+    if (!showScheduleModal && !showDetailPanel) return undefined;
+    const previousOverflow = document.body.style.overflow;
     const onKey = (e) => {
-      if (e.key === "Escape") setShowScheduleModal(false);
+      if (e.key !== "Escape") return;
+      if (showDetailPanel) {
+        setShowDetailPanel(false);
+        if (followUpParam) {
+          const next = new URLSearchParams(searchParams);
+          next.delete("followup");
+          setSearchParams(next, { replace: true });
+        }
+      } else {
+        setShowScheduleModal(false);
+      }
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
     };
-  }, [showScheduleModal]);
+  }, [showScheduleModal, showDetailPanel, followUpParam, searchParams, setSearchParams]);
 
   const authorizedFollowUps = loadedOwner === user?.id && scopeReady && (!supervisor || canViewFollowUps) ? followUps.filter(inScope) : [];
   const dateFilteredFollowUps = authorizedFollowUps.filter((row) => matchesDateRange(row.scheduledDateRaw || row.scheduled_date, dateFrom, dateTo));
@@ -1287,41 +1298,48 @@ export default function MidwifeFollowUp() {
 
       {/* Schedule Follow-up Modal */}
       {showScheduleModal && (
-        <div className="follow-up-schedule-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card
-            role="dialog"
-            aria-modal="true"
-            aria-label={selectedFollowUp ? "Edit Follow-up Schedule" : "Schedule Follow-up"}
-            className={`follow-up-schedule-modal flex min-h-0 w-full max-w-[820px] flex-col overflow-hidden ${supervisor ? "supervisor-modal supervisor-form" : ""}`}
-          >
-            {/* Fixed header */}
-            <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-4 py-3 sm:px-6">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-light">
-                  <Calendar className="h-5 w-5 text-brand-blue" strokeWidth={1.8} />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-lg font-semibold text-brand-ink">
-                    {selectedFollowUp ? "Edit / Reschedule Follow-up" : "Schedule Follow-up"}
-                  </h3>
-                  <p className="text-xs text-brand-gray">
-                    {selectedFollowUp ? "Update the scheduled visit details." : "Book the next follow-up visit for a resident"}
-                  </p>
-                </div>
-              </div>
+        <FormModal
+          title={selectedFollowUp ? "Edit / Reschedule Follow-up" : "Schedule Follow-up"}
+          description={selectedFollowUp ? "Update the scheduled visit details." : "Book the next follow-up visit for a resident."}
+          onClose={() => setShowScheduleModal(false)}
+          closeDisabled={saving}
+          size="standard"
+          overlayClassName="follow-up-schedule-overlay"
+          dialogClassName={supervisor ? "supervisor-modal supervisor-form" : ""}
+          bodyClassName="px-4 py-4 sm:px-6"
+          footer={
+            <>
+              <p className="flex flex-wrap items-center gap-2 text-xs text-brand-gray sm:mr-auto">
+                <FollowUpStatusBadge value={deriveStatus(scheduleForm.date)} showDot={false} className="shrink-0" />
+                <span>{selectedFollowUp
+                  ? "Rescheduling restores this follow-up to the scheduled workflow."
+                  : "Follow-ups are saved as Scheduled — appearing under Today or Upcoming based on the date."}</span>
+              </p>
               <button
                 type="button"
-                onClick={() => setShowScheduleModal(false)}
+                onClick={() => {
+                  setShowScheduleModal(false);
+                  setSelectedFollowUp(null);
+                  setSelectedResident(null);
+                }}
                 disabled={saving}
-                className="ml-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink"
-                aria-label="Close modal"
+                className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60 dark:border-border dark:bg-input dark:hover:bg-hover"
               >
-                <X className="w-4 h-4" />
+                Cancel
               </button>
-            </div>
-
-            {/* Scrollable form body */}
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+              <button
+                type="button"
+                onClick={handleSchedule}
+                disabled={!canSchedule || saving}
+                className={`min-h-10 rounded-btn px-4 py-2.5 text-sm font-medium transition-colors ${
+                  canSchedule && !saving ? "bg-brand-blue text-white hover:bg-brand-dark" : "cursor-not-allowed bg-brand-blue/50 text-white"
+                }`}
+              >
+                {saving ? selectedFollowUp ? "Saving..." : <><Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden="true" />Scheduling...</> : selectedFollowUp ? "Save Changes" : "Schedule Follow-up"}
+              </button>
+            </>
+          }
+        >
               <div className="space-y-4">
                 {/* RESIDENT */}
                 {!selectedFollowUp && <section>
@@ -1507,122 +1525,107 @@ export default function MidwifeFollowUp() {
                   </div>
                 </section>
               </div>
-            </div>
-
-            {/* Status hint strip */}
-            <div className="shrink-0 border-t border-brand-border bg-brand-bg/60 px-4 py-2 sm:px-6">
-              <p className="flex flex-wrap items-center gap-2 text-xs text-brand-gray">
-                <FollowUpStatusBadge value={deriveStatus(scheduleForm.date)} showDot={false} className="shrink-0" />
-                <span>
-                  {selectedFollowUp
-                    ? "Rescheduling restores this follow-up to the scheduled workflow."
-                    : "Follow-ups are saved as Scheduled — appearing under Today or Upcoming based on the date."}
-                </span>
-              </p>
-            </div>
-
-            {/* Fixed footer */}
-            <div className="flex shrink-0 justify-end gap-3 bg-white px-4 py-3 sm:px-6 sm:py-4 max-[767px]:flex-col">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowScheduleModal(false);
-                  setSelectedFollowUp(null);
-                  setSelectedResident(null);
-                }}
-                disabled={saving}
-                className="rounded-btn px-4 py-2.5 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg max-[767px]:w-full"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSchedule}
-                disabled={!canSchedule || saving}
-                className={`rounded-btn px-4 py-2.5 text-sm font-medium transition-colors max-[767px]:w-full ${
-                  canSchedule && !saving
-                    ? "bg-brand-blue text-white hover:bg-brand-dark"
-                    : "cursor-not-allowed bg-brand-blue/50 text-white"
-                }`}
-              >
-                {saving ? selectedFollowUp ? "Saving..." : <><Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden="true" />Scheduling...</> : selectedFollowUp ? "Save Changes" : "Schedule Follow-up"}
-              </button>
-            </div>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {/* Detail Panel */}
       {showDetailPanel && selectedFollowUp && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Follow-up Details" className={`w-full max-w-md max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
-            <div className="p-5">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-base font-semibold text-brand-ink">Follow-up Details</h3>
-                <button
-                  onClick={closeDetail}
-                  aria-label="Close follow-up details"
-                  className="text-brand-gray hover:text-brand-ink"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4">
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="follow-up-details-title"
+            className={`flex max-h-[85dvh] w-[calc(100vw-1.5rem)] min-w-0 flex-col overflow-hidden sm:w-[92vw] sm:max-w-[840px] ${supervisor ? "supervisor-modal" : ""}`}
+          >
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-3 dark:border-border sm:px-5">
+              <h3 id="follow-up-details-title" className="text-base font-semibold text-brand-ink">Follow-up Details</h3>
+              <button
+                type="button"
+                onClick={closeDetail}
+                aria-label="Close follow-up details"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg hover:text-brand-ink dark:hover:bg-hover"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </header>
 
-              <div className="mb-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold">
-                    {selectedFollowUp.resident.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 pb-6 sm:px-5">
+              <section aria-labelledby="resident-profile-heading" className="rounded-btn border border-brand-border bg-brand-bg/40 p-3 dark:border-border dark:bg-card-nested">
+                <h4 id="resident-profile-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue">Resident Profile</h4>
+                <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand-blue text-sm font-semibold text-white">
+                      {String(selectedFollowUp.resident || "Resident").trim().split(/\s+/).filter(Boolean).map((name) => name[0]).slice(0, 2).join("").toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-brand-ink">{selectedFollowUp.resident || "Resident name unavailable"}</p>
+                      <p className="mt-0.5 break-words text-xs text-brand-gray">
+                        {[selectedFollowUp.sex, selectedFollowUp.age !== "" && selectedFollowUp.age != null ? `${selectedFollowUp.age} years old` : ""].filter(Boolean).join(" · ") || "Demographics not recorded"}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.resident}</p>
-                    <p className="text-xs text-brand-gray">{[selectedFollowUp.sex, selectedFollowUp.age !== "" && `${selectedFollowUp.age} years old`].filter(Boolean).join(" · ") || "Demographics not recorded"}</p>
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-brand-gray">Barangay</p>
+                    <p className="mt-0.5 break-words text-sm font-medium text-brand-ink">{selectedFollowUp.barangay || "Not recorded"}</p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-brand-gray">Contact number</p>
+                    <p className="mt-0.5 break-words text-sm font-medium text-brand-ink">{selectedFollowUp.contact || "Not recorded"}</p>
                   </div>
                 </div>
-                <div className="space-y-1 text-xs">
-                  <p className="text-brand-gray">Barangay {selectedFollowUp.barangay}</p>
-                  <p className="text-brand-gray">{selectedFollowUp.contact}</p>
-                </div>
-              </div>
+              </section>
 
-              <div className="mb-4 space-y-3">
-                {!supervisor && selectedFollowUp.type && (
-                  <div>
-                    <p className="text-xs text-brand-gray mb-1">Follow-up Type</p>
-                    <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.type}</p>
+              <section aria-labelledby="follow-up-schedule-heading">
+                <h4 id="follow-up-schedule-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue">Follow-up Schedule</h4>
+                <dl className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                  {!supervisor && selectedFollowUp.type && (
+                    <div className="min-w-0 rounded-btn border border-brand-border bg-white px-3 py-2 dark:border-border dark:bg-card">
+                      <dt className="text-[11px] text-brand-gray">Follow-up type</dt>
+                      <dd className="mt-0.5 break-words text-sm font-medium text-brand-ink">{selectedFollowUp.type}</dd>
+                    </div>
+                  )}
+                  {[
+                    ["Purpose", selectedFollowUp.purpose],
+                    ["Scheduled date and time", [selectedFollowUp.scheduledDate, selectedFollowUp.scheduledTime].filter(Boolean).join(" · ")],
+                    ["Health station", selectedFollowUp.location || "Not recorded"],
+                    ["Assigned personnel", selectedFollowUp.assignedMidwife || "Not assigned"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="min-w-0 rounded-btn border border-brand-border bg-white px-3 py-2 dark:border-border dark:bg-card">
+                      <dt className="text-[11px] text-brand-gray">{label}</dt>
+                      <dd className="mt-0.5 break-words text-sm font-medium text-brand-ink">{value || "Not recorded"}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+
+              <section aria-labelledby="follow-up-status-heading" className="rounded-btn border border-brand-border bg-brand-bg/40 px-3 py-2.5 dark:border-border dark:bg-card-nested">
+                <h4 id="follow-up-status-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue">Follow-up Status</h4>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="min-w-0">
+                    <p className="mb-1 text-[11px] text-brand-gray">Risk level</p>
+                    {selectedFollowUp.priority
+                      ? <PriorityBadge value={selectedFollowUp.priority} />
+                      : <span className="text-sm text-brand-gray">Not recorded</span>}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="mb-1 text-[11px] text-brand-gray">Schedule status</p>
+                    <FollowUpStatusBadge value={isOverdue(selectedFollowUp) ? "Overdue" : selectedFollowUp.status} />
+                  </div>
+                </div>
+                {supervisor && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-brand-border pt-2 text-caption text-brand-gray dark:border-border">
+                    <span>Follow-up ID: {selectedFollowUp.id}</span>
+                    {selectedFollowUp.syncStatus && <span className="text-amber-800 dark:text-amber-300">{selectedFollowUp.syncStatus}</span>}
                   </div>
                 )}
-                <div>
-                  <p className="text-xs text-brand-gray mb-1">Purpose</p>
-                  <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.purpose}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-3.5 h-3.5 text-brand-gray" />
-                  <p className="text-sm text-brand-ink">{selectedFollowUp.scheduledDate} • {selectedFollowUp.scheduledTime}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-3.5 h-3.5 text-brand-gray" />
-                  <p className="text-sm text-brand-ink">{selectedFollowUp.location || "Not recorded"}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <User className="w-3.5 h-3.5 text-brand-gray" />
-                  <p className="text-sm text-brand-ink">{selectedFollowUp.assignedMidwife || "Not assigned"}</p>
-                </div>
-                {!supervisor && (
-                  <div className="flex items-center gap-3">
-                    <PriorityBadge value={selectedFollowUp.priority} />
-                    <FollowUpStatusBadge value={selectedFollowUp.status} />
-                  </div>
-                )}
-              </div>
-
-              {supervisor && <div className="mb-4 flex flex-wrap gap-2"><StatusBadge value={selectedFollowUp.priority || "Not specified"} /><StatusBadge value={isOverdue(selectedFollowUp) ? "Overdue" : selectedFollowUp.status} /><span className="text-caption text-brand-gray">Follow-up ID: {selectedFollowUp.id}</span>{selectedFollowUp.syncStatus && <span className="text-caption text-amber-800">{selectedFollowUp.syncStatus}</span>}</div>}
+              </section>
 
               {can("consultation.history.view") && ["health_supervisor", "phn", "mho"].includes(user?.role) && <LabResultsPanel residentId={selectedFollowUp.residentId} compact />}
               {selectedFollowUp.remarks && (
-                <div className="mb-5">
-                  <p className="text-xs text-brand-gray mb-1">Remarks</p>
-                  <p className="whitespace-pre-wrap text-sm text-brand-ink">{selectedFollowUp.remarks}</p>
-                </div>
+                <section aria-label="Follow-up remarks" className="min-w-0 border-t border-brand-border pt-3 dark:border-border">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Remarks</h4>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm text-brand-ink">{selectedFollowUp.remarks}</p>
+                </section>
               )}
             </div>
           </Card>
@@ -1631,18 +1634,26 @@ export default function MidwifeFollowUp() {
 
       {/* Record Visit Modal */}
       {showRecordVisitModal && selectedFollowUp && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Record Follow-up Visit" className={`w-full max-w-lg max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal supervisor-form" : ""}`}>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-brand-ink">Record Visit</h3>
-                <button
-                  onClick={() => setShowRecordVisitModal(false)}
-                  className="text-brand-gray hover:text-brand-ink"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+        <FormModal
+          title="Record Follow-up Visit"
+          description="Record the visit outcome and any care provided."
+          onClose={() => setShowRecordVisitModal(false)}
+          size="standard"
+          dialogClassName={supervisor ? "supervisor-modal supervisor-form" : ""}
+          footer={
+            <>
+              <button type="button" onClick={() => setShowRecordVisitModal(false)} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+              <button
+                type="button"
+                disabled={saving || (visitForm.nextVisitDate ? !canEditFollowUp : !canCompleteFollowUp)}
+                onClick={() => handleSaveVisit(visitForm)}
+                className="min-h-10 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+              >
+                {saving ? "Saving..." : "Save Visit"}
+              </button>
+            </>
+          }
+        >
               <div className="space-y-4">
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div>
@@ -1719,44 +1730,19 @@ export default function MidwifeFollowUp() {
                   />
                 </div>
               </div>
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  onClick={() => setShowRecordVisitModal(false)}
-                  className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  disabled={saving || (visitForm.nextVisitDate ? !canEditFollowUp : !canCompleteFollowUp)}
-                  onClick={() => {
-                    handleSaveVisit(visitForm);
-                  }}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
-                >
-                  {saving ? "Saving..." : "Save Visit"}
-                </button>
-              </div>
-            </div>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {/* Update Status Modal */}
       {showUpdateStatusModal && selectedFollowUp && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Update Follow-up Status" className={`w-full max-w-md ${supervisor ? "supervisor-modal" : ""}`}>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-brand-ink">Update Status</h3>
-                <button
-                  onClick={() => setShowUpdateStatusModal(false)}
-                  aria-label="Close dialog"
-                  className="text-brand-gray hover:text-brand-ink"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <p className="text-sm text-brand-gray mb-4">Select new status for {selectedFollowUp.resident}'s follow-up:</p>
+        <FormModal
+          title="Update Follow-up Status"
+          description={`Select a new status for ${selectedFollowUp.resident}'s follow-up.`}
+          onClose={() => setShowUpdateStatusModal(false)}
+          size="standard"
+          dialogClassName={supervisor ? "supervisor-modal" : ""}
+          footer={<button type="button" onClick={() => setShowUpdateStatusModal(false)} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>}
+        >
               <div className="space-y-2">
                 {["Scheduled", "Ongoing"]
                   .filter((status) =>
@@ -1775,27 +1761,27 @@ export default function MidwifeFollowUp() {
                   </button>
                 ))}
               </div>
-            </div>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {/* Remarks Modal */}
       {showRemarksModal && selectedFollowUp && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Add Follow-up Remarks" className={`w-full max-w-md ${supervisor ? "supervisor-modal supervisor-form" : ""}`}>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-brand-ink">Add Remarks</h3>
-                <button
-                  onClick={() => setShowRemarksModal(false)}
-                  aria-label="Close dialog"
-                  className="text-brand-gray hover:text-brand-ink"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="mb-4">
+        <FormModal
+          title="Add Follow-up Remarks"
+          description={`Add notes for ${selectedFollowUp.resident}'s follow-up.`}
+          onClose={() => setShowRemarksModal(false)}
+          size="standard"
+          dialogClassName={supervisor ? "supervisor-modal supervisor-form" : ""}
+          footer={
+            <>
+              <button type="button" onClick={() => setShowRemarksModal(false)} disabled={saving} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60 dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+              <button type="button" disabled={saving} onClick={() => handleSaveRemarks(remarksDraft)} className="min-h-10 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </>
+          }
+        >
+              <div>
                 <label className="text-sm font-medium text-brand-ink block mb-1.5">Remarks</label>
                 <textarea
                   rows={4}
@@ -1805,25 +1791,7 @@ export default function MidwifeFollowUp() {
                   className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none"
                 />
               </div>
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowRemarksModal(false)}
-                  disabled={saving}
-                  className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  disabled={saving}
-                  onClick={() => handleSaveRemarks(remarksDraft)}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
-                >
-                  {saving ? "Saving..." : "Save"}
-                </button>
-              </div>
-            </div>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {statusConfirmation && selectedFollowUp && (

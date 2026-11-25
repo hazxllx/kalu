@@ -2,6 +2,8 @@ import React from "react";
 import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
 import UniversalDetailsModal from "@/components/common/UniversalDetailsModal";
+import PriorityBadge from "./PriorityBadge";
+import FollowUpStatusBadge from "./FollowUpStatusBadge";
 import { Bell, CalendarClock, CalendarDays, Check, ChevronRight, Clock, HeartPulse, MapPin, Plus, Stethoscope, TriangleAlert, User, Users, X } from "lucide-react";
 import { buildMonthGrid, calendarEventKey, formatCalendarStatus, parseCalendarDate, toDateKey } from "@/features/dashboards/components/scheduleCalendarUtils";
 import ScheduleStatusBadge, { ConfirmationBadge, STATUS_DOTS, STATUS_TONES } from "./ScheduleStatusBadge";
@@ -474,6 +476,12 @@ export function AgendaView({ events, selectedDay, loading = false, incomplete = 
 export function ScheduleDetailModal({ schedule, onClose, actions = null, variant = "supervisor", presentation = "default", error = "" }) {
   const dialogRef = React.useRef(null);
   React.useEffect(() => {
+    if (presentation === "supervisor") return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [presentation]);
+  React.useEffect(() => {
     if (presentation !== "supervisor") return undefined;
     const dialog = dialogRef.current;
     dialog?.showModal();
@@ -525,32 +533,75 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
         ...(schedule.completedAt ? [["Completed", formatDateTime(schedule.completedAt)]] : []),
       ]),
     ];
+    if (service) {
+      return (
+        <dialog ref={dialogRef} aria-labelledby="supervisor-activity-title" onCancel={(event) => { event.preventDefault(); onClose(); }} className="supervisor-modal m-auto max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/50 sm:p-5">
+          <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+            <div className="min-w-0">
+              <p className="text-caption text-brand-gray">Health-service attendance</p>
+              <h2 id="supervisor-activity-title" className="mt-0.5 break-words text-section font-semibold">{schedule.label}</h2>
+            </div>
+            <button type="button" onClick={onClose} className="supervisor-button is-icon" aria-label="Close activity details"><X className="h-4 w-4" aria-hidden="true" /></button>
+          </div>
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+            {details.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-caption text-brand-gray">{label}</dt><dd className="mt-0.5 break-words text-ui">{value}</dd></div>)}
+          </dl>
+          <div className="mt-4 border-t border-brand-border pt-3">
+            <p className="text-caption text-brand-gray">Attendance notes</p>
+            <p className="mt-1 whitespace-pre-wrap break-words text-ui">{schedule.detail || "No notes recorded."}</p>
+          </div>
+          {schedule.confirmationStatus && <div className="mt-4 border-t border-brand-border pt-3">
+            <p className="text-caption text-brand-gray">Resident confirmation</p>
+            <p className="mt-1 text-ui font-medium">{schedule.confirmationStatus}</p>
+            {schedule.respondedAt && <p className="mt-1 text-caption text-brand-gray">Responded {formatDateTime(schedule.respondedAt)}</p>}
+            {schedule.rejectionReason && <p className="mt-2 whitespace-pre-wrap break-words text-ui">Rejection reason: {schedule.rejectionReason}</p>}
+          </div>}
+          {schedule.offline && <p className="mt-4 text-caption text-brand-gray">Saved on this device / {schedule.syncStatus || "Pending sync"}. Resident confirmation and visibility to other staff may await synchronization.</p>}
+          {schedule.cached && !schedule.offline && <p className="mt-4 text-caption text-brand-gray">Showing a saved device record, which may be out of date. Reconnect and retry the follow-up source to verify the current record.</p>}
+          {error && <p role="alert" className="mt-4 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
+          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-brand-border pt-3">{actions}<button type="button" onClick={onClose} className="supervisor-button">Close</button></div>
+        </dialog>
+      );
+    }
     return (
-      <dialog ref={dialogRef} aria-labelledby="supervisor-activity-title" onCancel={(event) => { event.preventDefault(); onClose(); }} className="supervisor-modal m-auto max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/50 sm:p-5">
-        <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+      <dialog ref={dialogRef} aria-labelledby="supervisor-activity-title" onCancel={(event) => { event.preventDefault(); onClose(); }} className="supervisor-modal m-auto flex max-h-[85dvh] w-[calc(100%_-_2rem)] flex-col overflow-hidden rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/50 sm:w-[92vw] sm:max-w-[840px] sm:p-5">
+        <div className="mb-3 flex shrink-0 items-start justify-between gap-3 border-b border-brand-border pb-3">
           <div className="min-w-0">
-            <p className="text-caption text-brand-gray">{service ? "Health-service attendance" : "Follow-up details"}</p>
+            <p className="text-caption text-brand-gray">Follow-up details</p>
             <h2 id="supervisor-activity-title" className="mt-0.5 break-words text-section font-semibold">{schedule.label}</h2>
           </div>
           <button type="button" onClick={onClose} className="supervisor-button is-icon" aria-label="Close activity details"><X className="h-4 w-4" aria-hidden="true" /></button>
         </div>
-        <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-          {details.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-caption text-brand-gray">{label}</dt><dd className="mt-0.5 break-words text-ui">{value}</dd></div>)}
-        </dl>
-        <div className="mt-4 border-t border-brand-border pt-3">
-          <p className="text-caption text-brand-gray">{service ? "Attendance notes" : "Follow-up instructions"}</p>
-          <p className="mt-1 whitespace-pre-wrap break-words text-ui">{(service ? schedule.detail : schedule.instructions) || "No notes recorded."}</p>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+            {details.map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-caption text-brand-gray">{label}</dt>
+                <dd className="mt-0.5 break-words [overflow-wrap:anywhere] text-ui">
+                  {label === "Status"
+                    ? <FollowUpStatusBadge value={value} />
+                    : label === "Priority" && schedule.priority
+                      ? <PriorityBadge value={schedule.priority} />
+                      : value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div className="mt-4 border-t border-brand-border pt-3">
+            <p className="text-caption text-brand-gray">Follow-up instructions</p>
+            <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-ui">{schedule.instructions || "No notes recorded."}</p>
+          </div>
+          {schedule.confirmationStatus && <div className="mt-4 border-t border-brand-border pt-3">
+            <p className="text-caption text-brand-gray">Resident confirmation</p>
+            <p className="mt-1 text-ui font-medium">{schedule.confirmationStatus}</p>
+            {schedule.respondedAt && <p className="mt-1 text-caption text-brand-gray">Responded {formatDateTime(schedule.respondedAt)}</p>}
+            {schedule.rejectionReason && <p className="mt-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-ui">Rejection reason: {schedule.rejectionReason}</p>}
+          </div>}
+          {schedule.offline && <p className="mt-4 text-caption text-brand-gray">Saved on this device / {schedule.syncStatus || "Pending sync"}. Resident confirmation and visibility to other staff may await synchronization.</p>}
+          {schedule.cached && !schedule.offline && <p className="mt-4 text-caption text-brand-gray">Showing a saved device record, which may be out of date. Reconnect and retry the follow-up source to verify the current record.</p>}
+          {error && <p role="alert" className="mt-4 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
         </div>
-        {schedule.confirmationStatus && <div className="mt-4 border-t border-brand-border pt-3">
-          <p className="text-caption text-brand-gray">Resident confirmation</p>
-          <p className="mt-1 text-ui font-medium">{schedule.confirmationStatus}</p>
-          {schedule.respondedAt && <p className="mt-1 text-caption text-brand-gray">Responded {formatDateTime(schedule.respondedAt)}</p>}
-          {schedule.rejectionReason && <p className="mt-2 whitespace-pre-wrap break-words text-ui">Rejection reason: {schedule.rejectionReason}</p>}
-        </div>}
-        {schedule.offline && <p className="mt-4 text-caption text-brand-gray">Saved on this device / {schedule.syncStatus || "Pending sync"}. Resident confirmation and visibility to other staff may await synchronization.</p>}
-        {schedule.cached && !schedule.offline && <p className="mt-4 text-caption text-brand-gray">Showing a saved device record, which may be out of date. Reconnect and retry the follow-up source to verify the current record.</p>}
-        {error && <p role="alert" className="mt-4 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
-        <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-brand-border pt-3">{actions}<button type="button" onClick={onClose} className="supervisor-button">Close</button></div>
+        <div className="mt-3 flex shrink-0 flex-wrap justify-end gap-2 border-t border-brand-border pt-3">{actions}<button type="button" onClick={onClose} className="supervisor-button">Close</button></div>
       </dialog>
     );
   }
@@ -563,10 +614,9 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
     { icon: User, label: "Healthcare Provider", value: schedule.provider },
   ];
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Follow-up Details">
-      <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto break-words [overflow-wrap:anywhere]">
-        <div className="p-4 sm:p-6">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4" role="dialog" aria-modal="true" aria-label="Follow-up Details">
+      <Card className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] min-w-0 flex-col overflow-hidden break-words [overflow-wrap:anywhere] sm:w-[92vw] sm:max-w-[840px]">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-3 dark:border-border sm:px-6">
             <div>
               <h3 className="text-lg font-semibold text-brand-ink">Follow-up Details</h3>
               <p className="mt-0.5 text-sm text-brand-gray">
@@ -582,28 +632,29 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
                 <X className="h-5 w-5" />
               </button>
             </div>
-          </div>
+        </div>
 
-          <div className="space-y-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4 pb-6 sm:px-6">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
             {rows.map((r) => (
-              <div key={r.label} className="flex items-start gap-3 rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested">
+              <div key={r.label} className="flex min-w-0 items-start gap-3 rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested">
                 <r.icon className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" strokeWidth={1.8} />
                 <div className="min-w-0">
                   <p className="text-[11px] uppercase tracking-wide text-brand-gray">{r.label}</p>
-                  <p className="mt-0.5 text-sm font-medium text-brand-ink">{r.value}</p>
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-sm font-medium text-brand-ink">{r.value}</p>
                 </div>
               </div>
             ))}
-            <div className="rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested">
+            <div className="min-w-0 rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested sm:col-span-2">
               <p className="text-[11px] uppercase tracking-wide text-brand-gray">Follow-up Instructions</p>
-              <p className="mt-0.5 text-sm text-brand-ink">{schedule.instructions || "No instructions recorded."}</p>
+              <p className="mt-0.5 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-brand-ink">{schedule.instructions || "No instructions recorded."}</p>
             </div>
 
             {/* Resident confirmation — shared by both roles; the supervisor
                 sees the resident's response (and rejection reason) here without
                 creating or editing anything. */}
             {schedule.confirmationStatus && variant !== "resident" && (
-              <div className="rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested">
+              <div className="min-w-0 rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested sm:col-span-2">
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">
                   {variant === "resident" ? "Confirmation" : "Resident Confirmation"}
                 </p>
@@ -618,17 +669,17 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
                     <p className="text-[11px] uppercase tracking-wide text-rose-600 dark:text-rose-400">
                       Reason for rejecting the follow-up schedule
                     </p>
-                    <p className="mt-0.5 text-sm text-rose-700 dark:text-rose-300">{schedule.rejectionReason}</p>
+                    <p className="mt-0.5 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-rose-700 dark:text-rose-300">{schedule.rejectionReason}</p>
                   </div>
                 )}
               </div>
             )}
             {variant === "resident" && (schedule.statusDetail || schedule.respondedAt || schedule.rejectionReason) && (
-              <div className="rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested">
+              <div className="min-w-0 rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested sm:col-span-2">
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">Status details</p>
-                {schedule.statusDetail && <p className="mt-1 text-sm text-brand-ink">{schedule.statusDetail}</p>}
+                {schedule.statusDetail && <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-brand-ink">{schedule.statusDetail}</p>}
                 {schedule.respondedAt && <p className="mt-1 text-xs text-brand-gray">Response recorded {formatDateTime(schedule.respondedAt)}</p>}
-                {schedule.rejectionReason && <p className="mt-1 text-sm text-brand-ink">Reason: {schedule.rejectionReason}</p>}
+                {schedule.rejectionReason && <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-brand-ink">Reason: {schedule.rejectionReason}</p>}
               </div>
             )}
             {/* Resident response prompt — shown only while the follow-up is
@@ -637,7 +688,7 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
                 so the same secure workflow is used from the calendar and the
                 list. */}
             {variant === "resident" && schedule.confirmationStatus === "Awaiting Confirmation" && (
-              <div className="rounded-btn border border-amber-200 bg-amber-50 px-3.5 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+              <div className="rounded-btn border border-amber-200 bg-amber-50 px-3.5 py-3 dark:border-amber-500/30 dark:bg-amber-500/10 sm:col-span-2">
                 <p className="text-[11px] uppercase tracking-wide text-amber-700 dark:text-amber-400">Follow-up Response</p>
                 <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
                   Your health team scheduled this follow-up for you. Please confirm whether you can attend, or reject it with a reason.
@@ -645,11 +696,11 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
               </div>
             )}
           </div>
+        </div>
 
-          <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
+        <div className="flex shrink-0 flex-wrap justify-end gap-3 border-t border-slate-200 px-4 py-3 dark:border-border sm:px-6">
             {actions}
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Close</button>
-          </div>
         </div>
       </Card>
     </div>

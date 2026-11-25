@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { X, Save } from "lucide-react";
-import { Card } from "@/components/common/Card";
+import { Save } from "lucide-react";
+import FormModal from "@/components/common/FormModal";
 import { ButtonSelectGroup } from "@/components/system";
 import { ORAL_SERVICES, toRecord } from "../lib/programFormConfig";
 
@@ -145,20 +145,21 @@ export default function ProgramFormModal({ config, entity, initialForm, onClose,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-3xl max-h-[92vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-start justify-between gap-3 mb-1">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">{config.title}</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">
-                {config.scope === "household" ? "Household" : "Client"}: <span className="font-medium text-brand-ink">{entity.name}</span>
-              </p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="w-5 h-5" /></button>
-          </div>
-
-          <div className="space-y-5 mt-4">
+    <FormModal
+      title={config.title}
+      description={`${config.scope === "household" ? "Household" : "Client"}: ${entity.name}`}
+      onClose={onClose}
+      size="standard"
+      footer={
+        <>
+          <button type="button" onClick={onClose} disabled={saving} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60 dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">Cancel</button>
+          <button type="button" onClick={submit} disabled={saving} className="inline-flex min-h-10 items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+            <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save Record"}
+          </button>
+        </>
+      }
+    >
+          <div className="space-y-5">
             {config.groups.map((group) => {
               const keys = visibleFields[group.title];
               if (!keys.length) return null;
@@ -187,15 +188,7 @@ export default function ProgramFormModal({ config, entity, initialForm, onClose,
 
             {submitError && <div className="rounded-btn border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">{submitError}</div>}
 
-            <div className="flex justify-end gap-3 border-t border-brand-border pt-4">
-              <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Cancel</button>
-              <button onClick={submit} disabled={saving} className="flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors disabled:opacity-60">
-                <Save className="w-4 h-4" /> {saving ? "Saving…" : "Save Record"}
-              </button>
-            </div>
           </div>
-        </div>
-      </Card>
-    </div>
+    </FormModal>
   );
 }

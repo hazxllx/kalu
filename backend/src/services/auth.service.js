@@ -5,7 +5,7 @@ import repository from '../repositories/supabaseRepository.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
 import { AUTH_SERVICE_UNAVAILABLE_CODE, AUTH_SERVICE_UNAVAILABLE_MESSAGE, isAuthServiceUnavailable } from '../../../shared/authConnectivity.js';
 import env from '../config/env.js';
-import { sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service.js';
+import { getSmtpFailureDetails, sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service.js';
 import {
   digestInvitationRecoverySecret,
   digestInvitationRecoveryPassword,
@@ -294,7 +294,11 @@ export const requestPasswordReset = async ({ email } = {}) => {
   try {
     if (isInitialPersonnelSetup) await sendPasswordSetupEmail({ email: authUser.email, setupUrl: resetUrl.href });
     else await sendPasswordResetEmail({ email: authUser.email, resetUrl: resetUrl.href });
-  } catch {
+  } catch (error) {
+    console.error('smtp_email_delivery_failed', {
+      operation: isInitialPersonnelSetup ? 'personnel_password_setup' : 'password_reset',
+      ...getSmtpFailureDetails(error),
+    });
     throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
   }
   return { accepted: true };

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X, Activity, HeartPulse, NotebookPen, Lock, CheckCircle2 } from "lucide-react";
+import { Activity, HeartPulse, NotebookPen, Lock, CheckCircle2 } from "lucide-react";
 import HouseholdDialog from "./HouseholdDialog";
+import { FormModalHeader } from "@/components/common/FormModal";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
@@ -194,16 +195,11 @@ export default function MemberHealthModal({ householdId, member, verificationSta
 
   return (
     <HouseholdDialog label="Member health profile" className="max-w-xl" onClose={onClose}>
-          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-2 sm:px-6">
-            <div className="min-w-0">
-              <p className="gov-kicker text-[11px] text-brand-gray">Member Health Profile</p>
-              <h3 className="line-clamp-2 text-lg font-semibold text-brand-ink [overflow-wrap:anywhere]">{member.name}</h3>
-              {memberMeta && <p className="mt-0.5 text-xs text-brand-gray">{memberMeta}</p>}
-            </div>
-            <button type="button" onClick={onClose} className="grid h-11 w-11 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close member health profile">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
+          <FormModalHeader
+            title="Member Health Profile"
+            description={[member.name, memberMeta].filter(Boolean).join(" · ")}
+            onClose={onClose}
+          />
 
           <div className="min-h-0 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere] sm:p-6">
           {loading && <SkeletonList rows={5} />}
@@ -377,29 +373,24 @@ export default function MemberHealthModal({ householdId, member, verificationSta
                 </p>
               )}
 
-              <div className="flex flex-wrap items-center justify-end gap-2 [&>button]:min-h-11">
-                {saved && (
-                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-green">
-                    <CheckCircle2 className="h-4 w-4" /> {savedOffline ? "Saved offline" : "Saved"}
-                  </span>
-                )}
-                <button
-                  onClick={onClose}
-                  className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving || lockedForBhw}
-                  className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
-                >
-                  {saving ? "Saving…" : "Save Health Profile"}
-                </button>
-              </div>
             </>
           )}
         </div>
+        {!loading && !loadError && (
+          <div className="flex shrink-0 flex-col gap-2 border-t border-brand-border bg-white px-4 py-3 dark:border-border dark:bg-card sm:flex-row sm:items-center sm:justify-end sm:px-6">
+            {saved && (
+              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-green sm:mr-auto">
+                <CheckCircle2 className="h-4 w-4" /> {savedOffline ? "Saved offline" : "Saved"}
+              </span>
+            )}
+            <button type="button" onClick={onClose} className="min-h-11 w-full rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover sm:w-auto">
+              Cancel
+            </button>
+            <button type="button" onClick={handleSave} disabled={saving || lockedForBhw} className="min-h-11 w-full rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60 sm:w-auto">
+              {saving ? "Saving…" : "Save Health Profile"}
+            </button>
+          </div>
+        )}
     </HouseholdDialog>
   );
 }

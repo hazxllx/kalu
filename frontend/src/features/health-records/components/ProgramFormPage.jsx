@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import DataTable from "@/components/tables/DataTable";
 import { Card } from "@/components/common/Card";
-import { Plus, X, Search, CheckCircle2, RefreshCw, Pencil } from "lucide-react";
+import FormModal from "@/components/common/FormModal";
+import { Plus, Search, CheckCircle2, RefreshCw, Pencil } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
 import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
@@ -265,13 +266,13 @@ export default function ProgramFormPage({ config }) {
 
       {/* Entity picker */}
       {picking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-lg max-h-[80vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <h3 className="text-lg font-semibold text-brand-ink">Select {config.scope === "household" ? "household" : "client"}</h3>
-                <button onClick={() => setPicking(false)} className="text-brand-gray hover:text-brand-ink"><X className="w-5 h-5" /></button>
-              </div>
+        <FormModal
+          title={`Select ${config.scope === "household" ? "household" : "client"}`}
+          description="Search for the record you want to add a health program entry for."
+          onClose={() => setPicking(false)}
+          size="standard"
+          footer={<button type="button" onClick={() => setPicking(false)} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>}
+        >
               <div className="flex items-center gap-2 bg-white border border-brand-border rounded-btn px-3 py-2.5 focus-within:border-brand-blue">
                 <Search className="w-4 h-4 shrink-0 text-brand-gray" />
                 <input value={query} onChange={(e) => setQuery(e.target.value)} autoFocus placeholder={`Search ${config.scope === "household" ? "household head" : "resident"} by name or ID…`} className="w-full bg-transparent text-sm outline-none" />
@@ -287,9 +288,7 @@ export default function ProgramFormPage({ config }) {
                 ))}
                 {filteredEntities.length === 0 && <p className="px-3 py-3 text-sm text-brand-gray">No matches.</p>}
               </div>
-            </div>
-          </Card>
-        </div>
+        </FormModal>
       )}
 
       {editing && (

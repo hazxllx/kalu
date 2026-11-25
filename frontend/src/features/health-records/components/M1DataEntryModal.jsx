@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { X, CheckCircle2, Save, ClipboardList } from "lucide-react";
+import { CheckCircle2, Save, ClipboardList } from "lucide-react";
+import FormModal from "@/components/common/FormModal";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonTable } from "@/components/system/Skeleton";
 import TclEmptyState from "./TclEmptyState";
@@ -182,23 +183,22 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="m1-entry-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-card border border-brand-border bg-white shadow-card outline-none">
-        <div className="p-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h3 id="m1-entry-title" className="flex items-center gap-2 text-lg font-semibold text-brand-ink">
-                <ClipboardList className="h-5 w-5 text-brand-blue" /> Record M1 Data
-              </h3>
-              <p className="mt-0.5 text-sm text-brand-gray">
-                Enter FHSIS M1 reporting indicators that are not derived from operational records. Saved to the database and used by the Monthly, Quarterly and Annual reports.
-              </p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
+    <FormModal
+      title={<span className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-brand-blue" /> Record M1 Data</span>}
+      description="Enter FHSIS M1 reporting indicators that are not derived from operational records. Saved to the database and used by the Monthly, Quarterly and Annual reports."
+      onClose={onClose}
+      closeOnBackdrop
+      labelledBy="m1-entry-title"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">Cancel</button>
+          <button type="button" disabled={saving || loading || !current} onClick={handleSave} className="ui-tcl-control ui-tcl-control-primary min-h-10">
+            <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save M1 Data"}
+          </button>
+        </>
+      }
+    >
+          <div ref={dialogRef} tabIndex={-1}>
           {/* Period + indicator selectors */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -279,18 +279,7 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
             <TclEmptyState compact title="No manual indicators" description="Every indicator in this section is derived from operational records." />
           )}
 
-          <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
-            <button onClick={onClose} className="ui-tcl-control ui-tcl-control-secondary">Close</button>
-            <button
-              disabled={saving || loading || !current}
-              onClick={handleSave}
-              className="ui-tcl-control ui-tcl-control-primary"
-            >
-              <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save M1 Data"}
-            </button>
           </div>
-        </div>
-      </div>
-    </div>
+    </FormModal>
   );
 }

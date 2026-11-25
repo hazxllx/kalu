@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { FormModalHeader } from "@/components/common/FormModal";
 import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -108,17 +109,13 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
   };
 
   return (
-    <dialog ref={dialogRef} aria-labelledby="schedule-form-title" onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }} className="supervisor-modal m-auto max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/50 sm:p-5">
-      <form onSubmit={submit} noValidate className="supervisor-form">
-        <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
-          <div>
-            <h2 id="schedule-form-title" className="text-section font-semibold">{isNew ? "Schedule follow-up" : "Edit / reschedule follow-up"}</h2>
-            <p className="mt-1 text-caption text-brand-gray">Use the resident's existing follow-up record and actual appointment details.</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={saving} className="supervisor-button is-icon" aria-label="Close follow-up form"><X className="h-4 w-4" aria-hidden="true" /></button>
-        </div>
-        {error && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
-        <div className="space-y-3">
+    <dialog ref={dialogRef} aria-labelledby="schedule-form-title" onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }} className="supervisor-modal m-auto flex max-h-[90vh] w-[calc(100%_-_2rem)] max-w-3xl flex-col overflow-hidden rounded border border-brand-border bg-card p-0 text-brand-ink backdrop:bg-black/50">
+      <form onSubmit={submit} noValidate className="supervisor-form flex min-h-0 flex-1 flex-col">
+        <FormModalHeader title={isNew ? "Schedule follow-up" : "Edit / reschedule follow-up"} description="Use the resident's existing follow-up record and actual appointment details." onClose={onClose} closeDisabled={saving} titleId="schedule-form-title" />
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white p-4 dark:bg-card sm:p-5">
+          {error && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
+          <h3 className="mb-3 border-b border-brand-border pb-2 text-ui font-semibold">Follow-up details</h3>
+          <div className="space-y-3">
           <Field label="Resident" required error={errors.residentId}>
             {isNew ? <select required value={form.residentId} disabled={saving || residentsLoading || Boolean(residentsError)} aria-invalid={Boolean(errors.residentId)} onChange={(event) => {
               const resident = residents.find((row) => String(row.id) === event.target.value);
@@ -147,8 +144,9 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
             <input type="checkbox" checked={form.requiresResidentResponse} onChange={(event) => set("requiresResidentResponse", event.target.checked)} className="mt-1 h-4 w-4" />
             <span>Require resident confirmation<span className="mt-0.5 block text-caption text-brand-gray">The resident must confirm before the follow-up is scheduled. A rejection cancels it; the supervisor cannot change the resident's decision.</span></span>
           </label>}
+          </div>
         </div>
-        <div className="mt-4 flex justify-end gap-2 border-t border-brand-border pt-3">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-brand-border bg-white px-4 py-3 dark:bg-card sm:px-5">
           <button type="button" onClick={onClose} disabled={saving} className="supervisor-button">Cancel</button>
           <button type="submit" disabled={saving || (isNew && (residentsLoading || Boolean(residentsError) || !residents.length))} className="supervisor-button is-primary"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />{saving ? "Saving..." : isNew ? "Add schedule" : "Save changes"}</button>
         </div>
@@ -191,17 +189,12 @@ function ActivityFormModal({ initial, date, residents, residentsLoading, residen
   };
 
   return (
-    <dialog ref={dialogRef} aria-labelledby="calendar-activity-form-title" aria-describedby="calendar-activity-form-description" onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }} className="supervisor-modal schedule-activity-modal m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%_-_2rem)] max-w-lg overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/40 sm:p-5">
-      <form onSubmit={submit} noValidate className="supervisor-form">
-        <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
-          <div>
-            <h2 id="calendar-activity-form-title" className="text-base font-semibold">{initial ? "Edit activity" : "Add Activity"}</h2>
-            <p id="calendar-activity-form-description" className="mt-1 text-caption text-brand-gray">A personal calendar activity, visible only to you.</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={saving} className="supervisor-button is-icon is-quiet" aria-label="Close activity form"><X className="h-4 w-4" aria-hidden="true" /></button>
-        </div>
-        {error && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
-        <div className="space-y-4">
+    <dialog ref={dialogRef} aria-labelledby="calendar-activity-form-title" onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }} className="supervisor-modal schedule-activity-modal m-auto flex max-h-[calc(100dvh-2rem)] w-[calc(100%_-_2rem)] max-w-2xl flex-col overflow-hidden rounded border border-brand-border bg-card p-0 text-brand-ink backdrop:bg-black/40">
+      <form onSubmit={submit} noValidate className="supervisor-form flex min-h-0 flex-1 flex-col">
+        <FormModalHeader title={initial ? "Edit activity" : "Add Activity"} description="A personal calendar activity, visible only to you." onClose={onClose} closeDisabled={saving} titleId="calendar-activity-form-title" descriptionId="calendar-activity-form-description" />
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white p-4 dark:bg-card sm:p-5">
+          {error && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
+          <div className="space-y-4">
           <fieldset className="min-w-0">
             <legend className="mb-2 text-ui font-semibold text-brand-ink">Activity details</legend>
             <div className="space-y-3">
@@ -240,8 +233,9 @@ function ActivityFormModal({ initial, date, residents, residentsLoading, residen
               </Field>
             </div>
           </fieldset>
+          </div>
         </div>
-        <div className="mt-4 flex justify-end gap-2 border-t border-brand-border pt-3">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-brand-border bg-white px-4 py-3 dark:bg-card sm:px-5">
           <button type="button" onClick={onClose} disabled={saving} className="supervisor-button">Cancel</button>
           <button type="submit" disabled={saving} className="supervisor-button is-primary">{saving ? "Saving..." : "Save Activity"}</button>
         </div>

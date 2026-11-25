@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { X, Loader2, Clock, CalendarDays } from "lucide-react";
-import { Card } from "@/components/common/Card";
+import { Loader2, Clock, CalendarDays } from "lucide-react";
+import FormModal from "@/components/common/FormModal";
 import { visitPlansApi } from "@/services/api";
 import { formatWindow, formatChip } from "../lib/visitPlanFormat";
 
@@ -79,29 +79,22 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Register for ${service.name}`}
-    >
-      <Card className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col overflow-hidden">
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-4 dark:border-border sm:px-5">
-          <div className="min-w-0">
-            <h2 className="break-words text-[15px] font-semibold text-brand-ink dark:text-foreground">{service.name}</h2>
-            <p className="mt-0.5 break-words text-xs text-brand-gray dark:text-muted-foreground">{service.facilityName}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-btn p-1.5 text-brand-gray transition-colors hover:bg-brand-bg dark:text-muted-foreground dark:hover:bg-hover"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
+    <FormModal
+      title={service.name}
+      description={`Register for this health service${service.facilityName ? ` at ${service.facilityName}` : ""}.`}
+      onClose={onClose}
+      size="standard"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">Cancel</button>
+          <button type="button" onClick={submit} disabled={submitting || !selected || dates.length === 0} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
+            {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {submitting ? "Registering…" : "Confirm Registration"}
           </button>
-        </div>
-
-        <div className="min-h-0 space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
+        </>
+      }
+    >
+        <div className="space-y-4">
           {windowLabel && (
             <div className="flex items-center gap-2 text-[13px] text-brand-gray dark:text-muted-foreground">
               <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -167,26 +160,6 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
 
           {formError && <p className="text-[13px] text-brand-danger">{formError}</p>}
         </div>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-brand-border px-4 py-3.5 dark:border-border sm:px-5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-btn px-3.5 py-2 text-[13px] font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:text-muted-foreground dark:hover:bg-hover"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting || !selected || dates.length === 0}
-            className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {submitting ? "Registering…" : "Confirm Registration"}
-          </button>
-        </div>
-      </Card>
-    </div>
+    </FormModal>
   );
 }

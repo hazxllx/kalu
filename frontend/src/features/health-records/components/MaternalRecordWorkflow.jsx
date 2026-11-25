@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2, Baby, Calendar } from "lucide-react";
 import { Card } from "@/components/common/Card";
+import FormModal from "@/components/common/FormModal";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { ButtonSelectGroup as SelectButtonGroup } from "@/components/system";
 
@@ -238,36 +239,25 @@ function RegisterPregnancyForm({
   const displayResident = isEditMode ? initial.residentName : resident?.name;
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={modalTitle}
+    <FormModal
+      title={modalTitle}
+      description={isEditMode ? "Update pregnancy information" : "Essential information to establish the maternal pregnancy record"}
+      onClose={onClose}
+      size="large"
+      bodyClassName="sm:px-6 sm:py-5"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+          <button type="button" disabled={saving} onClick={() => {
+            if (!validate()) return;
+            onSave({ ...form, ...(isEditMode ? { id: initial.id } : {}) });
+          }} className="inline-flex min-h-10 items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+            <CheckCircle2 className="h-4 w-4" /> {saving ? (isEditMode ? "Saving..." : "Registering...") : buttonText}
+          </button>
+        </>
+      }
     >
-      <Card className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl !p-0 shadow-xl max-h-[90vh]">
-        {/* Fixed Header */}
-        <div className="border-b border-gray-200 px-6 py-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">{modalTitle}</h3>
-              <p className="mt-1 text-sm text-gray-600">
-                {isEditMode ? "Update pregnancy information" : "Essential information to establish the maternal pregnancy record"}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Form */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="px-6 py-5 space-y-6">
+          <div className="space-y-6">
             {/* Patient Information */}
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 mb-3">
@@ -412,35 +402,7 @@ function RegisterPregnancyForm({
               />
             </div>
           </div>
-        </div>
-
-        {/* Fixed Footer */}
-        <div className="border-t border-gray-200 px-6 py-3 flex items-center justify-end gap-3 bg-gray-50">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => {
-              if (!validate()) return;
-              onSave({
-                ...form,
-                ...(isEditMode ? { id: initial.id } : {}),
-              });
-            }}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors"
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            {saving ? (isEditMode ? "Saving..." : "Registering...") : buttonText}
-          </button>
-        </div>
-      </Card>
-    </div>
+    </FormModal>
   );
 }
 
@@ -559,36 +521,26 @@ function RecordEncounterForm({
   const bmi = calculateBMI();
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Record maternal encounter"
+    <FormModal
+      title="Record Maternal Encounter"
+      description="Document a prenatal visit, laboratory result, or postpartum follow-up."
+      onClose={onClose}
+      size="large"
+      bodyClassName="sm:px-6 sm:py-5"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+          <button type="button" disabled={saving} onClick={() => {
+            if (!validate()) return;
+            submissionKey.current ||= crypto.randomUUID();
+            onSave(form, submissionKey.current);
+          }} className="inline-flex min-h-10 items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "Recording..." : "Record Encounter"}
+          </button>
+        </>
+      }
     >
-      <Card className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl !p-0 shadow-xl max-h-[90vh]">
-        {/* Fixed Header */}
-        <div className="border-b border-gray-200 px-6 py-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Record Maternal Encounter</h3>
-              <p className="mt-1 text-sm text-gray-600">
-                Document a prenatal visit, laboratory result, or postpartum follow-up.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Form */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="px-6 py-5 space-y-6">
+          <div className="space-y-6">
             {/* Patient Information */}
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 mb-3">
@@ -836,33 +788,7 @@ function RecordEncounterForm({
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Fixed Footer */}
-        <div className="border-t border-gray-200 px-6 py-3 flex items-center justify-end gap-3 bg-gray-50">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => {
-              if (!validate()) return;
-              submissionKey.current ||= crypto.randomUUID();
-              onSave(form, submissionKey.current);
-            }}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors"
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            {saving ? "Recording..." : "Record Encounter"}
-          </button>
-        </div>
-      </Card>
-    </div>
+    </FormModal>
   );
 }
 
@@ -953,15 +879,21 @@ function DeliveryRecordForm({ resident, residents, initialRecord = null, saving,
   );
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Record delivery">
-      <Card className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl !p-0 shadow-xl max-h-[90vh]">
-        <div className="border-b border-gray-200 px-6 py-4">
-          <div className="flex items-start justify-between">
-            <div><h3 className="text-lg font-semibold text-gray-900">Record Delivery</h3><p className="mt-1 text-sm text-gray-600">Document delivery and pregnancy outcome.</p></div>
-            <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100"><X className="h-5 w-5" /></button>
-          </div>
-        </div>
-        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+    <FormModal
+      title={initialRecord ? "Edit Delivery Record" : "Record Delivery"}
+      description="Document delivery details and pregnancy outcome."
+      onClose={onClose}
+      size="large"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+          <button type="button" disabled={saving} onClick={submit} className="inline-flex min-h-10 items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Delivery"}
+          </button>
+        </>
+      }
+    >
+        <div className="space-y-5">
           <ResidentSummary resident={resident} initialRecord={initialRecord} residents={residents} onSelectResident={onSelectResident} errors={errors} />
           <section><h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-700">Delivery Details</h4>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -979,14 +911,7 @@ function DeliveryRecordForm({ resident, residents, initialRecord = null, saving,
             </div>
           </section>
         </div>
-        <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3">
-          <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-gray-700 hover:bg-gray-200">Cancel</button>
-          <button type="button" disabled={saving} onClick={submit} className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
-            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Delivery"}
-          </button>
-        </div>
-      </Card>
-    </div>
+    </FormModal>
   );
 }
 
@@ -1029,15 +954,21 @@ function PostpartumFollowUpForm({ resident, residents, initialRecord = null, sav
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Record postpartum visit">
-      <Card className="flex w-full max-w-xl flex-col overflow-hidden rounded-2xl !p-0 shadow-xl max-h-[90vh]">
-        <div className="border-b border-gray-200 px-6 py-4">
-          <div className="flex items-start justify-between">
-            <div><h3 className="text-lg font-semibold text-gray-900">Record Postpartum Visit</h3><p className="mt-1 text-sm text-gray-600">Each visit is saved as a separate dated encounter.</p></div>
-            <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100"><X className="h-5 w-5" /></button>
-          </div>
-        </div>
-        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+    <FormModal
+      title="Record Postpartum Visit"
+      description="Each visit is saved as a separate dated encounter."
+      onClose={onClose}
+      size="standard"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+          <button type="button" disabled={saving} onClick={submit} className="inline-flex min-h-10 items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60">
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Postpartum Visit"}
+          </button>
+        </>
+      }
+    >
+        <div className="space-y-5">
           <ResidentSummary resident={resident} initialRecord={initialRecord} residents={residents} onSelectResident={onSelectResident} errors={errors} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -1071,14 +1002,7 @@ function PostpartumFollowUpForm({ resident, residents, initialRecord = null, sav
             <textarea rows={3} value={form.notes} onChange={(event) => set("notes")(event.target.value)} className={`${inputCls()} resize-none`} />
           </div>
         </div>
-        <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3">
-          <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-gray-700 hover:bg-gray-200">Cancel</button>
-          <button type="button" disabled={saving} onClick={submit} className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
-            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Postpartum Visit"}
-          </button>
-        </div>
-      </Card>
-    </div>
+    </FormModal>
   );
 }
 

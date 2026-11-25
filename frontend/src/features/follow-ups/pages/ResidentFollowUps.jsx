@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import FormModal from "@/components/common/FormModal";
 import TablePagination from "@/components/tables/TablePagination";
 import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
 import { residentFollowUpsApi } from "@/services/api";
@@ -13,7 +14,7 @@ import {
   summarizeResidentFollowUps,
 } from "../lib/residentFollowUpPresentation";
 import {
-  CheckCircle2, Ban, X,
+  CheckCircle2, Ban,
 } from "lucide-react";
 
 /**
@@ -380,38 +381,32 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
     onSubmit(reason.trim());
   };
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Request Cancellation">
-      <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto break-words">
-        <div className="p-6">
-          <div className="mb-1 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">Request Cancellation</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">{schedule.purpose || "Scheduled service"} · {schedule.date || "Existing schedule"}</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
-          </div>
-          <p className="mt-2 text-sm text-brand-gray">Your schedule remains active until the responsible health team reviews and approves this request.</p>
-          <div className="mt-4">
-            <label htmlFor="follow-up-rejection-reason" className="text-sm font-medium text-brand-ink">Reason <span className="text-brand-danger">*</span></label>
-            <textarea
-              id="follow-up-rejection-reason"
-              rows={4}
-              value={reason}
-              onChange={(e) => { setReason(e.target.value); if (error) setError(""); }}
-              placeholder="Explain why you are requesting cancellation."
-              className={`mt-1.5 w-full resize-none rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${error ? "border-brand-danger" : "border-slate-200 dark:border-border"}`}
-            />
-            {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
-          </div>
-          <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-            <button disabled={!canSubmit} onClick={submit} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60 disabled:cursor-not-allowed">
-              <Ban className="h-4 w-4" /> Send Request
-            </button>
-          </div>
-        </div>
-      </Card>
-    </div>
+    <FormModal
+      title="Request Cancellation"
+      description={`${schedule.purpose || "Scheduled service"} · ${schedule.date || "Existing schedule"}`}
+      onClose={onClose}
+      footer={<>
+        <button type="button" onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+        <button type="button" disabled={!canSubmit} onClick={submit} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:cursor-not-allowed disabled:opacity-60">
+          <Ban className="h-4 w-4" /> Send Request
+        </button>
+      </>}
+    >
+      <p className="text-sm text-brand-gray">Your schedule remains active until the responsible health team reviews and approves this request.</p>
+      <section className="mt-4">
+        <h3 className="mb-2 border-b border-brand-border pb-2 text-sm font-semibold text-brand-ink">Cancellation details</h3>
+        <label htmlFor="follow-up-rejection-reason" className="text-sm font-medium text-brand-ink">Reason <span className="text-brand-danger">*</span></label>
+        <textarea
+          id="follow-up-rejection-reason"
+          rows={4}
+          value={reason}
+          onChange={(e) => { setReason(e.target.value); if (error) setError(""); }}
+          placeholder="Explain why you are requesting cancellation."
+          className={`mt-1.5 w-full resize-none rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${error ? "border-brand-danger" : "border-slate-200 dark:border-border"}`}
+        />
+        {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
+      </section>
+    </FormModal>
   );
 }
 
@@ -423,11 +418,20 @@ function RescheduleModal({ value, setValue, busy, onClose, onSubmit }) {
     if (!value.reason.trim()) { setError("A reason is required."); return; }
     setError(""); onSubmit();
   };
-  return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"><Card className="w-full max-w-md"><div className="p-6">
-    <div className="flex items-start justify-between gap-3"><div><h3 className="text-lg font-semibold text-brand-ink">Request Reschedule</h3><p className="mt-1 text-sm text-brand-gray">Your current appointment stays active until staff approves the proposed time.</p></div><button onClick={onClose} aria-label="Close"><X className="h-5 w-5" /></button></div>
-    <label className="mt-4 block text-sm font-medium text-brand-ink">Proposed date and time<input type="datetime-local" min={minDateTime} value={value.dateTime} onChange={(event) => setValue((prior) => ({ ...prior, dateTime: event.target.value }))} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm dark:bg-input" /></label>
-    <label className="mt-4 block text-sm font-medium text-brand-ink">Reason<textarea rows={3} value={value.reason} onChange={(event) => setValue((prior) => ({ ...prior, reason: event.target.value }))} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm dark:bg-input" /></label>
-    {error && <p className="mt-2 text-xs text-brand-danger">{error}</p>}
-    <div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-btn px-3 py-2 text-sm text-brand-gray">Back</button><button disabled={busy} onClick={submit} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Send Request</button></div>
-  </div></Card></div>;
+  return <FormModal
+    title="Request Reschedule"
+    description="Your current appointment stays active until staff approves the proposed time."
+    onClose={onClose}
+    footer={<>
+      <button type="button" onClick={onClose} className="rounded-btn px-3 py-2 text-sm text-brand-gray">Back</button>
+      <button type="button" disabled={busy} onClick={submit} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Send Request</button>
+    </>}
+  >
+    <section className="space-y-4">
+      <h3 className="border-b border-brand-border pb-2 text-sm font-semibold text-brand-ink">Proposed appointment</h3>
+      <label className="block text-sm font-medium text-brand-ink">Proposed date and time<input type="datetime-local" min={minDateTime} value={value.dateTime} onChange={(event) => setValue((prior) => ({ ...prior, dateTime: event.target.value }))} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm dark:bg-input" /></label>
+      <label className="block text-sm font-medium text-brand-ink">Reason<textarea rows={3} value={value.reason} onChange={(event) => setValue((prior) => ({ ...prior, reason: event.target.value }))} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm dark:bg-input" /></label>
+      {error && <p className="text-xs text-brand-danger">{error}</p>}
+    </section>
+  </FormModal>;
 }

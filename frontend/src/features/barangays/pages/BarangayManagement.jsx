@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
+import FormModal from "@/components/common/FormModal";
 import { Card } from "@/components/common/Card";
 import { NavTabs } from "@/layouts/NavTabsLayout";
 import { ButtonSelectGroup } from "@/components/system";
@@ -10,7 +11,7 @@ import { useBarangays } from "@/context/BarangaysContext";
 import { barangaysApi } from "@/services/api";
 import {
   AlertTriangle, Ban, Building2, CheckCircle2, Filter, Loader2, MapPin, Pencil,
-  Plus, RotateCcw, Search, X,
+  Plus, RotateCcw, Search,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------------- */
@@ -187,36 +188,24 @@ function BarangayModal({ mode, record, municipalities, onClose, onSaved }) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4 sm:p-6"
-      role="presentation"
-      onMouseDown={onClose}
+    <FormModal
+      title={mode === "edit" ? "Edit Barangay" : "Add New Barangay"}
+      description={mode === "edit" ? "Update the barangay's directory information." : "Add a barangay to the municipal directory."}
+      onClose={onClose}
+      closeOnBackdrop
+      size="standard"
+      overlayClassName="z-[80]"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:hover:bg-hover">Cancel</button>
+          <button type="submit" form="barangay-form" disabled={saving} className="inline-flex min-h-10 items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {mode === "edit" ? "Save Changes" : "Save Barangay"}
+          </button>
+        </>
+      }
     >
-      <Card
-        role="dialog"
-        aria-modal="true"
-        aria-label={mode === "edit" ? "Edit barangay" : "Add barangay"}
-        className="flex max-h-[90vh] w-full max-w-[760px] flex-col overflow-hidden"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="flex min-h-0 flex-1 flex-col">
-          {/* Header (fixed) */}
-          <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4">
-            <h3 className="text-lg font-semibold text-brand-ink">
-              {mode === "edit" ? "Edit Barangay" : "Add New Barangay"}
-            </h3>
-            <button
-              type="button"
-              onClick={onClose}
-              className="-mr-1 rounded-btn p-1.5 text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink"
-              aria-label="Close dialog"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
-          {/* Body (scrolls) */}
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <form id="barangay-form" onSubmit={(e) => { e.preventDefault(); submit(); }} className="space-y-4">
             <div className="space-y-4">
               {/* Row 1 — full width */}
               <Field label="Barangay Name" htmlFor="brgy-name" required error={errors.name}>
@@ -258,29 +247,8 @@ function BarangayModal({ mode, record, municipalities, onClose, onSaved }) {
                 </Field>
               </div>
             </div>
-          </div>
-
-          {/* Footer (fixed) */}
-          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {mode === "edit" ? "Save Changes" : "Save Barangay"}
-            </button>
-          </div>
         </form>
-      </Card>
-    </div>
+    </FormModal>
   );
 }
 

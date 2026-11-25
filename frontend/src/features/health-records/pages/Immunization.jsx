@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
+import { FormModalHeader } from "@/components/common/FormModal";
 import TablePagination from "@/components/tables/TablePagination";
 import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
@@ -145,19 +146,12 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="immunization-form-title">
       <Card className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-6 py-4">
-          <div>
-            <h3 className="text-lg font-semibold text-brand-ink">{isEdit ? "Edit Immunization" : "Record Immunization"}</h3>
-            <p className="mt-0.5 text-sm text-brand-gray">Vaccination details for the resident.</p>
-          </div>
-          <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
-        </div>
+        <FormModalHeader title={isEdit ? "Edit Immunization" : "Record Immunization"} description="Vaccination details for the resident." onClose={onClose} titleId="immunization-form-title" />
 
         {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto bg-white px-6 py-5 dark:bg-card">
           <div className="space-y-6">
             {/* Resident Information */}
             <section>
@@ -260,7 +254,7 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
         </div>
 
         {/* Fixed footer */}
-        <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
+        <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4 dark:bg-card">
           <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
           <button
             disabled={saving}
