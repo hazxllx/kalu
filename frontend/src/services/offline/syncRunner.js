@@ -1,6 +1,6 @@
 import { assertCurrentOwner, captureOwnerGuard, db, requireEncryptedPayload } from './db.js';
 import { encryptJson } from './crypto.js';
-import { markDraftStatus } from './drafts.js';
+import { markDraftStatus, DRAFT_STATUS } from './drafts.js';
 import { pruneRecordCache } from './records.js';
 import {
   OUTBOX_STATUS,
@@ -12,6 +12,7 @@ import {
   updateOperation,
   markSyncing,
   recoverInterruptedOperations,
+  markAwaitingConfirmation,
 } from './outbox.js';
 import { releaseLock, renewLock, acquireLock, ownsLock, writeMeta, readMeta, lastSyncedKey, syncLockKey, META_KEYS, DEFAULT_LOCK_TTL_MS } from './meta.js';
 import { classifySyncError, SYNC_ERROR } from './errors.js';
@@ -53,6 +54,7 @@ export const runSyncPass = async ({
     attempted: 0,
     synced: 0,
     failed: 0,
+    awaitingConfirmation: 0,
     conflicts: 0,
     deferred: 0,
     skipped: false,
@@ -129,6 +131,9 @@ export const runSyncPass = async ({
       check();
       const allById = new Map(allOps.map((op) => [op.opId, op]));
       const isReady = (op) => op.status === OUTBOX_STATUS.PENDING ||
+        (op.status === OUTBOX_STATUS.AWAITING_CONFIRMATION &&
+          op.lastError?.retryable !== false &&
+          (op.nextAttemptAt || 0) <= now()) ||
         (op.status === OUTBOX_STATUS.FAILED &&
           (op.lastError?.retryable === true || (op.lastError?.retryable === undefined && op.attempts < op.maxAttempts)) &&
           (op.nextAttemptAt || 0) <= now());
@@ -265,6 +270,31 @@ export const runSyncPass = async ({
             summary.conflicts += 1;
           } else {
             const terminal = !info.retryable;
+            if ((info.code === SYNC_ERROR.NETWORK || (info.status === 425 && info.code === SYNC_ERROR.SERVER))
+              && op.entity === 'consultation' && op.opType === 'create'
+              && mutationType === MUTATION_TIER.SAFE_SYNC) {
+              const attempts = await db.transaction('rw', db.outbox, db.drafts, db.syncMeta, async () => {
+                const count = await markFailed(op.opId, {
+                  ...info,
+                  code: 'awaiting_confirmation',
+                  retryable: true,
+                  message: 'The response was lost or timed out. The server is being reconciled; this record will not be created twice.',
+                }, now() + computeBackoffMs(op.attempts + 1, { baseMs: baseBackoffMs, maxMs: maxBackoffMs, random }),
+                { ...resultContext, ownerId });
+                check();
+                await markDraftStatus(op.localRecordId, DRAFT_STATUS.FAILED, {
+                  lastError: { ...info, code: 'awaiting_confirmation', retryable: true, message: 'Awaiting server confirmation. This operation is retained safely for reconciliation.' },
+                  consultationAwaitingConfirmation: true,
+                }, ownerId, context);
+                check();
+                return count;
+              });
+              allById.set(op.opId, { ...op, status: OUTBOX_STATUS.FAILED, attempts });
+              summary.awaitingConfirmation += 1;
+              summary.failed += 1;
+              summary.stoppedReason = 'network';
+              continue;
+            }
             const attempts = await db.transaction('rw', db.outbox, db.drafts, db.syncMeta, async () => {
               const count = await markFailed(op.opId, info,
                 terminal ? now() : now() + computeBackoffMs(op.attempts + 1, { baseMs: baseBackoffMs, maxMs: maxBackoffMs, random }),
@@ -278,6 +308,10 @@ export const runSyncPass = async ({
             summary.failed += 1;
             if (info.code === SYNC_ERROR.NETWORK || info.code === SYNC_ERROR.AUTH) {
               summary.stoppedReason = info.code;
+              break;
+            }
+            if (info.code === SYNC_ERROR.SERVER) {
+              summary.stoppedReason = 'server';
               break;
             }
           }

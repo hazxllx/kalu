@@ -20,6 +20,7 @@ import { ownsLock, syncLockKey } from './meta.js';
 
 export const OUTBOX_STATUS = Object.freeze({
   PENDING: 'pending',
+  AWAITING_CONFIRMATION: 'awaiting_confirmation',
   SYNCING: 'syncing',
   SYNCED: 'synced',
   FAILED: 'failed',
@@ -164,6 +165,11 @@ export const listReadyOperations = async (ownerId, now = Date.now()) => {
   return rows.filter((op) => {
     if (op.status === OUTBOX_STATUS.PENDING) return true;
     if (
+      op.status === OUTBOX_STATUS.AWAITING_CONFIRMATION &&
+      op.lastError?.retryable !== false &&
+      (op.nextAttemptAt || 0) <= now
+    ) return true;
+    if (
       op.status === OUTBOX_STATUS.FAILED &&
       (op.lastError?.retryable === true ||
         (op.lastError?.retryable === undefined && op.attempts < op.maxAttempts)) &&
@@ -257,6 +263,26 @@ export const markConflict = async (opId, errorInfo, ownerId, context = {}) =>
       syncingAt: null,
     }, ownerId, context);
 
+/** Response-loss/timeout state: the operation may already have committed. */
+export const markAwaitingConfirmation = async (opId, errorInfo, nextAttemptAt, ownerId, context = {}) => {
+  const isOwnerCurrent = context.isOwnerCurrent || captureOwnerGuard(ownerId);
+  assertCurrentOwner(isOwnerCurrent);
+  const op = await db.outbox.get(opId);
+  assertCurrentOwner(isOwnerCurrent);
+  if (!op || op.ownerId !== ownerId) return null;
+  const attempts = (op.attempts || 0) + 1;
+  const updated = await updateOperation(opId, {
+    status: OUTBOX_STATUS.AWAITING_CONFIRMATION,
+    attempts,
+    lastError: errorInfo,
+    nextAttemptAt,
+    workerId: null,
+    workerToken: null,
+    syncingAt: null,
+  }, ownerId, { ...context, isOwnerCurrent });
+  return updated ? attempts : null;
+};
+
 export const requeueOperation = async (opId, ownerId, context = {}) => {
   const isOwnerCurrent = context.isOwnerCurrent || captureOwnerGuard(ownerId);
   assertCurrentOwner(isOwnerCurrent);
@@ -269,6 +295,21 @@ export const requeueOperation = async (opId, ownerId, context = {}) => {
     lastError: null,
     attempts: 0,
   }, ownerId, { ...context, isOwnerCurrent, expectedStatus: OUTBOX_STATUS.FAILED });
+};
+
+export const requeueAwaitingOperation = async (opId, ownerId, context = {}) => {
+  const isOwnerCurrent = context.isOwnerCurrent || captureOwnerGuard(ownerId);
+  assertCurrentOwner(isOwnerCurrent);
+  const op = await db.outbox.get(opId);
+  assertCurrentOwner(isOwnerCurrent);
+  if (!op || op.ownerId !== ownerId || op.status !== OUTBOX_STATUS.AWAITING_CONFIRMATION) return false;
+  return updateOperation(opId, {
+    status: OUTBOX_STATUS.PENDING,
+    nextAttemptAt: (context.now || Date.now)(),
+    workerId: null,
+    workerToken: null,
+    syncingAt: null,
+  }, ownerId, { ...context, isOwnerCurrent, expectedStatus: OUTBOX_STATUS.AWAITING_CONFIRMATION });
 };
 
 export const deleteOperation = async (opId, ownerId) => {
@@ -292,6 +333,7 @@ export const countByStatus = async (ownerId) => {
   const rows = await listOperations(ownerId);
   const counts = {
     pending: 0,
+    awaiting_confirmation: 0,
     syncing: 0,
     synced: 0,
     failed: 0,
@@ -359,8 +401,10 @@ export default {
   markSyncing,
   markSynced,
   markFailed,
+  markAwaitingConfirmation,
   markConflict,
   requeueOperation,
+  requeueAwaitingOperation,
   deleteOperation,
   countByStatus,
   recoverInterruptedOperations,

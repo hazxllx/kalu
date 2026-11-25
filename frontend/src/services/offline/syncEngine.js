@@ -1,7 +1,7 @@
-import { isNavigatorOnline, subscribeConnectivity } from './connectivity.js';
+import { isNavigatorOnline, subscribeConnectivity, checkBackendHealth } from './connectivity.js';
 import { lastSyncedKey, readMeta } from './meta.js';
 import { runSyncPass } from './syncRunner.js';
-import { listOperations, requeueOperation } from './outbox.js';
+import { listOperations, requeueOperation, requeueAwaitingOperation } from './outbox.js';
 import { earliestRetryAt, summarizeOperations } from './syncCore.js';
 import { getOfflineDraftCount } from './drafts.js';
 import { setOfflineOwnerResolver } from './db.js';
@@ -29,9 +29,10 @@ const defaultState = () => ({
   syncing: false,
   ownerId: null,
   lastSyncedAt: null,
-  counts: { pending: 0, syncing: 0, synced: 0, resolved: 0, failed: 0, conflict: 0, offlineDraft: 0, total: 0 },
+  counts: { pending: 0, awaiting_confirmation: 0, syncing: 0, synced: 0, resolved: 0, failed: 0, conflict: 0, offlineDraft: 0, total: 0 },
   failed: [],
   conflicts: [],
+  awaitingConfirmation: [],
   progress: null,
   lastResult: null,
   lastError: null,
@@ -45,6 +46,7 @@ let engineGeneration = 0;
 const hiddenOwnerState = defaultState();
 let debounceTimer = null;
 let retryTimer = null;
+let healthTimer = null;
 let stopConnectivity = null;
 let visibilityHandler = null;
 /** @type {(() => string | null) | null} */
@@ -103,7 +105,7 @@ export const refreshSyncState = async () => {
   try {
     const ops = await listOperations(ownerId);
     if (!isCurrent()) return getSnapshot();
-    const { counts, failed, conflicts } = summarizeOperations(ops);
+    const { counts, failed, conflicts, awaitingConfirmation = [] } = summarizeOperations(ops);
     const offlineDraftCount = await getOfflineDraftCount(ownerId);
     if (!isCurrent()) return getSnapshot();
     const lastSyncedAt = await readMeta(lastSyncedKey(ownerId), null);
@@ -113,6 +115,7 @@ export const refreshSyncState = async () => {
       counts: { ...counts, offlineDraft: offlineDraftCount },
       failed,
       conflicts,
+      awaitingConfirmation,
       lastSyncedAt,
       initialized: true,
     });
@@ -145,10 +148,33 @@ export const requestSync = async (reason = 'manual') => {
     queued = true;
     return state.lastResult;
   }
+  try {
+    const operations = await listOperations(ownerId);
+    if (!operations.some((op) =>
+      op.status === 'pending' ||
+      op.status === 'syncing' ||
+      op.status === 'awaiting_confirmation' ||
+      (op.status === 'failed' && op.lastError?.retryable === true),
+    )) {
+      await refreshSyncState();
+      return { skipped: true, stoppedReason: 'queue-empty', reason };
+    }
+  } catch (error) {
+    setState({ lastError: { code: 'storage', message: error?.message || 'Offline storage is unavailable.' } });
+    return { skipped: true, stoppedReason: 'storage', reason };
+  }
   if (!isNavigatorOnline()) {
     setState({ online: false, ownerId });
     await refreshSyncState();
     return { skipped: true, stoppedReason: 'offline', reason };
+  }
+  if (!handlerResolver) {
+    const available = await checkBackendHealth({ force: reason !== 'retry-backoff' });
+    setState({ online: true, serverAvailable: available, ownerId });
+    if (!available) {
+      await refreshSyncState();
+      return { skipped: true, stoppedReason: 'server-unavailable', reason };
+    }
   }
 
   const pass = { generation, ownerId };
@@ -164,13 +190,23 @@ export const requestSync = async (reason = 'manual') => {
       onProgress: ({ processed, total }) => { if (isCurrent()) setState({ progress: { processed, total } }); },
     });
     if (!isCurrent()) return result;
+    let healthAvailable = state.serverAvailable;
+    if (!handlerResolver) healthAvailable = await checkBackendHealth();
     const serverAvailable = result.stoppedReason === 'network'
       ? false
+      : result.stoppedReason === 'server'
+        ? false
+        : result.stoppedReason === 'awaiting-confirmation'
+          ? healthAvailable
       : result.attempted > 0
         ? true
         : state.serverAvailable;
     const lastError = result.stoppedReason === 'network'
       ? { code: 'network', message: 'The backend is not reachable. Changes remain saved on this device and will retry automatically.' }
+      : result.stoppedReason === 'server'
+        ? { code: 'server', message: 'The server returned a temporary error. Changes remain queued and will retry automatically.' }
+      : result.stoppedReason === 'awaiting-confirmation'
+        ? { code: 'awaiting_confirmation', message: 'The response was lost or timed out. The server is being reconciled safely.' }
       : result.stoppedReason === 'auth'
         ? { code: 'auth', message: 'Your session expired. Sign in again before synchronizing.' }
         : result.stoppedReason
@@ -207,6 +243,10 @@ export const retryAll = async () => {
   if (!isCurrent()) return getSnapshot();
   for (const op of ops) {
     if (!isCurrent()) return getSnapshot();
+    if (op.status === 'awaiting_confirmation') {
+      await requeueAwaitingOperation(op.opId, ownerId, { isOwnerCurrent: isCurrent });
+      continue;
+    }
     if (op.status === 'failed' && isRecoverableFailure(op.lastError)) {
       await requeueOperation(op.opId, ownerId, { isOwnerCurrent: isCurrent });
       if (!isCurrent()) return getSnapshot();
@@ -226,8 +266,12 @@ export const retryOperation = async (opId) => {
   const ops = await listOperations(ownerId);
   if (!isCurrent()) return getSnapshot();
   const op = ops.find((row) => row.opId === opId);
-  if (!op || !isRecoverableFailure(op.lastError)) return state;
-  const requeued = await requeueOperation(opId, ownerId, { isOwnerCurrent: isCurrent });
+  if (!op) return state;
+  const requeued = op.status === 'awaiting_confirmation'
+    ? await requeueAwaitingOperation(opId, ownerId, { isOwnerCurrent: isCurrent })
+    : isRecoverableFailure(op.lastError)
+      ? await requeueOperation(opId, ownerId, { isOwnerCurrent: isCurrent })
+      : false;
   if (!isCurrent()) return getSnapshot();
   if (!requeued) return state;
   await refreshSyncState();
@@ -241,6 +285,10 @@ const scheduleRetryForPending = async (ownerId, generation = engineGeneration) =
   if (retryTimer) {
     clearTimeout(retryTimer);
     retryTimer = null;
+  }
+  if (healthTimer) {
+    clearInterval(healthTimer);
+    healthTimer = null;
   }
   if (!ownerId || !isNavigatorOnline()) return;
 
@@ -289,13 +337,30 @@ export const startSyncEngine = () => {
   const generation = engineGeneration;
   stopConnectivity = subscribeConnectivity((online) => {
     setState({ online: currentOwner() ? online : state.online });
-    if (online) scheduleSync(300);
+    if (online) {
+      void checkBackendHealth({ force: true }).then((available) => {
+        if (generation === engineGeneration) setState({ serverAvailable: available });
+      });
+      scheduleSync(300);
+    } else {
+      setState({ serverAvailable: null });
+    }
   });
   if (typeof document !== 'undefined') {
     visibilityHandler = () => {
       if (document.visibilityState === 'visible') scheduleSync(1500);
     };
     document.addEventListener('visibilitychange', visibilityHandler);
+  }
+  if (typeof setInterval === 'function') {
+    healthTimer = setInterval(() => {
+      if (generation !== engineGeneration || !currentOwner() || !isNavigatorOnline()) return;
+      void checkBackendHealth({ force: true }).then((available) => {
+        if (generation !== engineGeneration) return;
+        setState({ serverAvailable: available, online: true });
+        if (available) scheduleSync(250);
+      });
+    }, 30_000);
   }
   setState({ online: isNavigatorOnline() });
   refreshSyncState()
@@ -304,6 +369,10 @@ export const startSyncEngine = () => {
       if (generation === engineGeneration && ownerId && isNavigatorOnline()) {
         await requeueExpiredSessionOperations(ownerId, generation);
         if (generation === engineGeneration && currentOwner() === ownerId) scheduleSync(1000);
+      }
+      if (generation === engineGeneration && ownerId) {
+        const available = await checkBackendHealth({ force: true });
+        if (generation === engineGeneration) setState({ serverAvailable: available });
       }
     })
     .catch((error) => {

@@ -10,7 +10,7 @@ import { medicalHistoryForRecord } from '../../src/features/health-records/lib/h
 import * as consultationRisk from '../../src/features/consultations/lib/consultationRisk.js';
 
 const Empty = () => null;
-const Container = ({ children }) => React.createElement('div', null, children);
+const Container = ({ children, ...props }) => React.createElement('div', props, children);
 const Header = ({ title, subtitle, action }) => React.createElement('header', null, title, subtitle, action);
 const Range = () => null;
 const text = (node) => JSON.stringify(node.toJSON());
@@ -67,7 +67,7 @@ async function healthPage(t, respond = async () => fullRecord) {
     '@/features/health-records/lib/healthRecordPdf': { medicalHistoryForRecord, downloadHealthRecordPdf: async (data) => { exports.push(data); } },
     '@/features/consultations/lib/consultationRisk': consultationRisk,
     '@/features/consultations/utils/bpClassification': { bloodPressureBadgeClassName: () => '' },
-    '@/components/common/RiskBadge': { default: ({ level, mediumLabel }) => React.createElement('span', null, level === 'Moderate' ? mediumLabel : level || 'Unassessed') },
+    '@/components/common/RiskBadge': { default: ({ level, mediumLabel, unassessedLabel }) => React.createElement('span', null, level === 'Moderate' ? mediumLabel : level || unassessedLabel || 'Unassessed') },
     '@/features/health-records/lib/pregnancyVisibility': { shouldShowPregnancyStatus: () => true },
     '@/features/health-records/components/LabResultsPanel': { default: Empty },
     '@/lib/dateUtils': { formatLongDate: (value) => value },
@@ -112,6 +112,18 @@ test('range lives in history, preserves latest vitals, filters export immediatel
   assert.deepEqual(calls.at(-1), {});
   assert.equal(renderer.root.findByType(Range).props.from, '');
   assert.match(text(renderer), /120\/80/);
+});
+
+test('latest vitals empty state uses the right-aligned assessment badge and centered bordered copy', async (t) => {
+  const { renderer, flush } = await healthPage(t, async () => ({ ...fullRecord, consultations: [] }));
+  await flush();
+  const rendered = text(renderer);
+  assert.match(rendered, /Not yet assessed/);
+  assert.match(rendered, /No vitals recorded yet/);
+  assert.match(rendered, /Your blood pressure, weight, and other readings appear here after your next health center visit\./);
+  assert.match(rendered, /items-center justify-between/);
+  assert.match(rendered, /rounded-\[14px\].*p-7/);
+  assert.match(rendered, /min-h-32.*border-dashed/);
 });
 
 test('saved consultation risk, clinical context and dated prescriptions appear without medical-history placeholders', async (t) => {

@@ -499,7 +499,6 @@ export const updateSubmissionForPhn = async ({
   const dateTime = { consultationDate: patch.consultationDate ?? encounter.consultationDetails.consultationDate ?? clinicalDateTime.date,
     consultationTime: patch.consultationTime ?? encounter.consultationDetails.consultationTime ?? clinicalDateTime.time };
   const clinicalErrors = { ...validateConsultationVitals(vitals), ...validateConsultationDateTime(dateTime) };
-  if (encounter.consultationDetails.clinicalIndicators?.dangerSignsReviewed !== true) clinicalErrors['clinicalIndicators.dangerSignsReviewed'] = 'Confirm that danger signs were reviewed.';
   if (!String(encounter.consultationDetails.findings ?? encounter.findings ?? '').trim()) clinicalErrors.findings = 'Clinical findings are required.';
   if (Object.keys(clinicalErrors).length) throw ApiError.unprocessable('Complete valid clinical measurements and date/time before saving consultation details.', clinicalErrors);
   Object.assign(encounter.consultationDetails, dateTime, { clinicalIntegrityVersion: 'consultation-clinical-v1',

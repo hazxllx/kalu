@@ -19,6 +19,13 @@ const dropdown = {
   ...Object.fromEntries(["Root", "Trigger", "Portal", "Content"].map((name) => [name, Panel])),
   Item: ({ children, onSelect, disabled }) => React.createElement("button", { onClick: onSelect, disabled }, children),
 };
+const actionMenu = {
+  ActionMenu: Panel,
+  ActionMenuTrigger: ({ children, ...props }) => React.createElement("button", props, children),
+  ActionMenuContent: Panel,
+  ActionMenuItem: dropdown.Item,
+  ActionMenuMessage: Panel,
+};
 const options = {
   roles: [{ id: "phn", name: "Public Health Nurse" }, { id: "bhw", name: "Barangay Health Worker" }],
   municipalities: [{ id: "pili", name: "Pili" }], barangays: [], facilities: [], rhuStations: [],
@@ -36,9 +43,10 @@ const deferred = () => {
   return { promise, resolve };
 };
 
-async function mount({ account = resident, accounts = [account], get = async () => ({ user: account }), history = async () => ({ audit: [], notifications: [] }), created = personnel, roleOptions = options } = {}) {
-  const calls = { get: [], history: [], create: [], list: 0, summary: 0 };
+async function mount({ account = resident, accounts = [account], get = async () => ({ user: account }), history = async () => ({ audit: [], notifications: [] }), created = personnel, roleOptions = options, sendLifecycle = async () => ({ user: personnel }) } = {}) {
+  const calls = { get: [], history: [], create: [], lifecycle: [], list: 0, summary: 0 };
   const creationStarted = deferred();
+  const lifecycleStarted = deferred();
   const toasts = [];
   const timers = new Map();
   let timerId = 0;
@@ -53,6 +61,7 @@ async function mount({ account = resident, accounts = [account], get = async () 
     get: async (id) => { calls.get.push(id); return get(id); },
     history: async (id) => { calls.history.push(id); return history(id); },
     create: async (...args) => { calls.create.push(args); creationStarted.resolve(); return { user: created }; },
+    lifecycle: async (...args) => { calls.lifecycle.push(args); lifecycleStarted.resolve(); return sendLifecycle(...args); },
   };
   const overrides = {
     "@/services/api": { usersApi },
@@ -60,6 +69,7 @@ async function mount({ account = resident, accounts = [account], get = async () 
     "@/context/AuthContext": { useAuth: () => ({ user: { id: "admin-1", role: "admin" } }) },
     "@/context/PermissionsContext": { usePermissions: () => ({ can: () => true }) },
     "@/components/ui/use-toast": { useToast: () => ({ toast: (toast) => toasts.push(toast) }) },
+    "@/components/ui/action-menu": actionMenu,
     "@/lib/supabase": { supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: "admin-1" }, access_token: "test-token" } } }) } } },
     "react-router-dom": { useOutletContext: () => ({}) },
     "@radix-ui/react-dialog": dialog,
@@ -84,7 +94,7 @@ async function mount({ account = resident, accounts = [account], get = async () 
     for (const [id, callback] of timers) { timers.delete(id); await callback(); }
   });
   return {
-    renderer, calls, toasts,
+    renderer, calls, toasts, lifecycleStarted,
     text: () => text(renderer.toJSON()),
     click: async (label, within = renderer.root) => {
       const button = within.findAllByType("button").find((node) => text(node).trim() === label);
@@ -161,6 +171,69 @@ test("personnel profile refresh applies despite history failure and activity can
     assert.equal(page.renderer.root.findAllByProps({ role: "alert" }).length, 0);
     assert.match(page.text(), /account updated/);
     assert.match(page.text(), /Reviewing Admin/);
+  } finally { page.close(); }
+});
+
+test("resend locks while processing, prevents duplicate submissions, and confirms only SMTP-accepted success", async () => {
+  const response = deferred();
+  const page = await mount({ account: personnel, sendLifecycle: () => response.promise });
+  try {
+    await page.click("Resend setup link");
+    const confirmation = page.renderer.root.findAllByType("input").find((node) => node.props.type === "checkbox");
+    assert.ok(confirmation);
+    await act(async () => confirmation.props.onChange({ target: { checked: true } }));
+
+    const form = page.renderer.root.findByType("form");
+    let submission;
+    await act(async () => {
+      submission = form.props.onSubmit({ preventDefault() {} });
+      form.props.onSubmit({ preventDefault() {} });
+      await page.lifecycleStarted.promise;
+    });
+
+    assert.equal(page.calls.lifecycle.length, 1);
+    assert.equal(page.calls.lifecycle[0][0], personnel.id);
+    assert.equal(page.calls.lifecycle[0][1].action, "invite");
+    const sendingButton = page.renderer.root.findAllByType("button").find((node) => text(node).trim() === "Sending...");
+    assert.ok(sendingButton);
+    assert.equal(sendingButton.props.disabled, true);
+
+    await act(async () => {
+      response.resolve({ user: { ...personnel, notification: { status: "sent" } } });
+      await submission;
+    });
+    assert.equal(page.renderer.root.findAllByType("form").length, 0);
+    assert.equal(
+      text(createToastTree(page.toasts[0].description)).trim(),
+      "Password setup link has been successfully sent to the registered email address.",
+    );
+    assert.equal(page.calls.create.length, 0, "resending must not create another account");
+  } finally { page.close(); }
+});
+
+test("resend transport failure reconciles a newly sent notification instead of reporting offline", async () => {
+  const previous = { ...personnel, notification: { id: "notification-before", status: "sent" } };
+  const latest = { ...personnel, notification: { id: "notification-after", status: "sent" } };
+  const transportError = Object.assign(new TypeError("Failed to fetch"), { code: "API_TRANSPORT_ERROR" });
+  const page = await mount({
+    account: previous,
+    get: async () => ({ user: latest }),
+    sendLifecycle: async () => { throw transportError; },
+  });
+  try {
+    await page.click("Resend setup link");
+    const confirmation = page.renderer.root.findAllByType("input").find((node) => node.props.type === "checkbox");
+    await act(async () => confirmation.props.onChange({ target: { checked: true } }));
+    await act(async () => {
+      await page.renderer.root.findByType("form").props.onSubmit({ preventDefault() {} });
+    });
+
+    assert.deepEqual(page.calls.get, [personnel.id]);
+    assert.equal(page.renderer.root.findAllByType("form").length, 0);
+    assert.equal(
+      text(createToastTree(page.toasts[0].description)).trim(),
+      "Password setup link has been successfully sent to the registered email address.",
+    );
   } finally { page.close(); }
 });
 

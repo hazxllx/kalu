@@ -238,9 +238,6 @@ export const phnWorkflowApi = {
       // field is genuinely absent we leave it untouched rather than clearing an
       // association the submission already carried.
       ...(recorded.healthServiceId === undefined ? {} : { healthServiceId: recorded.healthServiceId || null }),
-      ...(recorded.dangerSignsReviewed === undefined ? {} : {
-        consultationDetails: { clinicalIndicators: { dangerSignsReviewed: recorded.dangerSignsReviewed === true } },
-      }),
       // Structured prescriptions recorded in the workbench's MedicineSelector.
       // Forwarded verbatim (never renamed/dropped) so the backend persists them
       // to visits.medications; an empty array clears nothing it did not set.

@@ -146,9 +146,9 @@ test('clinical-text pregnancy indicator handles negation without classifying cli
   })), (error) => error.statusCode === 422 && Boolean(error.details?.['maternal.careType']));
 });
 
-test('consultations without a visible danger-sign attestation still save server-assessed risk', async () => {
-  const { clinicalIndicators: _ignored, ...withoutIndicators } = payload();
-  const saved = await create(write({ payload: withoutIndicators }));
+test('consultations without a danger-sign attestation or diagnosis still save server-assessed risk', async () => {
+  const { clinicalIndicators: _ignoredIndicators, diagnosis: _ignoredDiagnosis, ...withoutOptionalFields } = payload();
+  const saved = await create(write({ payload: withoutOptionalFields }));
   assert.ok(saved.consultationRiskAssessment);
   assert.equal(saved.consultationRiskAssessment.level, 'Low');
   assert.equal(saved.clinicalIndicators?.dangerSignsReviewed, undefined);

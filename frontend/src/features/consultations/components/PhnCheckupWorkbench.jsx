@@ -121,7 +121,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const [diagnosis, setDiagnosis] = useState("");
   const [healthConcern, setHealthConcern] = useState("");
   const [consultationVitals, setConsultationVitals] = useState({});
-  const [dangerSignsReviewed, setDangerSignsReviewed] = useState(false);
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [recommendations, setRecommendations] = useState("");
   const [healthServiceId, setHealthServiceId] = useState("");
@@ -184,7 +183,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     setDiagnosis(saved?.diagnosis || "");
     setHealthConcern(saved?.healthConcern || "");
     setConsultationVitals(patient?.consultationVitals || patient?.raw?.consultationDetails?.consultationVitals || {});
-    setDangerSignsReviewed(patient?.raw?.consultationDetails?.clinicalIndicators?.dangerSignsReviewed === true);
     setClinicalNotes(saved?.clinicalNotes || "");
     setRecommendations(saved?.recommendations || "");
     setMedications(Array.isArray(saved?.medications) ? saved.medications : []);
@@ -236,7 +234,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     if (!assessment.trim()) next.assessment = "Please record your assessment or findings.";
     if (!healthConcern.trim()) next.healthConcern = "Health concern is required.";
     if (!recommendations.trim()) next.recommendations = "Record the actual treatment or recommendations before completing the consultation.";
-    if (!dangerSignsReviewed) next.dangerSignsReviewed = "Confirm that danger signs were reviewed and any positive findings were recorded.";
     const vitalErrors = validateConsultationVitals(consultationVitalValues);
     for (const field of missingVitalFields) {
       if (vitalErrors[field.key]) next[field.key] = vitalErrors[field.key];
@@ -261,7 +258,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       recommendations: recommendations.trim(),
       medications,
       healthServiceId: healthServiceId || null,
-      dangerSignsReviewed,
       consultationVitals: Object.fromEntries(missingVitalFields
         .map(({ key }) => [key, consultationVitals[key]])
         .filter(([, value]) => hasValue(value))),
@@ -278,7 +274,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       setErrors(Object.fromEntries(Object.entries(fieldErrors).flatMap(([field, message]) => {
         if (field.startsWith("medications")) return [[field, message]];
         if (field.startsWith("consultationVitals.")) return [[field.slice("consultationVitals.".length), message]];
-        if (field === "clinicalIndicators.dangerSignsReviewed") return [["dangerSignsReviewed", message]];
         return [];
       })));
       setSubmitError(error?.message || "Could not save this check-up. Your entries are still available; retry when ready.");
@@ -576,26 +571,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                       {errors.vitalSigns && <p className="mt-3 text-xs text-brand-danger" role="alert">{errors.vitalSigns}</p>}
                     </section>
                   )}
-                  <section className={`rounded-btn border px-3 py-3 dark:bg-card sm:px-4 ${errors.dangerSignsReviewed ? "border-brand-danger/50 bg-brand-danger/5" : "border-brand-border bg-white"}`}>
-                    <label htmlFor="consultation-danger-signs-reviewed" className="flex cursor-pointer items-start gap-2.5 text-sm text-brand-ink">
-                      <input
-                        id="consultation-danger-signs-reviewed"
-                        type="checkbox"
-                        checked={dangerSignsReviewed}
-                        aria-invalid={Boolean(errors.dangerSignsReviewed)}
-                        onChange={(event) => {
-                          setDangerSignsReviewed(event.target.checked);
-                          if (event.target.checked) setErrors((previous) => ({ ...previous, dangerSignsReviewed: "" }));
-                        }}
-                        className="mt-0.5 h-4 w-4 shrink-0 accent-brand-blue"
-                      />
-                      <span>
-                        <span className="block font-medium">Danger signs reviewed <span className="text-brand-danger">*</span></span>
-                        <span className="mt-0.5 block text-xs text-brand-gray">Confirm that danger signs were assessed and any positive findings were documented.</span>
-                      </span>
-                    </label>
-                    {errors.dangerSignsReviewed && <p className="mt-2 text-xs text-brand-danger" role="alert">{errors.dangerSignsReviewed}</p>}
-                  </section>
                   <div>
                     <ConsultationHealthServiceField
                       value={healthServiceId}

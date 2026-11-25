@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   PERSONNEL_ROLES, isPersonnelRole, personnelState, notificationMeta, legacyApprovalMessage, auditActorLabel,
-  canRetryPersonnelEmail, personnelActions, personnelActionMessage, personnelOperation, personnelCreationOperation, clearPersonnelCreationOperation,
+  canRetryPersonnelEmail, personnelActions, personnelActionMessage, personnelActionFailureMessage, personnelOperation, personnelCreationOperation, clearPersonnelCreationOperation,
   stationAssignmentPatch, stationAssignmentError, coverageAssignmentPatch, lifecyclePayload,
 } from "../../src/features/users/personnelLifecycle.js";
 
@@ -161,6 +161,29 @@ test("creation feedback reports returned setup and email states without pretendi
   assert.match(message, /Email is queued/);
   assert.doesNotMatch(message, /Invitation sent|now active/);
   assert.match(personnelActionMessage("invite", null), /check its current state/);
+});
+
+test("resend feedback confirms SMTP acceptance and distinguishes connection, timeout, and server failures", () => {
+  assert.equal(
+    personnelActionMessage("invite", approved({ notification: { status: "sent" } })),
+    "Password setup link has been successfully sent to the registered email address.",
+  );
+  assert.equal(
+    personnelActionFailureMessage("invite", Object.assign(new Error("Failed to fetch"), { code: "API_TRANSPORT_ERROR" })),
+    "Unable to connect to the server. Please check your internet connection and try again.",
+  );
+  assert.equal(
+    personnelActionFailureMessage("invite", Object.assign(new Error("Request timeout"), { name: "AbortError" })),
+    "Unable to send the password setup email. Please try again.",
+  );
+  assert.equal(
+    personnelActionFailureMessage("invite", Object.assign(new Error("SMTP delivery failed"), { status: 503 })),
+    "Unable to send the password setup email. Please try again.",
+  );
+  assert.equal(
+    personnelActionFailureMessage("invite", Object.assign(new Error("Session expired"), { status: 401 })),
+    "Session expired",
+  );
 });
 
 const operationStorage = () => {

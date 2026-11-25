@@ -131,13 +131,11 @@ export function assessClinicalEncounter({ vitals = {}, indicators = {}, pregnanc
   }
 
   const referralEvaluationRequired = urgency === 'immediate' || urgency === 'prompt';
-  const reviewed = indicators?.dangerSignsReviewed === true;
   const hasAssessableBp = (maternal || adult) && completeBp && validBp;
   const level = referralEvaluationRequired ? 'High' : urgency === 'routine' ? 'Medium'
-    : reviewed && hasAssessableBp ? 'Low' : null;
+    : hasAssessableBp ? 'Low' : null;
 
   if (!urgency) {
-    if (!reviewed) reasons.push({ ruleId: 'danger_sign_review_missing', reference: 'DOH_EMERGENCY' });
     if (!hasAssessableBp) reasons.push({ ruleId: age !== null && !maternal && !adult ? 'bp_protocol_age_scope_unverified' : 'bp_assessment_incomplete', reference: maternal ? 'DOH_MATERNAL' : 'DOH_PRIMARY' });
     if (level === 'Low') reasons.push({ ruleId: 'no_matching_encounter_risk_rule', reference: maternal ? 'DOH_MATERNAL' : 'DOH_PRIMARY' });
   }

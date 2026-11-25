@@ -6,7 +6,7 @@ import {
   WifiOff,
 } from 'lucide-react';
 
-import { retryAll } from '@/services/offline/syncEngine';
+import { retryAll, retryOperation } from '@/services/offline/syncEngine';
 import {
   OFFLINE_DB_READY_EVENT,
   OFFLINE_DB_UPGRADE_BLOCKED_EVENT,
@@ -90,6 +90,7 @@ const OfflineStatusIndicator = () => {
     counts = {},
     failed = [],
     conflicts = [],
+    awaitingConfirmation = [],
     syncing,
     progress,
     online,
@@ -98,13 +99,14 @@ const OfflineStatusIndicator = () => {
     lastError,
     initialized,
   } = status;
-  const attention = (counts.pending || 0) + (counts.failed || 0) + (counts.conflict || 0) + (counts.offlineDraft || 0);
+  const attention = (counts.pending || 0) + (counts.awaiting_confirmation || 0) + (counts.failed || 0) + (counts.conflict || 0) + (counts.offlineDraft || 0);
   const hasProblems = (counts.failed || 0) + (counts.conflict || 0) > 0;
-  const canRetry = (counts.pending || 0) > 0 || failed.some((item) => item.retryable);
-  const waitingCount = (counts.pending || 0) + (counts.syncing || 0) + (counts.offlineDraft || 0);
+  const canRetry = (counts.pending || 0) > 0 || (counts.awaiting_confirmation || 0) > 0 || failed.some((item) => item.retryable);
+  const waitingCount = (counts.pending || 0) + (counts.awaiting_confirmation || 0) + (counts.syncing || 0) + (counts.offlineDraft || 0);
   const metricsAvailable = initialized && !(lastError && !lastError.code) && [
     counts.synced,
     counts.pending,
+    counts.awaiting_confirmation,
     counts.syncing,
     counts.failed,
     counts.conflict,
@@ -119,16 +121,18 @@ const OfflineStatusIndicator = () => {
     if (upgradeBlocked) return 'Close other tabs to finish device storage upgrade';
     if (syncing) {
       const total = progress?.total || 0;
-      return total ? `Synchronizing changes (${progress?.processed || 0}/${total})` : 'Synchronizing changes...';
+      return total
+        ? `Automatically synchronizing pending changes... (${progress?.processed || 0}/${total})`
+        : 'Automatically synchronizing pending changes...';
     }
     if (counts.failed > 0) return 'Synchronization failed';
     if (lastError?.code === 'auth') return 'Sign in again to synchronize';
-    if (serverAvailable === false) return 'Backend unavailable — retrying automatically';
+    if (serverAvailable === false) return 'Your device is online, but the server is currently unreachable.';
     if (lastError) return 'Synchronization failed';
     if (counts.conflict > 0) return 'Changes need review';
-    if (waitingCount > 0) return 'Changes waiting to synchronize';
+    if (waitingCount > 0) return 'Pending changes will synchronize automatically.';
     if (!online) return 'Working offline';
-    return 'No pending sync';
+    return 'All changes are synchronized.';
   }, [initialized, metricsAvailable, syncing, progress, counts.failed, counts.conflict, waitingCount, online, upgradeBlocked, serverAvailable, lastError]);
 
   const handleRetry = async () => {
@@ -185,7 +189,7 @@ const OfflineStatusIndicator = () => {
                 Synchronization
               </p>
               <span className="ml-auto max-w-[65%] text-right text-xs text-slate-500">
-                {noPendingChanges ? 'No pending sync' : summary}
+                {noPendingChanges ? 'All changes are synchronized.' : summary}
               </span>
             </div>
             {syncing && (
@@ -200,8 +204,8 @@ const OfflineStatusIndicator = () => {
 
           {serverAvailable === false && (
             <p className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
-              The device is online, but the backend could not be reached. Saved changes remain
-              queued and will retry automatically.
+              Your device is online, but the server is currently unreachable. Saved changes will
+              synchronize automatically when the server becomes available.
             </p>
           )}
           {lastError?.code === 'auth' && (
@@ -236,19 +240,26 @@ const OfflineStatusIndicator = () => {
             <div className="grid grid-cols-2 gap-2">
               <Stat label="Successful" value={formatCount(counts.synced, initialized)} tone="success" />
               <Stat label="Pending" value={formatCount(counts.pending, initialized)} tone="info" />
+              <Stat label="Awaiting confirmation" value={formatCount(counts.awaiting_confirmation, initialized)} tone="warning" />
               <Stat label="Failed" value={formatCount(counts.failed, initialized)} tone="danger" />
               <Stat label="Conflicts" value={formatCount(counts.conflict, initialized)} tone="warning" />
             </div>
 
             {counts.pending > 0 && (
               <p className="rounded-lg border border-brand-blue/20 bg-brand-light px-3 py-2 text-xs text-brand-dark">
-                {counts.pending} change{counts.pending === 1 ? '' : 's'} saved on this device only,
-                awaiting server confirmation.
+                {counts.pending} change{counts.pending === 1 ? '' : 's'} pending. Pending changes will synchronize automatically.
               </p>
             )}
             {counts.offlineDraft > 0 && (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 {counts.offlineDraft} draft{counts.offlineDraft === 1 ? '' : 's'} saved offline — requires online confirmation.
+              </p>
+            )}
+
+            {(counts.awaiting_confirmation || 0) > 0 && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {counts.awaiting_confirmation} operation{counts.awaiting_confirmation === 1 ? '' : 's'} awaiting confirmation.
+                The server will be reconciled using the original operation UUID before retrying.
               </p>
             )}
 
@@ -263,6 +274,16 @@ const OfflineStatusIndicator = () => {
                       <span className="font-medium capitalize">{item.entity}</span>{' '}
                       <span className="text-slate-500">({item.opType} · attempt {item.attempts})</span>
                       <p className="mt-0.5 text-slate-600">{item.message}</p>
+                      {item.retryable && (
+                        <button
+                          type="button"
+                          disabled={!online || retrying}
+                          onClick={() => void retryOperation(item.opId)}
+                          className="mt-1 text-brand-blue underline disabled:opacity-50"
+                        >
+                          Retry operation
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -292,7 +313,7 @@ const OfflineStatusIndicator = () => {
 
             {syncing ? (
               <button type="button" disabled className="inline-flex w-full items-center justify-center rounded-btn bg-brand-blue/70 px-4 py-2 text-sm font-medium text-white">
-                Synchronizing changes...
+                Automatically synchronizing pending changes...
               </button>
             ) : canRetry ? (
               <button

@@ -5,6 +5,7 @@
 
 export const SYNC_STATE = Object.freeze({
   PENDING: 'pending',
+  AWAITING_CONFIRMATION: 'awaiting_confirmation',
   SYNCING: 'syncing',
   SYNCED: 'synced',
   FAILED: 'failed',
@@ -104,12 +105,17 @@ export const dependenciesSatisfied = (op, allOpsById) =>
 
 /** Build the user-facing status summary consumed by the UI. */
 export const summarizeOperations = (ops) => {
-  const counts = { pending: 0, syncing: 0, synced: 0, failed: 0, conflict: 0, total: ops.length };
+  const counts = { pending: 0, awaiting_confirmation: 0, syncing: 0, synced: 0, failed: 0, conflict: 0, total: ops.length };
   for (const op of ops) {
-    if (op.status in counts) counts[op.status] += 1;
+    if (op.status in counts && !(op.status === SYNC_STATE.FAILED && op.lastError?.code === 'awaiting_confirmation')) {
+      counts[op.status] += 1;
+    }
+    if (op.status === SYNC_STATE.FAILED && op.lastError?.code === 'awaiting_confirmation') {
+      counts.awaiting_confirmation += 1;
+    }
   }
   const failed = ops
-    .filter((op) => op.status === SYNC_STATE.FAILED)
+    .filter((op) => op.status === SYNC_STATE.FAILED && op.lastError?.code !== 'awaiting_confirmation')
     .map((op) => ({
       opId: op.opId,
       entity: op.entity,
@@ -128,12 +134,24 @@ export const summarizeOperations = (ops) => {
       code: op.lastError?.code || 'conflict',
       message: op.lastError?.message || 'This record needs review.',
     }));
-  return { counts, failed, conflicts };
+  const awaitingConfirmation = ops
+    .filter((op) => op.status === SYNC_STATE.AWAITING_CONFIRMATION ||
+      (op.status === SYNC_STATE.FAILED && op.lastError?.code === 'awaiting_confirmation'))
+    .map((op) => ({
+      opId: op.opId,
+      entity: op.entity,
+      opType: op.opType,
+      attempts: op.attempts,
+      retryable: op.lastError?.retryable === true,
+      code: op.lastError?.code || 'awaiting_confirmation',
+      message: op.lastError?.message || 'Awaiting server confirmation.',
+    }));
+  return { counts, failed, conflicts, awaitingConfirmation };
 };
 
 export const earliestRetryAt = (ops) => {
   const retries = ops
-    .filter((op) => op.status === SYNC_STATE.FAILED && op.lastError?.retryable === true)
+    .filter((op) => (op.status === SYNC_STATE.FAILED || op.status === SYNC_STATE.AWAITING_CONFIRMATION) && op.lastError?.retryable === true)
     .map((op) => op.nextAttemptAt)
     .filter(Number.isFinite);
   return retries.length ? Math.min(...retries) : null;

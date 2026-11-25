@@ -44,6 +44,26 @@ test('authorized requests bind the token owner and never pass owner metadata as 
   assert.equal('ownerId' in calls[0].options, false);
 });
 
+test('an online-only mutation attempts the server even when navigator reports offline and preserves fetch failures', async () => {
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } });
+  globalThis.fetch = async () => {
+    calls.push({ url: '/users/test/lifecycle' });
+    throw new TypeError('Failed to fetch');
+  };
+  try {
+    const { api } = await loadClient();
+    await assert.rejects(
+      api.post('/users/test/lifecycle', { action: 'invite' }, { offlineMutationType: 'ONLINE_ONLY' }),
+      { name: 'TypeError', code: 'API_TRANSPORT_ERROR', message: 'Failed to fetch' },
+    );
+    assert.equal(calls.length, 1);
+  } finally {
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+    else delete globalThis.navigator;
+  }
+});
+
 test('implicit private requests bind to the active account before awaiting a Supabase token', async () => {
   const { api } = await loadClient(async () => {
     owner = 'owner-b';

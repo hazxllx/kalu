@@ -27,6 +27,7 @@ import {
  */
 
 const isNetworkFailure = (error) => classifySyncError(error).code === SYNC_ERROR.NETWORK;
+const isTemporaryFailure = (error) => classifySyncError(error).retryable === true;
 const startQueuedSync = () => {
   requestSync('after-queue').catch((error) => {
     console.error('Offline synchronization could not be started:', error);
@@ -85,7 +86,7 @@ export const createHouseholdOffline = async ({ ownerId, payload }) => {
       // Only a transport failure falls back to the local queue. Validation (422),
       // duplicate (409), authorization (403) and every other server answer are
       // the server's authoritative response and must surface unchanged.
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) && !isTemporaryFailure(error)) throw error;
     }
   }
 
@@ -156,7 +157,7 @@ export const updateHouseholdOffline = async ({
       });
       return { household: result?.household ?? result, queued: false, source: 'server' };
     } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) && !isTemporaryFailure(error)) throw error;
     }
   }
 
@@ -323,7 +324,7 @@ export const saveMemberMeasurementsOffline = async ({
       const profile = result?.profile ?? result;
       return { profile, queued: false, source: 'server' };
     } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) && !isTemporaryFailure(error)) throw error;
     }
   }
 

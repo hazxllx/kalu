@@ -106,6 +106,14 @@ export const classifySyncError = (error) => {
     if (serverCode === 'DUPLICATE_RECORD') {
       return { code: SYNC_ERROR.DUPLICATE, status, retryable: false, message: DUPLICATE_MESSAGE };
     }
+    if (status === 425) {
+      return {
+        code: SYNC_ERROR.SERVER,
+        status,
+        retryable: true,
+        message: 'The server is still processing an identical operation. Confirmation is pending.',
+      };
+    }
     if (serverCode === 'STALE_REVISION') {
       return {
         code: SYNC_ERROR.CONFLICT,

@@ -16,6 +16,7 @@ import { ownsLock } from './meta.js';
 
 export const DRAFT_STATUS = Object.freeze({
   PENDING: 'pending',
+  AWAITING_CONFIRMATION: 'awaiting_confirmation',
   OFFLINE_DRAFT: 'offline_draft',
   SYNCING: 'syncing',
   SYNCED: 'synced',

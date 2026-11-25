@@ -25,6 +25,7 @@ export const EDITABLE_RESIDENT_FIELDS = new Set([
 ]);
 
 const networkFailure = (error) => classifySyncError(error).code === SYNC_ERROR.NETWORK;
+const temporaryFailure = (error) => classifySyncError(error).retryable === true;
 const triggerSync = () => {
   requestSync('resident-queued').catch((error) => {
     console.error('Resident synchronization could not be started:', error);
@@ -63,7 +64,7 @@ export const createResidentOffline = async ({ ownerId, payload, idempotencyKey =
       await cacheRecord({ entity: 'resident', remoteId: resident.id, ownerId, data: resident, revision: residentRevisionOf(resident) });
       return { resident, queued: false, source: 'server' };
     } catch (error) {
-      if (!networkFailure(error)) throw error;
+      if (!networkFailure(error) && !temporaryFailure(error)) throw error;
     }
   }
 
@@ -142,7 +143,7 @@ export const updateResidentOffline = async ({
         await refreshSyncState();
         return { resident: { id: residentId, ...residentPayload }, queued: true, conflict: true, source: 'local', localId };
       }
-      if (!networkFailure(error)) throw error;
+      if (!networkFailure(error) && !temporaryFailure(error)) throw error;
     }
   }
 

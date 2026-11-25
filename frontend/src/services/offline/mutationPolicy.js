@@ -11,10 +11,10 @@
  *   ONLINE_ONLY     — must happen online; throws immediately if offline
  *                     (account approval, permission changes, critical ops)
  *
- * Each operation's tier is declared in the mutation (e.g., api.post(...,
- * { offlineMutationType: MUTATION_TIER.SAFE_SYNC })). The apiClient enforces
- * it by checking the browser's online status and the operation's tier, then
- * either queuing or rejecting the operation.
+ * Feature workflows declare the appropriate offline behavior before choosing
+ * whether to use the API, queue a safe draft, or reject an offline action.
+ * The API client always attempts the request; `navigator.onLine` alone cannot
+ * establish backend connectivity.
  *
  * BHW household updates are SAFE_SYNC — only the allowed demographic fields
  * can be updated (see SAFE_HOUSEHOLD_UPDATE_FIELDS); any other field triggers
@@ -102,7 +102,8 @@ export const isBrowserOffline = () =>
  * Require online connectivity for a mutation. If the browser is offline and
  * the tier is ONLINE_ONLY, throw immediately.
  *
- * Called by the apiClient for every mutation to enforce the tier policy.
+ * Used by offline workflows that must reject immediately rather than attempt
+ * a server request.
  *
  * @param {'SAFE_SYNC' | 'OFFLINE_DRAFT' | 'ONLINE_ONLY'} [tier]
  * @throws {OfflineActionRequiredError} if browser is offline and tier is ONLINE_ONLY

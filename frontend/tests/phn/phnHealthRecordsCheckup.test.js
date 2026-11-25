@@ -34,7 +34,7 @@ test('PHN defaults use the shared Manila clock and never fabricate a historical 
   const fresh = consultationForm(null, now);
   assert.equal(fresh.consultationDate, '2026-11-22');
   assert.equal(fresh.consultationTime, '00:05');
-  assert.equal(fresh.clinicalIndicators.dangerSignsReviewed, false);
+  assert.equal(fresh.clinicalIndicators.dangerSignsReviewed, undefined);
   const historical = consultationForm({ residentId: 'RES-1', consultationDate: '2020-02-29', consultationTime: null }, now);
   assert.equal(historical.consultationDate, '2020-02-29');
   assert.equal(historical.consultationTime, '');

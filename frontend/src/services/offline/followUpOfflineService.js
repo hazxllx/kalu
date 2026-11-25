@@ -9,6 +9,7 @@ import { MUTATION_TIER, OfflineActionRequiredError } from './mutationPolicy.js';
 import { refreshSyncState, requestSync } from './syncEngine.js';
 
 const isNetworkFailure = (error) => classifySyncError(error).code === SYNC_ERROR.NETWORK;
+const isTemporaryFailure = (error) => classifySyncError(error).retryable === true;
 const startQueuedSync = () => requestSync('after-queue').catch(() => {});
 
 const unwrap = (result) => result?.record ?? result;
@@ -73,7 +74,7 @@ export const listFollowUpsOffline = async ({ ownerId, params, onSource } = {}) =
       ));
       source = 'server';
     } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) && !isTemporaryFailure(error)) throw error;
       loadError = error?.message || 'Follow-ups could not be refreshed from the server.';
     }
   }
@@ -107,7 +108,7 @@ export const createFollowUpOffline = async ({ ownerId, record }) => {
       const result = await followUpsApi.create(serverPayload(record), queueOptions(opId));
       return { record: unwrap(result), queued: false, source: 'server' };
     } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) && !isTemporaryFailure(error)) throw error;
     }
   }
   assertSafeFollowUpPayload(record);
@@ -136,7 +137,7 @@ export const updateFollowUpOffline = async ({ ownerId, followUpId, record }) => 
       const result = await followUpsApi.update(followUpId, serverPayload(record), queueOptions(opId, record));
       return { record: unwrap(result), queued: false, source: 'server' };
     } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) && !isTemporaryFailure(error)) throw error;
     }
   }
   assertSafeFollowUpPayload(record);

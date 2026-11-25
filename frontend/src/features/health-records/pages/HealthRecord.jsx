@@ -965,17 +965,29 @@ export default function HealthRecord() {
 
           {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : activeTab === "referrals" ? renderReferralHistory() : (
             <>
-              <div className="mb-3 flex flex-wrap items-center gap-2.5">
-                <RiskBadge level={consultationRiskLevel(latestRecord?.consultations?.[0])} mediumLabel="Medium" />
-                <h3 className="text-lg font-semibold leading-6 text-brand-ink">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="min-w-0 text-lg font-semibold leading-6 text-brand-ink">
                   Latest Vitals{latestRecord?.consultations?.length ? ` — ${formatDate(latestRecord.consultations[0].date)}` : ""}
                 </h3>
+                <RiskBadge
+                  level={consultationRiskLevel(latestRecord?.consultations?.[0])}
+                  mediumLabel="Medium"
+                  unassessedLabel="Not yet assessed"
+                  className="shrink-0"
+                />
               </div>
-              <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
-                {latestVitals.length === 0 ? (
-                  <Card className="p-5 text-sm text-brand-gray xl:col-span-4">No vitals recorded yet.</Card>
-                ) : (
-                  latestVitals.map((v) => (
+              {latestVitals.length === 0 ? (
+                <Card className="mb-5 rounded-[14px] border-slate-200 bg-white p-7 shadow-none dark:bg-card">
+                  <div className="flex min-h-32 w-full flex-col items-center justify-center rounded-xl border border-dashed border-sky-200 px-5 py-6 text-center dark:border-slate-700">
+                    <h4 className="text-base font-semibold leading-6 text-brand-ink dark:text-foreground">No vitals recorded yet</h4>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-muted-foreground">
+                      Your blood pressure, weight, and other readings appear here after your next health center visit.
+                    </p>
+                  </div>
+                </Card>
+              ) : (
+                <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
+                  {latestVitals.map((v) => (
                     <Card key={v.label} className="rounded-lg p-4 shadow-none">
                       <p className="text-sm font-medium text-brand-gray">{v.label}</p>
                       <p className="mt-1 font-sans text-xl font-semibold leading-6 text-brand-ink">
@@ -983,9 +995,9 @@ export default function HealthRecord() {
                       </p>
                       {v.category && <span className={`mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${bloodPressureBadgeClassName({ category: v.category })}`}>{v.category}</span>}
                     </Card>
-                  ))
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <Card className="h-full rounded-lg p-4 shadow-none sm:p-5">

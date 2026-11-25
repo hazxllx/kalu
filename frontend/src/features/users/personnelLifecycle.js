@@ -73,6 +73,9 @@ export function personnelActions(account, { isAdmin = false, isDelegate = false,
 }
 
 export function personnelActionMessage(action, account) {
+  if (action === "invite" && account?.notification?.status === "sent") {
+    return "Password setup link has been successfully sent to the registered email address.";
+  }
   const prefix = {
     create: isPersonnelRole(account?.roleId || account?.role) ? "Personnel account created." : "Staff account created.", approve: "Approval recorded.", reject: "Rejection recorded.",
     suspend: "Suspension recorded.", reactivate: "Activation choice recorded.",
@@ -83,6 +86,22 @@ export function personnelActionMessage(action, account) {
   const activation = account.approvalStatus === "approved" && account.activationRequested === false
     ? " Activation is withheld." : "";
   return `${prefix} ${PERSONNEL_STATE_META[state || "unknown"].description}${activation} ${notificationMeta(account.notification).message}`;
+}
+
+export function personnelActionFailureMessage(action, error) {
+  if (action !== "invite") return error?.message || "The personnel action could not be completed.";
+
+  const message = String(error?.message || "");
+  const timedOut = error?.name === "AbortError" || /timeout/i.test(message);
+  const connectivityFailure = !timedOut && error?.code === "API_TRANSPORT_ERROR";
+  if (connectivityFailure) {
+    return "Unable to connect to the server. Please check your internet connection and try again.";
+  }
+  if (error?.status === 401 || error?.status === 403 || error?.statusCode === 401 || error?.statusCode === 403
+    || error?.code === "auth" || /Auth(?:Api)?Error/i.test(error?.name || "")) {
+    return message || "Your session cannot perform this action. Sign in again and retry.";
+  }
+  return "Unable to send the password setup email. Please try again.";
 }
 
 export function legacyApprovalMessage(name, result) {

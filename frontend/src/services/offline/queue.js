@@ -15,6 +15,14 @@ import { MUTATION_TIER, assertQueueableMutation } from './mutationPolicy.js';
 
 const nowMs = () => Date.now();
 
+const scheduleAutomaticSync = () => {
+  void import('./syncEngine.js')
+    .then(({ requestSync, refreshSyncState }) =>
+      refreshSyncState().finally(() => requestSync('automatic-after-local-write')),
+    )
+    .catch((error) => console.error('[kalusagap/offline] Could not schedule automatic synchronization.', error));
+};
+
 /**
  * Queue a locally created record.
  *
@@ -69,6 +77,7 @@ export const queueCreate = async ({
       assertCurrentOwner(isOwnerCurrent);
     }),
   );
+  scheduleAutomaticSync();
   return { localId, operation: op, draft: { ...draft, data } };
 };
 
@@ -130,6 +139,7 @@ export const queueUpdate = async ({
       assertCurrentOwner(isOwnerCurrent);
     }),
   );
+  scheduleAutomaticSync();
   return { localId, operation: op, draft: { ...draft, data } };
 };
 

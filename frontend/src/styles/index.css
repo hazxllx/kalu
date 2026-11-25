@@ -1301,12 +1301,27 @@
 .supervisor-shell .consultation-records-grid th:nth-child(3),
 .supervisor-shell .consultation-records-grid td:nth-child(3) { width: 20%; }
 .supervisor-shell .consultation-records-grid th:nth-child(4),
-.supervisor-shell .consultation-records-grid td:nth-child(4) { width: 20%; }
+.supervisor-shell .consultation-records-grid td:nth-child(4) { width: 14%; }
 .supervisor-shell .consultation-records-grid th:nth-child(5),
 .supervisor-shell .consultation-records-grid td:nth-child(5) { width: 16%; }
 .supervisor-shell .consultation-records-grid th:nth-child(6),
-.supervisor-shell .consultation-records-grid td:nth-child(6) { width: 6%; text-align: center; }
-.supervisor-shell .consultation-records-grid th:nth-child(6) { text-align: center; }
+.supervisor-shell .consultation-records-grid td:nth-child(6) {
+  width: 8%;
+  min-width: 5rem;
+  padding-right: 0.5rem;
+  padding-left: 0.5rem;
+  text-align: center;
+}
+.supervisor-shell .consultation-records-grid th:nth-child(6) {
+  width: 8%;
+  min-width: 5rem;
+  padding-right: 0.5rem;
+  padding-left: 0.5rem;
+  text-align: center;
+}
+.supervisor-shell .consultation-records-grid .consultation-records-actions-cell > div {
+  width: 100%;
+}
 .supervisor-shell .consultation-records-grid td:first-child p,
 .supervisor-shell .consultation-records-grid td:nth-child(3) span {
   overflow: hidden;

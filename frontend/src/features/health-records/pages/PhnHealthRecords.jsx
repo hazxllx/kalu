@@ -584,7 +584,7 @@ export default function PhnHealthRecords() {
           disabled={editor === "edit" || busy}
           value={form.residentId}
           onChange={(residentId) => {
-            setForm((current) => ({ ...current, residentId, clinicalContext: { pregnancyStatus: "unknown", existingConditions: [] }, clinicalIndicators: { dangerSignsReviewed: false }, maternal: null }));
+            setForm((current) => ({ ...current, residentId, clinicalContext: { pregnancyStatus: "unknown", existingConditions: [] }, clinicalIndicators: {}, maternal: null }));
             setErrors((current) => ({ ...current, residentId: "" }));
           }}
           options={[

@@ -466,9 +466,8 @@ begin
     new.bmi := round(new.weight_kg / ((new.height_cm / 100) * (new.height_cm / 100)),1);
     if new.bmi not between 3 and 200 then raise exception 'Calculated BMI is outside the plausible range' using errcode='23514'; end if;
     new.bmi_category := case when new.bmi < 18.5 then 'Underweight' when new.bmi < 25 then 'Normal' when new.bmi < 30 then 'Overweight' else 'Obese' end;
-    if length(btrim(coalesce(new.consultation_details->>'findings',''))) = 0
-      or new.consultation_details#>'{clinicalIndicators,dangerSignsReviewed}' is distinct from 'true'::jsonb then
-      raise exception 'Clinical findings and confirmed danger-sign review are required' using errcode='23514';
+    if length(btrim(coalesce(new.consultation_details->>'findings',''))) = 0 then
+      raise exception 'Clinical findings are required' using errcode='23514';
     end if;
     if new.medications is not null and (tg_op = 'INSERT' or new.medications is distinct from old.medications) then
       if jsonb_typeof(new.medications) <> 'array' or jsonb_array_length(new.medications) > 50 then raise exception 'Use up to 50 structured prescriptions' using errcode='23514'; end if;

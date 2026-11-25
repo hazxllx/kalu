@@ -20,6 +20,7 @@ const inputClass = (error) =>
  *   disabled?: boolean,
  *   findingsLabel?: string,
  *   recommendationsRequired?: boolean
+ *   showDiagnosis?: boolean
  * }} props
  */
 export default function ConsultationClinicalFields({
@@ -35,12 +36,13 @@ export default function ConsultationClinicalFields({
   disabled = false,
   findingsLabel = "Clinical Findings",
   recommendationsRequired = false,
+  showDiagnosis = true,
 }) {
   return (
     <>
-      <section className="mb-4" aria-label="Clinical findings and diagnosis">
+      <section className="mb-4" aria-label={showDiagnosis ? "Clinical findings and diagnosis" : "Clinical findings"}>
         <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue">Clinical Findings</h4>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className={showDiagnosis ? "grid gap-3 sm:grid-cols-2" : "grid gap-3"}>
           <div>
             <label htmlFor="consultation-clinical-findings" className="mb-1 block text-xs text-brand-gray">
               {findingsLabel} <span className="text-brand-danger">*</span>
@@ -58,20 +60,22 @@ export default function ConsultationClinicalFields({
             />
             {errors.findings && <p className="mt-1 text-xs text-brand-danger" role="alert">{errors.findings}</p>}
           </div>
-          <div>
-            <label htmlFor="consultation-diagnosis" className="mb-1 block text-xs text-brand-gray">Diagnosis / Assessment</label>
-            <textarea
-              id="consultation-diagnosis"
-              rows={2}
-              disabled={disabled}
-              value={diagnosis}
-              onChange={(event) => onDiagnosisChange(event.target.value)}
-              placeholder="Clinical diagnosis or assessment"
-              aria-invalid={Boolean(errors.diagnosis)}
-              className={`${inputClass(errors.diagnosis)} resize-y`}
-            />
-            {errors.diagnosis && <p className="mt-1 text-xs text-brand-danger" role="alert">{errors.diagnosis}</p>}
-          </div>
+          {showDiagnosis && (
+            <div>
+              <label htmlFor="consultation-diagnosis" className="mb-1 block text-xs text-brand-gray">Diagnosis / Assessment</label>
+              <textarea
+                id="consultation-diagnosis"
+                rows={2}
+                disabled={disabled}
+                value={diagnosis}
+                onChange={(event) => onDiagnosisChange(event.target.value)}
+                placeholder="Clinical diagnosis or assessment"
+                aria-invalid={Boolean(errors.diagnosis)}
+                className={`${inputClass(errors.diagnosis)} resize-y`}
+              />
+              {errors.diagnosis && <p className="mt-1 text-xs text-brand-danger" role="alert">{errors.diagnosis}</p>}
+            </div>
+          )}
         </div>
       </section>
       <section className="mb-4" aria-label="Medications and prescriptions">

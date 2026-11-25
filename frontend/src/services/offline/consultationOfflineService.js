@@ -251,7 +251,19 @@ const persistConsultationCreate = async ({ ownerId, payload, localId = null }) =
 };
 
 export const draftToDisplay = (draft) => {
-  const syncStatus = { pending: 'Pending Sync', syncing: 'Syncing', failed: 'Sync Failed', conflict: 'Needs Review' }[draft.status] || 'Saved Offline';
+  if (draft.status === DRAFT_STATUS.FAILED && draft.lastError?.code === 'awaiting_confirmation') {
+    const syncStatus = 'Awaiting server confirmation';
+    return { ...draft.data, id: draft.localRef || draft.localId, localId: draft.localId,
+      offline: true, status: syncStatus, syncStatus, queueStatus: DRAFT_STATUS.FAILED,
+      lastError: draft.lastError || null, canDiscard: false };
+  }
+  const syncStatus = {
+    pending: 'Pending Sync',
+    awaiting_confirmation: 'Awaiting server confirmation',
+    syncing: 'Syncing',
+    failed: 'Sync Failed',
+    conflict: 'Needs Review',
+  }[draft.status] || 'Saved Offline';
   return { ...draft.data, id: draft.localRef || draft.localId, localId: draft.localId,
     offline: true, status: syncStatus, syncStatus, queueStatus: draft.status, lastError: draft.lastError || null,
     canDiscard: draft.status === DRAFT_STATUS.PENDING && !draft.consultationAttemptedAt && !draft.legacyConsultationDraft };
@@ -269,7 +281,7 @@ export const saveConsultationOffline = async ({ ownerId, payload, localId = null
   if (typeof create !== 'function') throw new Error('A consultation create function is required.');
   validateClinicalPayload(payload);
   const queued = await persistConsultationCreate({ ownerId, payload, localId });
-  await refreshQueue();
+  await refreshQueue(true);
   if (online()) return submitConsultationDraft({ ownerId, localId: queued.localId, create, online });
   return { record: draftToDisplay(queued.draft), queued: true, source: 'local', localId: queued.localId };
 };

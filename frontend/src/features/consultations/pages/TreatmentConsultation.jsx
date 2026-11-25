@@ -99,7 +99,6 @@ const emptyForm = (now = new Date()) => ({
   weight: "",
   oxygenSaturation: "",
   findings: "",
-  diagnosis: "",
   treatmentGiven: "",
   medicationPrescribed: "",
   medications: [],
@@ -573,7 +572,6 @@ export default function TreatmentConsultation() {
       weight: v.weightKg ?? record.weight ?? "",
       oxygenSaturation: v.o2sat ?? record.oxygenSaturation ?? "",
       findings: record.findings || "",
-      diagnosis: record.diagnosis || "",
       treatmentGiven: record.treatmentGiven || "",
       medicationPrescribed: record.medicationPrescribed || "",
       medications: Array.isArray(record.medications) ? record.medications : [],
@@ -669,9 +667,6 @@ export default function TreatmentConsultation() {
       || (maternalInfoProtected && hasMaternalInformation(formData.maternal)))) {
       next.serviceId = "Select a Prenatal / Maternal health service to save the entered maternal information.";
     }
-    if (!editingId && formData.clinicalIndicators?.dangerSignsReviewed !== true) {
-      next["clinicalIndicators.dangerSignsReviewed"] = "Confirm that danger signs were assessed and any positive findings were recorded.";
-    }
     if (!editingId && !formData.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
     if (!editingId && !formData.findings.trim()) next.findings = "Record the clinical findings from this consultation.";
     if (formData.treatmentGiven.length > 10000) next.treatmentGiven = "Use 10,000 characters or fewer for treatment provided.";
@@ -750,7 +745,7 @@ export default function TreatmentConsultation() {
           weightKg: formData.weight,
           o2sat: formData.oxygenSaturation,
         },
-        impression: formData.diagnosis || formData.findings || "",
+        impression: formData.findings || "",
         recommendations: formData.adviceGiven || "",
         clinicalNotes: saved?.remarks || "",
         treatmentVisitId: saved?.id || "",
@@ -856,6 +851,9 @@ export default function TreatmentConsultation() {
         return;
       }
       const data = restored.data || {};
+      const draftData = { ...data };
+      delete draftData.diagnosis;
+      delete draftData.clinicalFindingsDiagnosis;
       const resident =
         residentOptions.find((r) => r.id === data.residentId) ||
         (data.residentId ? { id: data.residentId, name: data.residentId, barangay: "" } : null);
@@ -869,9 +867,9 @@ export default function TreatmentConsultation() {
       clinicalInputResident.current = resident?.id || null;
       setFormData({ 
         ...emptyForm(),
-        ...data,
-        ...clinical,
-        clinicalIndicators: data.clinicalIndicators || { dangerSignsReviewed: false },
+        ...draftData,
+        findings: clinical.findings,
+        clinicalIndicators: data.clinicalIndicators || {},
         clinicalContext: { ...emptyForm().clinicalContext, ...(data.clinicalContext || {}) },
         maternal: { ...emptyForm().maternal, ...(data.maternal || {}) },
       });
@@ -952,8 +950,29 @@ export default function TreatmentConsultation() {
     { key: "service", label: "Health Service" },
     { key: "risk", label: "Risk Level" },
     { key: "followUp", label: "Follow-up" },
-    { key: "actions", label: "Actions" },
+    { key: "actions", label: "Actions", align: "center", className: "consultation-records-actions-cell" },
   ];
+  const serviceLabelFor = (row) =>
+    consultationServiceName(row) || healthServices.find((service) => service.id === row.serviceId)?.name || "";
+  const renderRecordActions = (row, presentation) => {
+    const menuId = `${presentation}:${row.id}`;
+    return (
+      <div className="flex items-center justify-center">
+        <ActionMenu
+          open={openActionMenu === menuId}
+          onOpenChange={(open) => setOpenActionMenu(open ? menuId : null)}
+        >
+          <ActionMenuTrigger label={`Actions for ${row.resident?.name || "consultation"}`} />
+          <ActionMenuContent aria-label={`Actions for ${row.resident?.name || "consultation"}`}>
+            <ActionMenuItem icon={Eye} onSelect={() => openRecord(row)}>View Details</ActionMenuItem>
+            {canEditConsultation && !consultationDateIsPast(row) && (
+              <ActionMenuItem icon={FileText} onSelect={() => openRecord(row, true)}>Edit Consultation</ActionMenuItem>
+            )}
+          </ActionMenuContent>
+        </ActionMenu>
+      </div>
+    );
+  };
 
   /* ------------------------- Entry form (unchanged style) ------------------------- */
   const renderForm = () => (
@@ -1366,10 +1385,9 @@ export default function TreatmentConsultation() {
         </div>
 
         <ConsultationClinicalFields
+          showDiagnosis={false}
           findings={formData.findings}
           onFindingsChange={(findings) => setFormData((current) => ({ ...current, findings }))}
-          diagnosis={formData.diagnosis}
-          onDiagnosisChange={(diagnosis) => setFormData((current) => ({ ...current, diagnosis }))}
           medications={formData.medications}
           onMedicationsChange={(medications) => setFormData((current) => ({ ...current, medications }))}
           recommendations={formData.adviceGiven}
@@ -1380,37 +1398,6 @@ export default function TreatmentConsultation() {
           errors={errors}
           disabled={Boolean(reviewLocalId)}
         />
-
-        <div className={`mb-4 rounded-lg border p-3 sm:p-4 ${errors["clinicalIndicators.dangerSignsReviewed"] ? "border-brand-danger/50 bg-red-50/50 dark:bg-red-950/20" : "border-brand-border bg-brand-bg/50 dark:bg-card-nested"}`}>
-          <label htmlFor="danger-signs-reviewed" className="flex cursor-pointer items-start gap-3">
-            <input
-              id="danger-signs-reviewed"
-              type="checkbox"
-              checked={formData.clinicalIndicators?.dangerSignsReviewed === true}
-              disabled={Boolean(reviewLocalId)}
-              onChange={(event) => setFormData((current) => ({
-                ...current,
-                clinicalIndicators: { ...(current.clinicalIndicators || {}), dangerSignsReviewed: event.target.checked },
-              }))}
-              aria-invalid={Boolean(errors["clinicalIndicators.dangerSignsReviewed"])}
-              aria-describedby={errors["clinicalIndicators.dangerSignsReviewed"] ? "danger-signs-reviewed-error" : "danger-signs-reviewed-help"}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-blue"
-            />
-            <span className="min-w-0">
-              <span className="block text-sm font-medium text-brand-ink dark:text-foreground">
-                Danger-sign screening completed <span className="text-brand-danger" aria-hidden="true">*</span>
-              </span>
-              <span id="danger-signs-reviewed-help" className="mt-1 block text-xs leading-5 text-brand-gray dark:text-muted-foreground">
-                Confirm that you assessed the resident for danger signs and recorded any positive findings in the clinical findings above.
-              </span>
-            </span>
-          </label>
-          {errors["clinicalIndicators.dangerSignsReviewed"] && (
-            <p id="danger-signs-reviewed-error" className="mt-2 text-xs text-brand-danger" role="alert">
-              {errors["clinicalIndicators.dangerSignsReviewed"]}
-            </p>
-          )}
-        </div>
 
         <div className="mb-4">
           <section className="mt-3" aria-label="Follow-up and referral">
@@ -1528,7 +1515,7 @@ export default function TreatmentConsultation() {
         {/* Filter Controls */}
         <div className="mb-5">
           {/* Unified Filter Row: Search + Date Range + Risk + Follow-up + Sort */}
-          <div className="mb-3 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mb-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {/* Search - 30% */}
             <div style={{ minWidth: 0 }}>
               <label htmlFor="filter-search" className="block text-xs text-brand-gray mb-1.5 font-medium">Search</label>
@@ -1704,11 +1691,12 @@ export default function TreatmentConsultation() {
         ) : (
           <>
             <DataTable
-              className="consultation-records-table"
+              className={`consultation-records-table ${isHealthSupervisor ? "hidden xl:block" : ""}`}
               tableClassName="consultation-records-grid"
               fitContainer
               compact={isHealthSupervisor}
-              mobileBreakpoint={isHealthSupervisor ? "lg" : "md"}
+              mobileBreakpoint={isHealthSupervisor ? "xl" : "md"}
+              mobileCards={!isHealthSupervisor}
               columns={columns}
               rows={displayedRecords}
               dense={isHealthSupervisor}
@@ -1727,8 +1715,7 @@ export default function TreatmentConsultation() {
                   );
                 if (key === "date") return <span className="whitespace-nowrap text-xs tabular-nums text-brand-ink">{formatDate(row.consultationDate)}</span>;
                 if (key === "service") {
-                  const service = healthServices.find((s) => s.id === row.serviceId);
-                  const label = consultationServiceName(row) || service?.name || "";
+                  const label = serviceLabelFor(row);
                   return label ? (
                     <span className="inline-flex max-w-[180px] items-center truncate rounded-full bg-brand-light px-2.5 py-1 text-xs font-medium text-brand-blue" title={label}>
                       {label}
@@ -1747,27 +1734,59 @@ export default function TreatmentConsultation() {
                   return <StatusBadge value={followUp.status} className="whitespace-nowrap px-2 py-0.5 text-[11px]" />;
                 }
                 if (key === "actions") {
-                  const menuId = `${presentation}:${row.id}`;
-                  return (
-                    <div className="flex justify-center">
-                      <ActionMenu
-                        open={openActionMenu === menuId}
-                        onOpenChange={(open) => setOpenActionMenu(open ? menuId : null)}
-                      >
-                        <ActionMenuTrigger label={`Actions for ${row.resident?.name || "consultation"}`} />
-                        <ActionMenuContent aria-label={`Actions for ${row.resident?.name || "consultation"}`}>
-                          <ActionMenuItem icon={Eye} onSelect={() => openRecord(row)}>View Details</ActionMenuItem>
-                          {canEditConsultation && !consultationDateIsPast(row) && (
-                            <ActionMenuItem icon={FileText} onSelect={() => openRecord(row, true)}>Edit Consultation</ActionMenuItem>
-                          )}
-                        </ActionMenuContent>
-                      </ActionMenu>
-                    </div>
-                  );
+                  return renderRecordActions(row, presentation);
                 }
                 return row[key];
               }}
             />
+            {isHealthSupervisor && (
+              <div className="space-y-3 xl:hidden">
+                {displayedRecords.map((row) => {
+                  const service = serviceLabelFor(row);
+                  const followUp = consultationFollowUp(row);
+                  return (
+                    <article key={row.id} className="rounded-xl border border-brand-border bg-white p-3.5 shadow-sm">
+                      <header className="flex min-w-0 items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-light text-xs font-semibold text-brand-blue" aria-hidden="true">
+                          {initialsOf(row.resident?.name)}
+                        </div>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <p className="break-words text-sm font-semibold leading-5 text-brand-ink">
+                            {row.resident?.name || "Name not recorded"}
+                          </p>
+                          <p className="mt-0.5 break-words text-xs leading-4 text-brand-gray">
+                            {row.resident?.barangay || "Barangay not recorded"}
+                          </p>
+                        </div>
+                        <div className="shrink-0">{renderRecordActions(row, "card")}</div>
+                      </header>
+                      <dl className="mt-3 grid min-w-0 grid-cols-2 gap-x-3 gap-y-3 border-t border-brand-border/70 pt-3">
+                        <div className="min-w-0">
+                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-brand-gray">Consultation Date</dt>
+                          <dd className="mt-1 break-words text-xs leading-4 text-brand-ink">{formatDate(row.consultationDate)}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-brand-gray">Risk Level</dt>
+                          <dd className="mt-1"><RiskBadge level={consultationRisk(row)} mediumLabel="Medium" /></dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-brand-gray">Health Service</dt>
+                          <dd className="mt-1 break-words text-xs leading-4 text-brand-ink">
+                            {service || (row.serviceId || row.healthServiceId ? "Registered service unavailable" : "No service recorded")}
+                          </dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-brand-gray">Follow-up Status</dt>
+                          <dd className="mt-1">
+                            <StatusBadge value={followUp.status} className="whitespace-normal px-2 py-0.5 text-[11px]" />
+                          </dd>
+                        </div>
+                      </dl>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
             {!focusedId && filteredRecordRows.length > 0 && <TablePagination total={filteredRecordRows.length} page={recordPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }} className="mt-3" />}
             {focusedId ? null : loading ? (
               <p className="py-10 text-center text-sm text-brand-gray">Loading consultations...</p>

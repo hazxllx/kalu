@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
  * 
  * Features:
  * - Desktop: Standard table layout with horizontal scroll
- * - Mobile (<768px): Automatic conversion to stacked card layout
+ * - Mobile: Automatic conversion to stacked card layout
  * - Configurable mobile behavior via mobileCards prop
  * - Support for custom cell rendering
  * - Smooth animations on row appearance
@@ -37,8 +37,10 @@ export default function DataTable({
   emptyText = "No records found.",
   striped = false,
 }) {
-  const responsiveTableClass = mobileCards ? (mobileBreakpoint === "lg" ? "hidden lg:table" : "hidden md:table") : "";
-  const responsiveCardsClass = mobileBreakpoint === "lg" ? "lg:hidden" : "md:hidden";
+  const responsiveTableClass = mobileCards
+    ? (mobileBreakpoint === "xl" ? "hidden xl:table" : mobileBreakpoint === "lg" ? "hidden lg:table" : "hidden md:table")
+    : "";
+  const responsiveCardsClass = mobileBreakpoint === "xl" ? "xl:hidden" : mobileBreakpoint === "lg" ? "lg:hidden" : "md:hidden";
   const cellValue = (column, row, presentation) => column.render
     ? column.render(row, presentation)
     : renderCell ? renderCell(column.key, row, presentation) : row[column.key];

@@ -1008,9 +1008,6 @@ export const consultationFieldErrors = (payload = {}, { requireResident = false,
   if (requireClinical) {
     required('chiefComplaint', 'Chief complaint is required.');
     if (!normalizeClinicalFindings(payload).findings) errors.findings = 'Clinical findings are required.';
-    if (payload.clinicalIndicators?.dangerSignsReviewed !== true) {
-      errors['clinicalIndicators.dangerSignsReviewed'] = 'Confirm danger-sign screening and record any positive findings before saving.';
-    }
   }
   for (const [field, label] of [
     ['treatmentGiven', 'Treatment provided'],

@@ -1,10 +1,5 @@
 import { supabase } from '../../lib/supabase.js';
 import { resolveApiBaseUrl } from './apiBaseUrl.js';
-import {
-  MUTATION_TIER,
-  OfflineActionRequiredError,
-  requireOnlineForMutation,
-} from '../offline/mutationPolicy.js';
 import { invalidateVerifiedPermissions } from '../accessControl/permissionCache.js';
 import { captureOwnerGuard, assertCurrentOwner, getOfflineOwnerId } from '../offline/db.js';
 import { performanceMonitor } from '../../utils/performanceMonitor.js';
@@ -38,7 +33,7 @@ const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.en
  * @property {AbortSignal} [signal]
  * @property {RequestCache} [cache]
  * @property {'blob'} [responseType]
- * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType]
+ * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType] Caller policy metadata; not used to infer connectivity.
  * @property {string} [ownerId] Authenticated account whose queued operation this request belongs to.
  * @property {string} [dedupeKey] Optional caller-supplied scope key for GET deduplication.
  * @property {number} [timeout] Request timeout in milliseconds (default: 30000)
@@ -57,6 +52,15 @@ class ApiError extends Error {
     super(message);
     this.status = status;
     this.payload = payload;
+  }
+}
+
+class ApiTransportError extends TypeError {
+  constructor(cause) {
+    super(cause?.message || 'The API request could not reach the server.');
+    this.name = 'TypeError';
+    this.code = 'API_TRANSPORT_ERROR';
+    this.cause = cause;
   }
 }
 
@@ -118,9 +122,9 @@ async function request(
   path,
   { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, timeout = 30000, signal, dedupeKey, responseType, ...rest } = {},
 ) {
-  const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
-  const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
-  if (isMutation) requireOnlineForMutation(mutationType);
+  // `navigator.onLine` is only a hint; let the API request establish whether
+  // this client can actually reach the server.
+  void offlineMutationType;
 
   // Request deduplication for GET requests
   const requestKey = getRequestKey(path, method, params, body, dedupeKey);
@@ -150,8 +154,8 @@ async function request(
 
     let response;
     const startTime = performance.now();
+    if (ownerGuard) assertCurrentOwner(ownerGuard);
     try {
-      if (ownerGuard) assertCurrentOwner(ownerGuard);
       response = await fetch(buildUrl(path, params), {
         method,
         credentials: 'include',
@@ -164,18 +168,21 @@ async function request(
         ...(effectiveSignal ? { signal: effectiveSignal } : {}),
         ...rest,
       });
-      
-      // Record API performance metric
-      const duration = performance.now() - startTime;
-      performanceMonitor.recordApiMetric(path, method, duration, response.status);
     } catch (error) {
-      if (error?.status === 401 || error?.code === 'auth') throw error;
-      if (isMutation && mutationType === MUTATION_TIER.ONLINE_ONLY) {
-        if (error?.name === 'AbortError') throw error;
-        throw new OfflineActionRequiredError();
-      }
-      throw error;
+      console.warn('[kalusagap/sync] transport failure', {
+        event: 'api_transport_failure',
+        endpoint: path,
+        method,
+        operationUuid: headers?.['Idempotency-Key'] || null,
+        errorCode: error?.code || error?.name || 'NETWORK',
+      });
+      if (error?.name === 'AbortError') throw error;
+      throw new ApiTransportError(error);
     }
+
+    // Record API performance metric
+    const duration = performance.now() - startTime;
+    performanceMonitor.recordApiMetric(path, method, duration, response.status);
 
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = responseType === 'blob' && response.ok
@@ -186,6 +193,15 @@ async function request(
   if (ownerGuard) assertCurrentOwner(ownerGuard);
 
   if (!response.ok) {
+    console.warn('[kalusagap/sync] HTTP rejection', {
+      event: 'api_http_rejection',
+      endpoint: path,
+      method,
+      status: response.status,
+      operationUuid: headers?.['Idempotency-Key'] || null,
+      errorCode: isJson ? payload?.error?.code || payload?.code || null : null,
+      message: isJson ? payload?.error?.message || payload?.message || null : null,
+    });
     if ((response.status === 401 || response.status === 403) && userId) {
       void invalidateVerifiedPermissions(userId)
         .catch((error) => console.error('[kalusagap/permissions] Could not clear rejected permissions.', error))

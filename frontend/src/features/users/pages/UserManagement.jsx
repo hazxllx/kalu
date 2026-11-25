@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { usersApi } from "@/services/api";
 import {
   isPersonnelRole, PERSONNEL_STATE_META, personnelState, notificationMeta,
-  personnelActions, personnelActionMessage, personnelOperation, personnelCreationOperation, clearPersonnelCreationOperation,
+  personnelActions, personnelActionMessage, personnelActionFailureMessage, personnelOperation, personnelCreationOperation, clearPersonnelCreationOperation,
   stationAssignmentPatch, stationAssignmentError, coverageAssignmentPatch, lifecyclePayload, auditActorLabel,
 } from "../personnelLifecycle";
 import {
@@ -640,6 +640,7 @@ function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onC
   const [newInviteConfirmed, setNewInviteConfirmed] = useState(false);
   const [validationError, setValidationError] = useState("");
   const operation = useRef(null);
+  const submitting = useRef(false);
   const meta = LIFECYCLE_ACTIONS[action];
   const needsReason = action === "reject" || action === "suspend";
   const activationChoice = action === "approve" || action === "reactivate";
@@ -651,17 +652,20 @@ function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onC
     invite: "Send a fresh password-setup email to this account. This does not create another account or change its approval. Use the separate retry action only when the latest email definitively failed.",
     retry_email: "Retry only a definitive email failure. This does not create another account or change its approval. An uncertain send must be reviewed manually instead.",
   };
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || submitting.current) return;
+    submitting.current = true;
     try {
       if (action === "invite" && !newInviteConfirmed) throw new Error("Confirm that you want to send a fresh password-setup email.");
       const payload = lifecyclePayload(action, { reason, activate: canActivate && activate });
       operation.current = personnelOperation(operation.current, payload);
       setValidationError("");
-      onSave({ ...payload, operationId: operation.current.id });
+      await onSave({ ...payload, operationId: operation.current.id });
     } catch (failure) {
       setValidationError(failure.message);
+    } finally {
+      submitting.current = false;
     }
   };
   return (
@@ -688,7 +692,7 @@ function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onC
         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
           <button type="button" disabled={busy} onClick={onClose} className="rounded-btn px-3 py-2 text-sm text-brand-gray hover:bg-brand-bg disabled:opacity-60">Cancel</button>
           <button type="submit" disabled={busy} className={`inline-flex items-center gap-2 rounded-btn px-4 py-2 text-sm font-medium text-white disabled:opacity-60 ${meta.danger ? "bg-brand-danger hover:bg-brand-danger/90" : "bg-brand-blue hover:bg-brand-dark"}`}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? "Saving..." : meta.label}
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? action === "invite" ? "Sending..." : "Saving..." : meta.label}
           </button>
         </div>
       </form>
@@ -1280,18 +1284,39 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
 
   const saveLifecycle = async (payload) => {
     if (!lifecycleTarget || busy) return;
+    const target = lifecycleTarget.target;
     setBusy(true);
     setActionError("");
+    let result;
     try {
-      const result = await usersApi.lifecycle(lifecycleTarget.target.id, payload);
-      setLifecycleTarget(null);
-      await Promise.all([load(), loadSummary()]);
-      showToast(personnelActionMessage(payload.action, result?.user));
+      result = await usersApi.lifecycle(target.id, payload);
     } catch (error) {
-      setActionError(error?.message || "The personnel action could not be completed.");
+      if (payload.action === "invite" && error?.code === "API_TRANSPORT_ERROR") {
+        try {
+          const latest = await usersApi.get(target.id);
+          const notification = latest?.user?.notification;
+          if (notification?.status === "sent" && notification.id && notification.id !== target.notification?.id) {
+            result = latest;
+          }
+        } catch (reconciliationError) {
+          console.warn("[account-management] Could not verify password setup email status after a transport failure.", reconciliationError);
+        }
+      }
+      if (!result) setActionError(personnelActionFailureMessage(payload.action, error));
     } finally {
       setBusy(false);
     }
+    if (!result?.user || (payload.action === "invite" && result.user.notification?.status !== "sent")) {
+      setActionError(personnelActionFailureMessage(payload.action, new Error("The server did not confirm password setup email acceptance.")));
+      return;
+    }
+
+    setLifecycleTarget(null);
+    showToast(personnelActionMessage(payload.action, result?.user));
+    // Refreshes are independent of the completed lifecycle action. Their
+    // errors must never replace a confirmed email-delivery result.
+    void load();
+    void loadSummary();
   };
 
   const handleConfirm = async () => {

@@ -112,16 +112,16 @@ test('shared BP safety requires complete plausible readings and escalates sympto
   }
 });
 
-test('no flags is incomplete without explicit review and assessable BP, not a negative clinical finding', () => {
+test('no flags with assessable BP is low risk; missing measurements remain incomplete', () => {
   const vitals = { bp: '120/80' };
   assert.equal(assessClinicalEncounter().status, 'incomplete');
   for (const dangerSignsReviewed of [undefined, false, 'true', 1]) {
     const result = assessClinicalEncounter({ vitals, indicators: { age: 30, dangerSignsReviewed } });
-    assert.equal(result.level, null);
-    assert.equal(result.status, 'incomplete');
+    assert.equal(result.level, 'Low');
+    assert.equal(result.status, 'assessed');
     assert.equal(result.referralEvaluationRequired, false);
     assert.equal(result.urgency, null);
-    assert.deepEqual(result.reasons, [{ ruleId: 'danger_sign_review_missing', reference: 'DOH_EMERGENCY' }]);
+    assert.deepEqual(result.reasons, [{ ruleId: 'no_matching_encounter_risk_rule', reference: 'DOH_PRIMARY' }]);
   }
   const reviewedAdult = { age: 30, dangerSignsReviewed: true };
   for (const vitals of [{}, { systolic: 120 }, { bp: 'invalid' }, { bp: '80/120' }]) {

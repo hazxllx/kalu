@@ -34,7 +34,7 @@ export const consultationForm = (record = null, now = new Date()) => {
     consultationTime: record ? value(record.consultationTime ?? details.consultationTime) : local.time,
     followUpRequired: 'No', referralRequired: 'No',
     medications: structuredClone(record?.medications ?? details.medications ?? []),
-    clinicalIndicators: structuredClone(record?.clinicalIndicators ?? details.clinicalIndicators ?? (record ? {} : { dangerSignsReviewed: false })),
+    clinicalIndicators: structuredClone(record?.clinicalIndicators ?? details.clinicalIndicators ?? {}),
     clinicalContext: {
       pregnancyStatus: submitted?.pregnancyStatus || (savedContext?.pregnancy?.isPregnant ? 'pregnant' : savedContext?.pregnancy?.isPostpartum ? 'postpartum' : 'unknown'),
       existingConditions: (submitted?.existingConditions || []).map(consultationCondition),
