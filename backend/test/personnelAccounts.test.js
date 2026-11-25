@@ -275,24 +275,43 @@ test('approved administrator creation confirms its outbox email inline', async (
   });
 });
 
-test('production exposes only the safe partial-account email delivery message', () => {
+test('production exposes safe invitation delivery guidance but masks unexpected provider errors', () => {
   const previous = env.isProduction;
   env.isProduction = true;
   try {
-    const response = {
-      statusCode: null,
-      body: null,
-      status(code) { this.statusCode = code; return this; },
-      json(body) { this.body = body; return this; },
+    const respond = (error) => {
+      const response = {
+        statusCode: null,
+        body: null,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; },
+      };
+      errorHandler(error, { path: '/api/users', method: 'POST', requestId: 'test' }, response, () => {});
+      return response;
     };
-    const error = new ApiError(
+    const createdError = new ApiError(
       503,
       'The account was created, but its invitation email was not confirmed (SMTP_EAUTH). Use Resend invitation. Do not create another account.',
     ).withCode('ACCOUNT_CREATED_EMAIL_FAILED');
-    errorHandler(error, { path: '/api/users', method: 'POST', requestId: 'test' }, response, () => {});
-    assert.equal(response.statusCode, 503);
-    assert.match(response.body.error.message, /account was created/i);
-    assert.equal(response.body.error.code, 'ACCOUNT_CREATED_EMAIL_FAILED');
+    const createdResponse = respond(createdError);
+    assert.equal(createdResponse.statusCode, 503);
+    assert.match(createdResponse.body.error.message, /account was created/i);
+    assert.equal(createdResponse.body.error.code, 'ACCOUNT_CREATED_EMAIL_FAILED');
+
+    const resendMessage = 'The password setup invitation was not confirmed (SMTP_EAUTH). Correct the email configuration, then use Resend setup link again. This account already exists; do not create another account.';
+    const resendResponse = respond(new ApiError(503, resendMessage)
+      .withCode('ACCOUNT_INVITATION_DELIVERY_UNCONFIRMED'));
+    assert.equal(resendResponse.body.error.message, resendMessage);
+    assert.equal(resendResponse.body.error.code, 'ACCOUNT_INVITATION_DELIVERY_UNCONFIRMED');
+
+    const workerMessage = 'This local backend is connected to hosted Supabase and is not allowed to process notification jobs. Use the deployed backend.';
+    const workerResponse = respond(new ApiError(503, workerMessage)
+      .withCode('NOTIFICATION_WORKER_ENVIRONMENT_NOT_ALLOWED'));
+    assert.equal(workerResponse.body.error.message, workerMessage);
+
+    const unexpectedResponse = respond(new ApiError(503, 'SMTP password=must-not-leak')
+      .withCode('SMTP_EAUTH'));
+    assert.equal(unexpectedResponse.body.error.message, 'Something went wrong. Please try again later.');
   } finally {
     env.isProduction = previous;
   }

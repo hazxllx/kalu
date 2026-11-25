@@ -1,5 +1,14 @@
 import env from '../config/env.js';
 
+// These are service-authored messages with deliberately sanitized delivery
+// diagnostics. Keep their useful guidance visible in production while masking
+// unexpected failures (including raw SMTP and database errors).
+const SAFE_PRODUCTION_SERVER_ERROR_CODES = new Set([
+  'ACCOUNT_CREATED_EMAIL_FAILED',
+  'ACCOUNT_INVITATION_DELIVERY_UNCONFIRMED',
+  'NOTIFICATION_WORKER_ENVIRONMENT_NOT_ALLOWED',
+]);
+
 /**
  * @module middleware/errorHandler
  *
@@ -61,7 +70,7 @@ const errorHandler = (err, req, res, next) => {
 
   const message = clinicalRequest && isServerError
     ? 'The clinical operation could not be confirmed. Your entries are still available; retry using the same form.'
-    : isServerError && env.isProduction && err.code !== 'ACCOUNT_CREATED_EMAIL_FAILED'
+    : isServerError && env.isProduction && !SAFE_PRODUCTION_SERVER_ERROR_CODES.has(err.code)
     ? 'Something went wrong. Please try again later.'
     : err.message || 'Unexpected error';
 
