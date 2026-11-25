@@ -9,6 +9,7 @@ import { notificationsApi } from "@/services/api";
 import { notifyUnreadChanged } from "@/services/notifications/unreadBus";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
+import { canTriage } from "@/lib/rhuStations";
 
 /** Relative "time ago" label from an ISO timestamp. */
 const relativeTime = (iso) => {
@@ -62,7 +63,7 @@ const mapNotification = (row) => {
  * notification links the resident to their My Health Records page (where the
  * Consultation History tab lives). Unknown types stay non-clickable.
  */
-const destinationFor = (notification, role) => {
+const destinationFor = (notification, role, user = null) => {
   if (!notification?.relatedType) return null;
   if (notification.relatedType === "consultation" && role === "resident") {
     return "/app/resident/record";
@@ -76,6 +77,10 @@ const destinationFor = (notification, role) => {
       ? "/app/health_supervisor/verifications"
       : "/app/health_supervisor/residents";
   }
+  if (notification.relatedType === "households" && role === "bhw") {
+    const household = notification.relatedId ? `&household=${encodeURIComponent(notification.relatedId)}` : "";
+    return `/app/bhw/households?view=returned${household}`;
+  }
   if (["follow_up_assigned", "follow_up_updated", "follow_ups"].includes(notification.relatedType)) {
     const destinations = {
       health_supervisor: "/app/health_supervisor/followups",
@@ -86,7 +91,7 @@ const destinationFor = (notification, role) => {
     return destinations[role] || null;
   }
   if (notification.relatedType === "health_referral") {
-    if (role === "rhu_personnel") return "/app/rhu_personnel/incoming-referrals";
+    if (role === "rhu_personnel" && canTriage(user)) return "/app/rhu_personnel/incoming-referrals";
     if (["health_supervisor", "phn", "mho"].includes(role)) return `/app/${role}/referrals`;
   }
   // Residency transfer requests. Staff reviewers deep-link to the Resident
@@ -104,6 +109,7 @@ const destinationFor = (notification, role) => {
 
 /** Short, role-aware label for a notification's deep-link action button. */
 const actionLabelFor = (notification, role) => {
+  if (notification?.relatedType === "households" && role === "bhw") return "Review household";
   if (["transfer_request", "transfer_request_resubmitted", "transfer_request_approved"].includes(notification?.relatedType)) {
     return ["resident", "resident-limited"].includes(role) ? "View submitted request" : "Open transfer request";
   }
@@ -124,7 +130,7 @@ const actionLabelFor = (notification, role) => {
  */
 export default function NotificationsPage() {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { toast } = useToast();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -238,7 +244,7 @@ export default function NotificationsPage() {
     const current = notificationsRef.current.find((item) => item.id === n.id);
     if (!current) return;
     if (!current.read && !(await markAsRead(current.id))) return;
-    const destination = destinationFor(current, role);
+    const destination = destinationFor(current, role, user);
     if (destination) navigate(destination);
   };
 
@@ -400,7 +406,7 @@ export default function NotificationsPage() {
                     <ul className="divide-y divide-brand-border">
                       {items.map((n, i) => {
                         const priority = hasPriority(n) ? n.priority : "";
-                        const destination = destinationFor(n, role);
+                        const destination = destinationFor(n, role, user);
                         const navigates = Boolean(destination);
                         // The whole card is interactive: clicking it marks the
                         // notification read (and navigates when a destination is

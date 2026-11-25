@@ -308,6 +308,10 @@ const ResidentsPage = appPage(
     )
 );
 
+const ResidentRiskSummary = appPage(
+  () => import('@/features/residents/pages/ResidentRiskSummary')
+);
+
 const Households = appPage(
   () =>
     import(
@@ -553,13 +557,6 @@ const MunicipalSubmissions = appPage(
     import(
       '@/features/submissions/pages/MunicipalSubmissions'
     )
-);
-
-const RhuIncomingReports = appPage(
-  () =>
-  import(
-    '@/features/reports/pages/RhuIncomingReports'
-  )
 );
 
 const HealthTrends = appPage(
@@ -906,6 +903,7 @@ const AppRoutes = () => (
           path="residents"
           element={<ResidentsPage />}
         />
+        <Route path="risk-summary" element={<ResidentRiskSummary />} />
         <Route
           path="trends"
           element={<HealthTrends />}
@@ -1013,6 +1011,7 @@ const AppRoutes = () => (
           path="residents"
           element={<ResidentsPage />}
         />
+        <Route path="risk-summary" element={<ResidentRiskSummary />} />
         <Route
           path="record"
           element={<PhnHealthRecords />}
@@ -1120,6 +1119,7 @@ const AppRoutes = () => (
           path="residents"
           element={<ResidentsPage />}
         />
+        <Route path="risk-summary" element={<ResidentRiskSummary />} />
         <Route
           path="residents/register"
           element={<StaffResidentRegistration />}
@@ -1310,18 +1310,13 @@ const AppRoutes = () => (
           path="incoming-referrals"
           element={<IncomingReferrals />}
         />
-        <Route
-          path="reports"
-          element={<RhuIncomingReports />}
-        />
-
         {/* RHU Personnel accounts are station-assigned; each account sees its own workspace. */}
         <Route
           path="consultation"
           element={<RhuConsultation />}
         />
 
-        {/* The referral inbox is recipient-scoped; only starting triage remains station-gated. */}
+        {/* Only Triage-station personnel can access the recipient-scoped referral inbox. */}
         <Route
           path="certificates/new"
           element={<CertificateComposer />}

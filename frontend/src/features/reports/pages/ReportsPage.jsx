@@ -5,7 +5,6 @@ import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
 import ErrorState from "@/components/common/ErrorState";
 import { Download, Send, Check, CheckCircle2, X, RefreshCw, FileText, ArrowLeft, Eye, Printer, AlertTriangle } from "lucide-react";
-import { phnMonthlyTrend } from "@/services/local/phnData";
 import {
   filterRowsByScope,
   normalizeBarangay,
@@ -45,6 +44,7 @@ const STATUS_COLORS = {
   Generated: "bg-brand-blue/10 text-brand-blue",
   Submitted: "bg-brand-green/10 text-brand-green",
   "Submitted to RHU": "bg-brand-green/10 text-brand-green",
+  "Submitted to PHN": "bg-brand-green/10 text-brand-green",
   "Submitted to MHO": "bg-brand-green/10 text-brand-green",
   Received: "bg-brand-yellow/15 text-[#B07E00]",
   "Needs Revision": "bg-brand-danger/10 text-brand-danger",
@@ -122,9 +122,8 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const canSubmitReports = canGenerate && (isPhn || Boolean(assignedBarangay));
   const canLoadOutgoing = canViewReports && (!supervisor || Boolean(assignedBarangay));
 
-  // A PHN works at the RHU — reports are submitted upward to the MHO, while
-  // barangay-level roles submit theirs to the RHU.
-  const submitTarget = isPhn ? "MHO" : "RHU";
+  // Barangay reports go to the PHN; PHN reports go to the MHO.
+  const submitTarget = isPhn ? "MHO" : "PHN";
 
   const reportTypes = isPhn
     ? REPORT_TYPE_LABELS
@@ -212,7 +211,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           name: row.title || row.reportType || "Report",
           type: row.reportType,
           period: row.reportPeriod,
-          status: row.status === "Submitted" ? (isPhn ? "Submitted to MHO" : "Submitted to RHU") : row.status,
+          status: row.status === "Submitted" ? `Submitted to ${submitTarget}` : row.status,
           date: row.createdAt ? new Date(row.createdAt).toLocaleDateString(supervisor ? "en-PH" : "en-US", { ...(supervisor ? { timeZone: "Asia/Manila" } : {}), month: supervisor ? "short" : "long", day: "numeric", year: "numeric" }) : "",
           barangay: row.barangay || assignedBarangay || "",
           submittedDate: row.submittedAt ? new Date(row.submittedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
@@ -470,19 +469,32 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   };
 
   const trendRange = lastActivityPeriod(6);
+  const trendBarangay = supervisor
+    ? assignedBarangay
+    : isPhn && coverageLabel && !rhuCoverage
+      ? coverageLabel
+      : null;
+  const trendAvailable = (supervisor || isPhn) && canViewAnalytics &&
+    (supervisor ? Boolean(assignedBarangay) : Boolean(coverage));
   const loadTrend = useCallback(async (options) => {
-    if (!supervisor || !canViewAnalytics || !assignedBarangay) return null;
-    const result = await authorizedViewsApi.earlyWarning({ barangay: assignedBarangay, ...lastActivityPeriod(6) }, options);
-    if (result.scope?.barangay !== assignedBarangay) throw new Error("The consultation trend did not match your authorized barangay scope.");
+    if (!trendAvailable) return null;
+    const params = { ...lastActivityPeriod(6) };
+    if (trendBarangay) params.barangay = trendBarangay;
+    const result = await authorizedViewsApi.earlyWarning(params, options);
+    if ((result.scope?.barangay ?? null) !== (trendBarangay ?? null)) {
+      throw new Error("The consultation trend did not match your authorized reporting scope.");
+    }
     return result;
-  }, [supervisor, canViewAnalytics, assignedBarangay]);
+  }, [trendAvailable, trendBarangay]);
   const trendResource = useAuthorizedData(loadTrend);
-  // The supervisor chart uses real aggregates, independently of report snapshots.
-  // PHN coverage presentation and its existing series are retained.
+  // Both PHN and Health Supervisor charts use the same permission-scoped,
+  // persisted analytics source; the former local PHN placeholder is empty.
+  const phnSeriesKey = rhuCoverage ? "rhu" : coverageLabel || "rhu";
+  const trendRows = trendResource.data?.consultationTrends || [];
   const trendData = isPhn
-    ? phnMonthlyTrend
-    : trendResource.data?.consultationTrends?.slice(-6).map((row) => ({ month: row.month, value: row.consultations })) || [];
-  const chartSeries = isPhn ? [rhuCoverage ? "rhu" : coverageLabel || "rhu"] : [];
+    ? trendRows.slice(-6).map((row) => ({ month: row.month, [phnSeriesKey]: Number(row.consultations) || 0 }))
+    : trendRows.slice(-6).map((row) => ({ month: row.month, value: Number(row.consultations) }));
+  const chartSeries = isPhn ? [phnSeriesKey] : [];
   const seriesConfig = {
     rhu: { fill: "#0B5CAD" },
     "San Isidro": { fill: "#2A7DE1" },
@@ -495,7 +507,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const hasTrendData =
     Array.isArray(trendData) &&
     trendData.some((d) => (isPhn ? chartSeries.some((k) => Number(d?.[k]) > 0) : Number(d?.value) > 0));
-  const trendComplete = trendResource.data && trendData.every((row) => Number.isFinite(row.value) && row.value >= 0);
+  const trendComplete = Boolean(trendResource.data) && trendData.length > 0 && trendData.every((row) => {
+    const value = isPhn ? Number(row[phnSeriesKey]) : Number(row.value);
+    return Number.isFinite(value) && value >= 0;
+  });
 
   // Report Summary is derived from the REAL, server-persisted reports loaded
   // for this user (scopedReports), never from mock datasets. It reports the
@@ -508,14 +523,14 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     const countBy = (pred) => scopedReports.filter(pred).length;
     return [
       { label: "Total Reports", value: String(total) },
-      { label: "Pending Review", value: String(countBy((r) => ["Submitted", "Submitted to RHU", "Submitted to MHO", "Received"].includes(r.status))) },
+      { label: "Pending Review", value: String(countBy((r) => ["Submitted", "Submitted to RHU", "Submitted to PHN", "Submitted to MHO", "Received"].includes(r.status))) },
       { label: "Approved", value: String(countBy((r) => r.status === "Reviewed")) },
       { label: "Needs Revision", value: String(countBy((r) => r.status === "Needs Revision")) },
       { label: "Rejected", value: String(countBy((r) => r.status === "Rejected")) },
     ];
   }, [scopedReports, submitTarget]);
   const displayStatus = (report) => {
-    if (["Submitted", "Submitted to RHU", "Submitted to MHO", "Received"].includes(report.status)) return "Pending Review";
+    if (["Submitted", "Submitted to RHU", "Submitted to PHN", "Submitted to MHO", "Received"].includes(report.status)) return "Pending Review";
     if (report.status === "Reviewed") return "Approved";
     return report.status;
   };
@@ -529,9 +544,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           isPhn
             ? "Prepare, review, and submit RHU-level health reports to the MHO."
             : assignedBarangay
-              ? `Prepare, review, and submit Brgy. ${assignedBarangay} health reports to the RHU.`
+              ? `Prepare, review, and submit Brgy. ${assignedBarangay} health reports to the PHN.`
               : supervisor ? "A valid barangay assignment is required to prepare and view reports."
-              : "Prepare, review, and submit your barangay health reports to the RHU."
+              : "Prepare, review, and submit your barangay health reports to the PHN."
         }
       />
 
@@ -543,9 +558,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         </div>
       )}
 
-      {/* Incoming oversight inbox — PHN has municipality-wide read/review
-          oversight of reports routed to the RHU. Barangay-level Health
-          Supervisors are senders only, so this is shown for the PHN view. */}
+      {/* PHN receives and reviews reports submitted by barangay teams. */}
       {isPhn && (
         <div className="mb-5">
           <IncomingReports />
@@ -557,7 +570,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-brand-ink">{supervisor ? "1. Prepare Report" : "Prepare a Report"}</h3>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-medium text-brand-blue">
-            {isPhn ? "Submitted to the MHO" : assignedBarangay ? `Brgy. ${assignedBarangay} → RHU` : "Submitted to the RHU"}
+            {isPhn ? "Submitted to the MHO" : assignedBarangay ? `Brgy. ${assignedBarangay} → PHN` : "Submitted to the PHN"}
           </span>
         </div>
 
@@ -652,7 +665,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   ? "Choose a report type to begin."
                   : !reportForm.period
                     ? "Select the month this report covers."
-                     : supervisor ? "Generate a saved draft, review its source records, then submit to the RHU." : "Generate the report, then review the totals before submitting."}
+                     : supervisor ? "Generate a saved draft, review its source records, then submit to the PHN." : "Generate the report, then review the totals before submitting."}
               </p>
               <button
                 onClick={handleGenerate}
@@ -730,9 +743,11 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         </Card>
 
         <Card className={supervisor ? "h-fit p-4" : "h-fit p-4 sm:p-6"}>
-          <h3 className="mb-1 text-base font-semibold text-brand-ink">{isPhn ? (rhuCoverage ? "RHU Health Cases Trend" : `${coverageLabel} Health Cases Trend`) : "Monthly Consultations"}</h3>
-          {supervisor && <p className="mb-3 text-caption text-brand-gray">Recorded consultations, {formatDateRange(trendRange.from, trendRange.to)}. Current month is partial; independent of saved report snapshots.</p>}
-          {supervisor && (!canViewAnalytics || !assignedBarangay) ? <p className="py-4 text-ui text-brand-gray">Consultation analytics are unavailable for this account's permission or barangay assignment.</p> : supervisor && trendResource.loading ? <p role="status" className="py-4 text-ui text-brand-gray">Loading authorized consultation counts...</p> : supervisor && trendResource.error ? <ErrorState compact title="Consultation trend unavailable" message={trendResource.error} onRetry={trendResource.refresh} /> : supervisor && !trendComplete ? <div className="py-4 text-ui text-brand-gray"><p>The aggregate source did not provide complete consultation counts.</p><button type="button" className="supervisor-button mt-2" onClick={trendResource.refresh}>Retry analytics</button></div> : hasTrendData ? (
+          <h3 className="mb-1 text-base font-semibold text-brand-ink">
+            {isPhn ? (coverageLabel ? `${coverageLabel} Health Cases Trend` : "Health Cases Trend") : "Monthly Consultations"}
+          </h3>
+          {(supervisor || isPhn) && <p className="mb-3 text-caption text-brand-gray">Recorded consultations, {formatDateRange(trendRange.from, trendRange.to)}. Current month is partial; independent of saved report snapshots.</p>}
+          {(supervisor || isPhn) && !trendAvailable ? <p className="py-4 text-ui text-brand-gray">Consultation analytics are unavailable for this account's permission or reporting assignment.</p> : (supervisor || isPhn) && trendResource.loading ? <p role="status" className="py-4 text-ui text-brand-gray">Loading authorized consultation counts...</p> : (supervisor || isPhn) && trendResource.error ? <ErrorState compact title="Consultation trend unavailable" message={trendResource.error} onRetry={trendResource.refresh} /> : (supervisor || isPhn) && !trendComplete ? <div className="py-4 text-ui text-brand-gray"><p>The aggregate source did not provide complete consultation counts.</p><button type="button" className="supervisor-button mt-2" onClick={trendResource.refresh}>Retry analytics</button></div> : hasTrendData ? (
             <ResponsiveContainer width="100%" height={160}>
               {isPhn ? (
                 <BarChart data={trendData}>
@@ -829,7 +844,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                       >
                         <Eye className="w-4 h-4" /> {report.status === "Draft" ? "Review draft" : "View"}
                       </button>
-                      {(report.status === "Submitted to RHU" || report.status === "Submitted to MHO" || report.status === "Submitted") && (
+                      {(report.status === "Submitted to RHU" || report.status === "Submitted to PHN" || report.status === "Submitted to MHO" || report.status === "Submitted") && (
                         <span className="flex items-center gap-1 text-xs text-brand-green">
                           <Check className="w-3 h-3" /> Submitted{report.submittedDate ? ` • ${report.submittedDate}` : ""}
                         </span>
@@ -1142,7 +1157,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               </div>
 
               {supervisor && (detailContent?.remarks || detailReport.remarks) && <section className="mt-4 rounded border border-amber-300 bg-amber-50 p-3"><h4 className="text-ui font-semibold text-amber-900">{["Needs Revision", "Rejected"].includes(detailContent?.status || detailReport.status) ? "Reviewer Explanation" : "Reviewer Remarks"}</h4><p className="mt-1 whitespace-pre-wrap text-ui text-amber-900">{detailContent?.remarks || detailReport.remarks}</p>{(detailContent?.reviewedByName || detailReport.reviewedByName) && <p className="mt-2 text-caption text-amber-900">{detailContent?.reviewedByName || detailReport.reviewedByName}{(detailContent?.reviewedAt || detailReport.reviewedAt) ? ` · ${reportDateTime(detailContent?.reviewedAt || detailReport.reviewedAt)}` : ""}</p>}</section>}
-              {supervisor && detailContent?.receivedAt && <section className="mt-4 rounded border border-brand-green/30 bg-brand-green/5 p-3"><h4 className="text-ui font-semibold text-brand-ink">Received by RHU</h4><p className="mt-1 text-caption text-brand-gray">{detailContent.receivedByName || "Receiving personnel"} · {reportDateTime(detailContent.receivedAt)}</p></section>}
+              {supervisor && detailContent?.receivedAt && <section className="mt-4 rounded border border-brand-green/30 bg-brand-green/5 p-3"><h4 className="text-ui font-semibold text-brand-ink">Received by PHN</h4><p className="mt-1 text-caption text-brand-gray">{detailContent.receivedByName || "Public Health Nurse"} · {reportDateTime(detailContent.receivedAt)}</p></section>}
               {supervisor && Array.isArray(detailContent?.history) && detailContent.history.length > 0 && <section className="mt-4"><h4 className="mb-2 text-ui font-semibold text-brand-ink">Persisted Report History</h4><ol className="divide-y divide-brand-border rounded border border-brand-border px-3">{detailContent.history.map((event, index) => <li key={`${event.at}-${index}`} className="py-2"><p className="text-ui font-medium text-brand-ink">{event.previousStatus ? `${event.previousStatus} → ` : ""}{event.status || event.action}</p><p className="text-caption text-brand-gray">{reportDateTime(event.at)}{event.actorName ? ` · ${event.actorName}` : ""}{event.actorRole ? ` (${event.actorRole.replaceAll("_", " ")})` : ""}</p>{event.explanation && <p className="mt-1 whitespace-pre-wrap text-ui text-brand-gray">{event.explanation}</p>}</li>)}</ol></section>}
               <div className="space-y-2 rounded-btn border border-brand-border bg-brand-bg/50 p-4">
                 {[

@@ -126,12 +126,9 @@ export const FEATURE_ROLES = Object.freeze({
   certificateRequest: [ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   certificateReview: [ROLES.PHN, ROLES.MHO],
 
-  // Monitoring / aggregate information. Report SENDERS are HS/PHN/MHO (POST is
-  // additionally restricted to those roles in reports.routes.js). RHU Personnel
-  // are the routed RECIPIENTS of Health Supervisor reports, so they are
-  // included here for read/review access ONLY — they can open and acknowledge
-  // their incoming queue but can never originate a report.
-  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
+  // Reports move through the administrative hierarchy only: Health Supervisor
+  // -> PHN -> MHO. RHU triage and consultation staff have no report access.
+  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
   // barangay-scoped Health Supervisor. Read by staff who can be assigned a

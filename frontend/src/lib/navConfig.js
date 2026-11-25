@@ -243,6 +243,12 @@ export const NAV = {
           activePaths: ["/app/phn/households"],
           permission: "households.view",
         },
+        {
+          label: "Resident Risk Summary",
+          icon: "Users",
+          path: "/app/phn/risk-summary",
+          permission: "reports.analytics.view",
+        },
       ],
     },
     {
@@ -390,6 +396,12 @@ children: [
           permission: "households.view",
         },
         {
+          label: "Resident Risk Summary",
+          icon: "Users",
+          path: "/app/health_supervisor/risk-summary",
+          permission: "reports.analytics.view",
+        },
+        {
           label: "Schedule Calendar",
           icon: "CalendarDays",
           path: "/app/health_supervisor/followup-calendar",
@@ -458,13 +470,7 @@ children: [
       icon: "Inbox",
       path: "/app/rhu_personnel/incoming-referrals",
       permission: "referrals.view",
-      group: "Operations",
-    },
-    {
-      label: "Incoming Reports",
-      icon: "BarChart3",
-      path: "/app/rhu_personnel/reports",
-      permission: "reports.view",
+      station: "triage",
       group: "Operations",
     },
     {
@@ -515,6 +521,13 @@ children: [
       label: "Health Trends",
       icon: "TrendingUp",
       path: "/app/mho/trends",
+      permission: "reports.analytics.view",
+      group: "Monitoring",
+    },
+    {
+      label: "Resident Risk Summary",
+      icon: "Users",
+      path: "/app/mho/risk-summary",
       permission: "reports.analytics.view",
       group: "Monitoring",
     },

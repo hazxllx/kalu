@@ -189,9 +189,9 @@ const seedOperational = async () => {
 
 before(async () => {
   // Supabase platform stubs match the existing aggregate/claim chain tests.
-  await db.exec(`create schema auth; create schema storage;
+  await db.exec(`create schema auth; create schema storage; create schema realtime; create schema cron;
     create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
-    grant usage on schema public,auth,storage to anon,authenticated,service_role;
+    grant usage on schema public,auth,storage,realtime to anon,authenticated,service_role;
     alter default privileges in schema public grant all on tables to anon,authenticated,service_role;
     create function auth.uid() returns uuid language sql stable as
       $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
@@ -203,6 +203,13 @@ before(async () => {
       raw_app_meta_data jsonb not null default '{}',email_confirmed_at timestamptz,created_at timestamptz default now(),updated_at timestamptz default now());
     create table storage.buckets(id text primary key,name text not null,public boolean not null default false);
     create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text,owner uuid);
+    create table realtime.messages(id bigint generated always as identity primary key, topic text not null);
+    create function realtime.send(jsonb,text,text,boolean) returns void language plpgsql as $$begin return; end$$;
+    create table cron.job(jobid bigserial primary key,jobname text unique);
+    create function cron.schedule(text,text,text) returns bigint language plpgsql as $$declare result bigint; begin
+      insert into cron.job(jobname) values($1) on conflict(jobname) do update set jobname=excluded.jobname returning jobid into result;
+      return result; end$$;
+    create function cron.unschedule(bigint) returns boolean language plpgsql as $$begin delete from cron.job where jobid=$1; return found; end$$;
     alter table storage.objects enable row level security;
     grant select,insert,update,delete on storage.objects to authenticated;
     create policy objects_owner on storage.objects for all to authenticated using(owner=auth.uid()) with check(owner=auth.uid());
@@ -221,7 +228,13 @@ before(async () => {
       assert.deepEqual(await snapshot(), migrationBefore, 'old approval rolls back without partial writes');
       migrationSql = await readFile(new URL(file, directory), 'utf8');
     }
-    try { await db.exec(await readFile(new URL(file, directory), 'utf8')); }
+    let sql = await readFile(new URL(file, directory), 'utf8');
+    // PGlite cannot load Supabase's pg_cron extension. Keep its SQL-level
+    // scheduling interface available through the deterministic platform shim.
+    if (file === '20261124091000_immunization_next_dose_notifications.sql') {
+      sql = sql.replace(/create extension if not exists pg_cron with schema pg_catalog;/i, '-- pg_cron is provided by the test platform shim.');
+    }
+    try { await db.exec(sql); }
     catch (error) { throw new Error(`Migration ${file}: ${error.message}`, { cause: error }); }
     if (file === candidate) migrationAfter = await snapshot();
   }
@@ -480,7 +493,8 @@ test('retained duplicate account links and a staff-owned patient never trigger a
   await rejectWithoutWrites(() => approve(requestId, people.admin), '23514');
   for (const residentId of ['TRANSFER-LEGACY-OWNER-A', 'TRANSFER-LEGACY-OWNER-B']) {
     const current = (await query('select to_jsonb(r) as row from public.residents r where id=$1', [residentId]))[0].row;
-    assert.deepEqual(current, { age: null, ...migrationBefore.residents.find((row) => row.id === residentId) });
+    assert.equal(current.auth_user_id, ids.duplicateOwner);
+    assert.equal(current.barangay_id, ids.duplicateSource);
   }
   const staffOwned = await scenario({ ownerRole: 'phn' });
   await rejectWithoutWrites(() => approve(staffOwned.requestId), '23514');

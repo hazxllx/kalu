@@ -8,6 +8,7 @@ import { transform } from 'esbuild';
 import * as phnRecords from '../../src/features/health-records/lib/phnRecords.js';
 import * as clinical from '../../../shared/consultationClinical.js';
 import * as consultationRisk from '../../src/features/consultations/lib/consultationRisk.js';
+import { formatBloodPressureInput } from '../../src/features/consultations/utils/bpClassification.js';
 import * as statusFormatter from '../../src/lib/statusFormatter.js';
 
 const { completePhnHealthRecordCheckup, consultationForm, clinicalPayload, clinicalErrors, requiresClinicalCompletion, requireServerConsultation } = phnRecords;
@@ -180,6 +181,9 @@ async function mountPhn({ records = [], online = true, context = async () => sou
   const state = { user: { id: 'owner-a', role: 'phn' }, online, records, contextRequests: [], updates: [], creates: [], queued: [], refreshes: 0 };
   const Empty = () => null;
   const Panel = ({ children, ...props }) => React.createElement('div', props, children);
+  const StubSearchableSelect = ({ ariaLabel, value, onChange }) => React.createElement('input', {
+    'aria-label': ariaLabel, value: value || '', onChange,
+  });
   const KpiHorizontal = Panel;
   KpiHorizontal.Item = Empty;
   const StubMedicineSelector = ({ disabled, value }) => React.createElement('div', { 'data-medicine-selector': true, 'data-disabled': disabled }, `${value.length} recorded prescriptions`);
@@ -189,9 +193,12 @@ async function mountPhn({ records = [], online = true, context = async () => sou
   };
   const deps = {
     ...phnRecords, ...clinical, ...consultationRisk, ...statusFormatter,
+    getManilaDateTime: () => clinical.getManilaDateTime(now),
+    formatBloodPressureInput,
     PageHeader: ({ title, action }) => React.createElement('header', null, title, action), Card: Panel, KpiHorizontal,
     ErrorState: Empty, SkeletonStatGrid: Empty, TablePagination: Empty, LabResultsPanel: Empty, PhnCheckupWorkbench: Empty,
     MedicineSelector: StubMedicineSelector,
+    SearchableSelect: StubSearchableSelect,
     Search: Empty, Plus: Empty, Eye: Empty, Edit2: Empty, Trash2: Empty, X: Empty, ClipboardCheck: Empty, MoreVertical: Empty,
     useAuth: () => ({ user: state.user }), usePhnCoverage: () => ({ coverage: null }), useSyncStatus: () => ({ online: state.online }),
     usePhnWorkflow: () => ({ patients: [], refresh: async () => {}, completeCheckup: async () => {} }),
@@ -228,7 +235,18 @@ async function mountPhn({ records = [], online = true, context = async () => sou
   await act(async () => { renderer = create(React.createElement(Page)); });
   const page = {
     state, renderer, text: () => JSON.stringify(renderer.toJSON()),
-    change: async (label, value) => act(async () => { renderer.root.findByProps({ 'aria-label': label }).props.onChange({ target: { value, checked: value } }); }),
+    change: async (label, value) => act(async () => {
+      const field = renderer.root.findByProps({ 'aria-label': label });
+      if (label === 'Resident Registry Record') field.props.onChange(value);
+      else {
+        const target = { value, checked: value, selectionStart: String(value).length, selectionEnd: String(value).length, setSelectionRange() {} };
+        try {
+          field.props.onChange({ target, currentTarget: target, nativeEvent: { inputType: 'insertText' } });
+        } catch (error) {
+          throw new Error(`Unable to change ${label}: ${error.message}`, { cause: error });
+        }
+      }
+    }),
     click: async (label) => act(async () => { await renderer.root.findAllByType('button').find((button) => textOf(button).trim() === label).props.onClick(); }),
     openEdit: async () => { await act(async () => { renderer.root.findByProps({ title: 'Actions' }).props.onClick(); }); await page.click('Edit Record'); },
     medicine: () => renderer.root.findByType(StubMedicineSelector),

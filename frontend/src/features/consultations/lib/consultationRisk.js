@@ -16,6 +16,8 @@ export const consultationRiskLevel = (consultation = {}) => {
   const details = consultation.consultationDetails ?? consultation.consultation_details ?? {};
   const assessment = consultationAssessment(consultation);
   const candidates = [
+    consultation.encounterRiskAssessment?.level,
+    consultation.encounter_risk_assessment?.level,
     assessment?.level,
     assessment?.riskLevel,
     assessment?.risk_level,
@@ -52,18 +54,22 @@ export const savedConsultationBloodPressureClassification = (consultation = {}) 
 
 export const consultationBloodPressureClassification = (consultation = {}) => {
   const saved = savedConsultationBloodPressureClassification(consultation);
-  if (saved) return { ...saved, badgeClassName: bloodPressureBadgeClassName(saved) };
   const details = consultation.consultationDetails ?? consultation.consultation_details ?? {};
   const vitals = consultation.vitals || {};
   const reading = vitals.bloodPressure || vitals.bp || consultation.bloodPressure || consultation.blood_pressure
     || (vitals.systolic != null && vitals.diastolic != null ? { systolic: vitals.systolic, diastolic: vitals.diastolic } : null);
-  return classifyBp(reading, {
+  // Reclassify older saved snapshots from the raw value for display only;
+  // previously recorded clinical history remains unchanged.
+  if (saved?.classificationVersion === 'bp-v4') return { ...saved, badgeClassName: bloodPressureBadgeClassName(saved) };
+  const current = classifyBp(reading, {
     chiefComplaint: consultation.chiefComplaint ?? details.chiefComplaint,
     findings: consultation.findings ?? details.findings,
     clinicalFindingsDiagnosis: consultation.clinicalFindingsDiagnosis,
     indicators: consultation.clinicalIndicators ?? details.clinicalIndicators
       ?? details.clinicalAssessment?.inputs?.indicators,
   });
+  if (current) return current;
+  return saved ? { ...saved, badgeClassName: bloodPressureBadgeClassName(saved) } : null;
 };
 
 export const consultationHealthServiceLabel = (service = {}) => {
@@ -86,7 +92,10 @@ export const consultationTemperatureWarningVisible = (value) => {
 
 export const consultationRiskReasons = (consultation = {}) => {
   const assessment = consultationAssessment(consultation);
-  const reasons = Array.isArray(assessment?.reasons) ? assessment.reasons : typeof assessment?.reasons === "string" ? [assessment.reasons] : [];
+  const encounterReasons = consultation.encounterRiskAssessment?.reasons ?? consultation.encounter_risk_assessment?.reasons;
+  const reasons = Array.isArray(encounterReasons) && encounterReasons.length
+    ? encounterReasons
+    : Array.isArray(assessment?.reasons) ? assessment.reasons : typeof assessment?.reasons === "string" ? [assessment.reasons] : [];
   const messages = reasons.map((reason) => typeof reason === "string" ? reason : reason?.message || reason?.ruleId?.replaceAll("_", " ")).filter(Boolean);
   return messages.length ? messages.join("; ") : consultation.riskReason || "";
 };

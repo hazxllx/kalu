@@ -21,6 +21,7 @@
  */
 import repository from '../repositories/index.js';
 import { assessVisitRisk, isLaterVisit } from '../utils/residentRisk.js';
+import { ageAtDate, classifyClinicalVitals } from '../../../shared/clinicalScreening.js';
 import { getRiskConfig, setRecalcHandler } from './riskConfig.service.js';
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
@@ -49,8 +50,15 @@ const latestVisitMap = (visits = []) => {
 };
 
 /** Assess a single resident from a (latest) visit + config. */
-const assessFromVisit = (visit, config, history = []) => {
+const assessFromVisit = (visit, config, history = [], resident = null) => {
   const { score, level, factors, status, missingMeasurements, reason, ...clinical } = assessVisitRisk(visit, config, history);
+  const assessedAt = visit?.visitDate || visit?.createdAt || null;
+  const clinicalScreening = classifyClinicalVitals(visit?.vitals || {}, {
+    ageYears: ageAtDate(resident?.birthDate, assessedAt || new Date()),
+    pregnancy: visit?.consultationDetails?.clinicalContext?.pregnancy
+      || visit?.consultationDetails?.clinicalContext?.pregnancyStatus
+      || null,
+  });
   return {
     riskScore: score,
     riskLevel: level,
@@ -59,6 +67,7 @@ const assessFromVisit = (visit, config, history = []) => {
     riskAssessmentStatus: status,
     missingMeasurements,
     riskReason: reason,
+    clinicalScreening,
     ...clinical,
   };
 };
@@ -78,7 +87,7 @@ export const attachRiskToResidents = async (residents = [], { repo = repository,
     const cfg = config || (await getRiskConfig({ repo }));
     const { rows: visits } = await repo.listVisits({ limit: Number.MAX_SAFE_INTEGER });
     const latest = latestVisitMap(visits || []);
-    return residents.map((r) => ({ ...r, ...assessFromVisit(latest.get(r.id), cfg, visits) }));
+    return residents.map((r) => ({ ...r, ...assessFromVisit(latest.get(r.id), cfg, visits, r) }));
   } catch {
     throw new ApiError(503, 'Resident risk assessment is unavailable. Reload the records to retry.').withCode('RISK_SOURCE_UNAVAILABLE');
   }
@@ -100,7 +109,12 @@ export const assessResidentById = async ({ id, repo = repository, config = null,
     if (rows.length < 200) break;
   }
   const latest = latestVisitMap(visits || []).get(id) || null;
-  return assessFromVisit(latest, cfg, visits);
+  let resident = typeof repo.getResident === 'function' ? await repo.getResident(id).catch(() => null) : null;
+  if (!resident && typeof repo.searchResidents === 'function') {
+    const matches = await repo.searchResidents({ q: id, limit: 20 }).catch(() => []);
+    resident = (Array.isArray(matches) ? matches : []).find((item) => String(item.id) === String(id)) || null;
+  }
+  return assessFromVisit(latest, cfg, visits, resident);
 };
 
 /**
@@ -168,7 +182,7 @@ export const getRiskSummary = async ({ barangay = null, municipalityId = null, r
   const counts = { Low: 0, Moderate: 0, High: 0 };
   let assessed = 0;
   for (const resident of residents) {
-    const { riskLevel } = assessFromVisit(latest.get(resident.id), cfg, visits);
+    const { riskLevel } = assessFromVisit(latest.get(resident.id), cfg, visits, resident);
     if (riskLevel) { counts[riskLevel] += 1; assessed += 1; }
   }
   const highPct = assessed > 0 ? Math.round((counts.High / assessed) * 100) : null;
@@ -191,6 +205,38 @@ export const getRiskSummary = async ({ barangay = null, municipalityId = null, r
 
 export const getRiskDistribution = async (scope) => (await getRiskSummary(scope)).distribution;
 
+/**
+ * Filterable resident risk register. The database RPC is the authority for
+ * both risk calculation and geographic scoping; caller supplied barangay IDs
+ * are only accepted after the RPC verifies their municipality assignment.
+ */
+export const getResidentRiskSummaryRecords = async ({ user, filters = {}, supabase = getServiceClient() } = {}) => {
+  if (!user?.id || !['health_supervisor', 'phn', 'mho'].includes(user.role)) {
+    throw ApiError.forbidden('Resident risk records are not available to this account.');
+  }
+  if (!user.municipalityId) throw ApiError.forbidden('An assigned municipality is required to view resident risk records.');
+  const { data, error } = await supabase.rpc('resident_risk_summary_records', {
+    p_actor_id: user.id,
+    p_barangay_id: filters.barangayId || null,
+    p_zone: filters.zone || null,
+    p_risk_level: filters.riskLevel || null,
+    p_assessment_status: filters.assessmentStatus || null,
+    p_from: filters.from || null,
+    p_to: filters.to || null,
+    p_indicator: filters.indicator || null,
+    p_search: filters.search || null,
+    p_limit: filters.limit ?? 25,
+    p_offset: filters.offset ?? 0,
+  });
+  if (error?.code === '42501') throw ApiError.forbidden('Resident risk records are outside the current account scope.');
+  if (error?.code === '22023') throw ApiError.badRequest(error.message || 'Invalid resident risk filters.');
+  if (error || !data || !Array.isArray(data.rows) || !data.summary) {
+    throw new ApiError(503, 'Resident risk summary is unavailable. Deploy the resident risk summary migration and reload the API schema.')
+      .withCode('RISK_SUMMARY_UNAVAILABLE');
+  }
+  return data;
+};
+
 export const getHighRiskResidents = async ({ barangay = null, municipalityId = null, repo = repository, user = null, supabase, limit = 100, offset = 0, includeTotal = false } = {}) => {
   if (repo.driver === 'supabase') {
     const result = await sqlRiskSummary({ user, barangay, municipalityId, limit, offset, supabase });
@@ -212,7 +258,7 @@ export const getHighRiskResidents = async ({ barangay = null, municipalityId = n
   const residentIds = new Set(residents.map((r) => r.id));
   const latest = latestVisitMap((visits || []).filter((v) => residentIds.has(v.residentId)));
   const rows = residents
-    .map((r) => ({ resident: r, ...assessFromVisit(latest.get(r.id), cfg, visits) }))
+    .map((r) => ({ resident: r, ...assessFromVisit(latest.get(r.id), cfg, visits, r) }))
     .filter((row) => row.riskLevel === 'High');
   return includeTotal ? { rows: rows.slice(offset, offset + limit), total: rows.length } : rows;
 };
@@ -240,7 +286,7 @@ export const recalculateAll = async ({ barangay = null, municipalityId = null, r
   const latest = latestVisitMap(visits || []);
   let updated = 0;
   for (const resident of residents) {
-    const result = assessFromVisit(latest.get(resident.id), cfg, visits);
+    const result = assessFromVisit(latest.get(resident.id), cfg, visits, resident);
     try {
       if (typeof repo.updateResident === 'function') {
         await repo.updateResident(resident.id, {
@@ -266,6 +312,7 @@ export default {
   persistResidentRisk,
   getRiskSummary,
   getRiskDistribution,
+  getResidentRiskSummaryRecords,
   getHighRiskResidents,
   recalculateAll,
 };

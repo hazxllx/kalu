@@ -63,7 +63,8 @@ export const indicatorsFromFindings = (findings = '') => {
 };
 
 const indicatorKeys = new Set([...Object.values(indicatorLabels), ...Object.keys(BP_EMERGENCY_SYMPTOMS),
-  'acuteCardiovascularSymptoms', 'followUpRequired', 'pregnancySevereBpPersistent', 'resourcesUnavailable']);
+  'acuteCardiovascularSymptoms', 'followUpRequired', 'pregnancySevereBpPersistent', 'resourcesUnavailable',
+  'dangerSignsReviewed']);
 
 export const validateClinicalIndicators = (value) => {
   if (value === undefined) return {};

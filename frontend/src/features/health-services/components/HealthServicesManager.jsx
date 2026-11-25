@@ -791,24 +791,27 @@ export default function HealthServicesManager({ subtitle }) {
   // Record attendance (attended / absent) against a registration. Reuses the
   // existing health-service attendance endpoints; a new record is created on
   // the first mark, and updated on subsequent changes.
-  const markAttendance = async (reg, status) => {
+  const markAttendance = async (reg, status, correctionReason = "") => {
     if (!canEdit || !regTarget) return;
     setAttBusy(reg.residentId);
     try {
       if (reg.attendance?.id) {
-        await healthServicesApi.updateAttendance(reg.attendance.id, { status });
+        await healthServicesApi.updateAttendance(reg.attendance.id, { status, ...(correctionReason ? { correction_reason: correctionReason } : {}) });
       } else {
         await healthServicesApi.createAttendance({
           service_id: regTarget.id,
           resident_id: reg.residentId,
           scheduled_date: reg.plannedDate,
           status,
+          ...(correctionReason ? { correction_reason: correctionReason } : {}),
         });
       }
       await loadRegistrations(regTarget.id);
       showToast(status === "attended" ? "Marked as attended." : "Marked as missed.");
+      return true;
     } catch (err) {
       showToast(err?.message || "The attendance could not be recorded.", "error");
+      return false;
     } finally {
       setAttBusy("");
     }
@@ -819,13 +822,14 @@ export default function HealthServicesManager({ subtitle }) {
     setAttBusy(reg.residentId);
     try {
       if (reg.attendance?.id) {
-        await healthServicesApi.updateAttendance(reg.attendance.id, { ...values, status: "attended", follow_up_id: reg.followUpId || undefined });
+        await healthServicesApi.updateAttendance(reg.attendance.id, { ...values, status: "attended", service_completed: true, follow_up_id: reg.followUpId || undefined });
       } else {
         await healthServicesApi.createAttendance({
           service_id: regTarget.id,
           resident_id: reg.residentId,
           scheduled_date: reg.plannedDate,
           status: "attended",
+          service_completed: true,
           follow_up_id: reg.followUpId || undefined,
           ...values,
         });
@@ -1687,17 +1691,44 @@ function ActionMenu({ service, open, onToggle, onClose, canEdit, canDelete, acti
 const REG_STATUS_BADGE = {
   Registered: "bg-brand-blue/10 text-brand-blue",
   Attended: "bg-brand-green/10 text-brand-green",
+  "Service Completed": "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
   Missed: "bg-brand-danger/10 text-brand-danger",
   Cancelled: "bg-brand-gray/10 text-brand-gray",
+  Rescheduled: "bg-brand-yellow/15 text-[#9A6B00] dark:text-amber-300",
 };
 
 // Resident-facing status derived from the plan + attendance, for the staff list.
 const registrationLabel = (reg) => {
   if (reg.status === "Cancelled") return "Cancelled";
   const att = reg.attendance?.status;
+  if (att === "missed" || att === "absent") return "Missed";
+  if (att === "rescheduled") return "Rescheduled";
+  if (reg.attendance?.serviceCompleted) return "Service Completed";
   if (att === "attended" || att === "walk_in") return "Attended";
-  if (att === "absent") return "Missed";
   return "Registered";
+};
+
+const manilaToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
+const manilaTimeNow = () => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
+const serviceScheduleOf = (service) => service?.schedule || service || {};
+const missedWindowHasPassedUi = (service, scheduledDate) => {
+  if (!scheduledDate) return false;
+  const today = manilaToday();
+  if (scheduledDate < today) return true;
+  if (scheduledDate > today) return false;
+  const schedule = serviceScheduleOf(service);
+  const endTime = String(schedule.endTime || schedule.end_time || "23:59").slice(0, 5);
+  return manilaTimeNow() >= endTime;
+};
+const serviceDateNeedsCorrectionReason = (service, registration, actualDate) => {
+  const attendance = registration?.attendance || {};
+  if (attendance.serviceCompleted || ["missed", "absent"].includes(attendance.status)) return true;
+  if (!registration?.plannedDate || registration.plannedDate < manilaToday() || actualDate !== registration.plannedDate) return true;
+  return missedWindowHasPassedUi(service, registration.plannedDate);
+};
+const serviceDeliveryMaxDate = (service) => {
+  const schedule = serviceScheduleOf(service);
+  return schedule.endDate && schedule.endDate < manilaToday() ? schedule.endDate : manilaToday();
 };
 
 const formatDate = (iso) => {
@@ -1722,6 +1753,7 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
   const [statusFilter, setStatusFilter] = useState("all");
   const [deliveryTarget, setDeliveryTarget] = useState(null);
   const [missedTarget, setMissedTarget] = useState(null);
+  const [attendanceTarget, setAttendanceTarget] = useState(null);
   const [attendanceDetailId, setAttendanceDetailId] = useState(null);
   const attendanceDetail = attendanceDetailId
     ? registrations.find((registration) => registration.id === attendanceDetailId) || null
@@ -1739,12 +1771,13 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
     const onKeyDown = (event) => {
       if (event.key !== "Escape") return;
       if (missedTarget) setMissedTarget(null);
+      else if (attendanceTarget) setAttendanceTarget(null);
       else if (deliveryTarget) setDeliveryTarget(null);
       else onClose();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [deliveryTarget, missedTarget, onClose]);
+  }, [deliveryTarget, missedTarget, attendanceTarget, onClose]);
 
   useEffect(() => {
     if (!followUpStart?.id || !followUpStart?.residentId || !service) return;
@@ -1768,16 +1801,20 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
       || String(reg.barangay || "").toLowerCase().includes(query);
     const matchesStatus = statusFilter === "all"
       || (statusFilter === "attended" && label === "Attended")
+      || (statusFilter === "completed" && label === "Service Completed")
       || (statusFilter === "pending" && label === "Registered")
       || (statusFilter === "absent" && label === "Missed")
+      || (statusFilter === "rescheduled" && label === "Rescheduled")
       || (statusFilter === "cancelled" && label === "Cancelled");
     return matchesSearch && matchesStatus;
   });
   const statusOptions = [
     ["all", "All"],
     ["attended", "Attended"],
+    ["completed", "Service Completed"],
     ["pending", "Pending"],
     ["absent", "Missed / Not Attended"],
+    ...(registrations.some((reg) => registrationLabel(reg) === "Rescheduled") ? [["rescheduled", "Rescheduled"]] : []),
     ...(hasCancelled ? [["cancelled", "Cancelled"]] : []),
   ];
 
@@ -1812,6 +1849,10 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
               <div className="flex items-baseline gap-1.5">
                 <dt className="text-xs text-brand-gray">Attended</dt>
                 <dd className="font-stat text-sm font-semibold text-brand-green">{counts.attended}</dd>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-xs text-brand-gray">Service Completed</dt>
+                <dd className="font-stat text-sm font-semibold text-emerald-700 dark:text-emerald-300">{counts.serviceCompleted || 0}</dd>
               </div>
               <div className="flex items-baseline gap-1.5">
                 <dt className="text-xs text-brand-gray">Pending</dt>
@@ -1905,7 +1946,7 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                         {reg.note && <p className="mt-1 text-xs text-brand-gray">Registration note: {reg.note}</p>}
                       </div>
                     </div>
-                    {reg.attendance?.status === "attended" && reg.attendance.serviceProvided && (
+                    {reg.attendance?.serviceCompleted && reg.attendance.serviceProvided && (
                       <button
                         type="button"
                         onClick={() => setAttendanceDetailId(reg.id)}
@@ -1916,19 +1957,32 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                     )}
                     {canEdit && reg.status !== "Cancelled" && (
                       <div className="mt-2 flex flex-wrap gap-2">
+                        {(label === "Registered" || label === "Missed") && (
+                          <button
+                            type="button"
+                            onClick={() => (label === "Missed" || missedWindowHasPassedUi(service, reg.plannedDate))
+                              ? setAttendanceTarget(reg)
+                              : void onMark(reg, "attended")}
+                            disabled={attBusy === reg.residentId || reg.plannedDate > manilaToday()}
+                            className="inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-green/40 px-3 text-xs font-medium text-brand-green transition-colors hover:bg-brand-green/5 disabled:opacity-60"
+                          >
+                            <UserCheck className="h-3.5 w-3.5" aria-hidden="true" /> {label === "Missed" ? "Correct attendance" : "Mark Attended"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setDeliveryTarget(reg)}
                           disabled={attBusy === reg.residentId}
                           className="inline-flex min-h-9 items-center gap-1.5 rounded-btn bg-brand-blue px-3 text-xs font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
                         >
-                          <UserCheck className="h-3.5 w-3.5" aria-hidden="true" /> {reg.attendance?.status === "attended" && reg.attendance.serviceProvided ? "Edit service record" : "Record Service"}
+                          <UserCheck className="h-3.5 w-3.5" aria-hidden="true" /> {reg.attendance?.serviceCompleted ? "Edit service record" : "Record Service"}
                         </button>
-                        {label !== "Missed" && label !== "Attended" && (
+                        {label !== "Missed" && label !== "Attended" && label !== "Service Completed" && (
                           <button
                             type="button"
                             onClick={() => setMissedTarget(reg)}
-                            disabled={attBusy === reg.residentId}
+                            disabled={attBusy === reg.residentId || !missedWindowHasPassedUi(service, reg.plannedDate)}
+                            title={!missedWindowHasPassedUi(service, reg.plannedDate) ? "The scheduled attendance window has not ended yet." : undefined}
                             className="inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-danger/40 px-3 text-xs font-medium text-brand-danger transition-colors hover:bg-brand-danger/5 disabled:opacity-60"
                           >
                             <UserX className="h-3.5 w-3.5" aria-hidden="true" /> Mark as Missed
@@ -1955,8 +2009,8 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
               <button type="button" onClick={() => setMissedTarget(null)} className="min-h-9 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:border-border dark:hover:bg-hover">Cancel</button>
               <button
                 type="button"
-                onClick={() => { const target = missedTarget; setMissedTarget(null); void onMark(target, "absent"); }}
-                disabled={attBusy === missedTarget.residentId}
+                onClick={() => { const target = missedTarget; setMissedTarget(null); void onMark(target, "missed"); }}
+                disabled={attBusy === missedTarget.residentId || !missedWindowHasPassedUi(service, missedTarget.plannedDate)}
                 className="min-h-9 rounded-btn bg-brand-danger px-3 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60"
               >
                 Confirm missed
@@ -1964,6 +2018,18 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
             </div>
           </div>
         </div>
+      )}
+      {attendanceTarget && (
+        <AttendanceCorrectionModal
+          registration={attendanceTarget}
+          wasMissed={registrationLabel(attendanceTarget) === "Missed"}
+          busy={attBusy === attendanceTarget.residentId}
+          onClose={() => setAttendanceTarget(null)}
+          onSave={async (reason) => {
+            const saved = await onMark(attendanceTarget, "attended", reason);
+            if (saved) setAttendanceTarget(null);
+          }}
+        />
       )}
       {deliveryTarget && (
         <ServiceDeliveryModal
@@ -2024,6 +2090,8 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
   const isImmunization = String(service.category || '').toLowerCase() === 'immunization';
   const [form, setForm] = useState(() => ({
     service_provided: previous.serviceProvided || "",
+    service_provided_date: previous.serviceProvidedDate || registration.plannedDate || manilaToday(),
+    correction_reason: "",
     assessment: previous.assessment || "",
     recommendations: previous.recommendations || "",
     follow_up_required: Boolean(previous.followUpRequired),
@@ -2031,7 +2099,7 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
     notes: previous.notes || "",
     vaccine: previousImmunization.vaccine || "BCG",
     dose: previousImmunization.dose || "",
-    administered_date: previousImmunization.administeredDate || registration.plannedDate || "",
+    administered_date: previousImmunization.administeredDate || registration.plannedDate || manilaToday(),
     next_dose: previousImmunization.nextDose || "",
     immunization_status: previousImmunization.status || "Completed",
   }));
@@ -2042,18 +2110,27 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
     event.preventDefault();
     if (isImmunization) {
       if (!form.vaccine.trim()) { setError("Select the vaccine."); return; }
-      if (form.immunization_status === "Completed" && !form.administered_date) { setError("Enter the date administered."); return; }
+      if (!form.service_provided_date) { setError("Enter the actual service date."); return; }
     } else {
       if (!form.service_provided.trim()) { setError("Describe the service or care provided."); return; }
+      if (!form.service_provided_date) { setError("Enter the actual service date."); return; }
       if (form.follow_up_required && !form.follow_up_date) { setError("Choose a follow-up date."); return; }
+    }
+    if (serviceDateNeedsCorrectionReason(service, registration, form.service_provided_date) && !form.correction_reason.trim()) {
+      setError("Add a reason for this late entry or correction.");
+      return;
     }
     setError("");
     onSave(isImmunization ? {
       ...form,
+      service_completed: true,
+      service_provided_date: form.service_provided_date,
+      administered_date: form.service_provided_date,
+      immunization_status: "Completed",
       service_provided: `Immunization: ${form.vaccine}${form.dose ? ` (${form.dose})` : ''}`,
       follow_up_required: false,
       follow_up_date: null,
-    } : { ...form, follow_up_date: form.follow_up_required ? form.follow_up_date : null });
+    } : { ...form, service_completed: true, follow_up_date: form.follow_up_required ? form.follow_up_date : null });
   };
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Record service delivery">
@@ -2062,7 +2139,7 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Service delivery</p>
-              <h3 className="mt-1 text-lg font-semibold text-brand-ink">{registration.attendance?.serviceProvided ? "Update service record" : "Record delivered service"}</h3>
+              <h3 className="mt-1 text-lg font-semibold text-brand-ink">{registration.attendance?.serviceCompleted ? "Update service record" : "Record delivered service"}</h3>
               <p className="mt-1 text-sm text-brand-gray">{service.name} · {registration.residentName} · {registration.plannedDate ? formatDate(registration.plannedDate) : "Scheduled visit"}</p>
             </div>
             <button type="button" onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
@@ -2072,13 +2149,13 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
             <div className="grid gap-4 sm:grid-cols-2">
               <DeliveryField label="Vaccine" required><select value={form.vaccine} onChange={set("vaccine")} className={fieldClass}>{["BCG", "Hepatitis B", "Pentavalent (DPT-HepB-Hib)", "OPV", "IPV", "PCV", "MMR", "Measles", "Tetanus Toxoid", "COVID-19", "Influenza", "Other"].map((vaccine) => <option key={vaccine}>{vaccine}</option>)}</select></DeliveryField>
               <DeliveryField label="Dose"><select value={form.dose} onChange={set("dose")} className={fieldClass}><option value="">Select dose…</option>{["1st dose", "2nd dose", "3rd dose", "Booster", "Annual", "Single dose", "Other"].map((dose) => <option key={dose}>{dose}</option>)}</select></DeliveryField>
-              <DeliveryField label="Immunization status" required><select value={form.immunization_status} onChange={set("immunization_status")} className={fieldClass}>{["Due", "Completed", "Missed"].map((status) => <option key={status}>{status}</option>)}</select></DeliveryField>
-              <DeliveryField label="Date administered" required={form.immunization_status === "Completed"}><input type="date" value={form.administered_date} onChange={set("administered_date")} className={fieldClass} /></DeliveryField>
+              <DeliveryField label="Date administered" required><input type="date" min={serviceScheduleOf(service).startDate || undefined} max={serviceDeliveryMaxDate(service)} value={form.service_provided_date} onChange={(event) => setForm((current) => ({ ...current, service_provided_date: event.target.value, administered_date: event.target.value }))} className={fieldClass} /></DeliveryField>
               <DeliveryField label="Next dose"><input type="date" value={form.next_dose} onChange={set("next_dose")} className={fieldClass} /></DeliveryField>
               <p className="self-end text-xs text-brand-gray">Provider will be recorded from your signed-in account.</p>
             </div>
           ) : (
             <>
+              <DeliveryField label="Date service was provided" required><input type="date" min={serviceScheduleOf(service).startDate || undefined} max={serviceDeliveryMaxDate(service)} value={form.service_provided_date} onChange={set("service_provided_date")} className={fieldClass} /></DeliveryField>
               <DeliveryField label="Service or care provided" required><textarea rows={3} maxLength={5000} value={form.service_provided} onChange={set("service_provided")} className={fieldClass} placeholder="Describe the program service, care, or procedure delivered." /></DeliveryField>
               <DeliveryField label="Assessment / observations"><textarea rows={3} maxLength={5000} value={form.assessment} onChange={set("assessment")} className={fieldClass} placeholder="Record assessment findings or relevant observations." /></DeliveryField>
               <DeliveryField label="Recommendations"><textarea rows={3} maxLength={5000} value={form.recommendations} onChange={set("recommendations")} className={fieldClass} placeholder="Add advice, instructions, or recommendations." /></DeliveryField>
@@ -2088,6 +2165,9 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
               </div>
             </>
           )}
+          {serviceDateNeedsCorrectionReason(service, registration, form.service_provided_date) && (
+            <DeliveryField label="Reason for late entry or correction" required><textarea rows={2} maxLength={1000} value={form.correction_reason} onChange={set("correction_reason")} className={fieldClass} placeholder="Explain why this service is being entered late or corrected." /></DeliveryField>
+          )}
           <DeliveryField label="Additional notes"><textarea rows={2} maxLength={2000} value={form.notes} onChange={set("notes")} className={fieldClass} placeholder="Optional notes" /></DeliveryField>
           {error && <p role="alert" className="text-sm text-brand-danger">{error}</p>}
           <div className="flex justify-end gap-2 border-t border-brand-border pt-4 dark:border-border">
@@ -2095,6 +2175,29 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
             <button type="submit" disabled={busy} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:brightness-95 disabled:opacity-60">{busy ? "Saving…" : "Save service record"}</button>
           </div>
         </form>
+      </Card>
+    </div>
+  );
+}
+
+function AttendanceCorrectionModal({ registration, wasMissed, busy, onClose, onSave }) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="attendance-correction-title">
+      <Card className="w-full max-w-md p-5 sm:p-6">
+        <h4 id="attendance-correction-title" className="text-base font-semibold text-brand-ink">{wasMissed ? "Correct missed attendance" : "Record late attendance"}</h4>
+        <p className="mt-2 text-sm text-brand-gray">{wasMissed
+          ? "Confirm that " + registration.residentName + " attended this service, and explain why the missed status is being corrected."
+          : "Confirm that " + registration.residentName + " attended this service, and explain why the attendance is being recorded after its scheduled window."}</p>
+        <label className="mt-4 block space-y-1.5 text-sm font-medium text-brand-ink">Correction reason <span className="text-brand-danger">*</span>
+          <textarea rows={3} maxLength={1000} value={reason} onChange={(event) => setReason(event.target.value)} className="w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-border dark:bg-input" placeholder="Reason for correcting the missed status" />
+        </label>
+        {error && <p role="alert" className="mt-2 text-sm text-brand-danger">{error}</p>}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} className="min-h-10 rounded-btn border border-brand-border px-4 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:border-border dark:hover:bg-hover">Cancel</button>
+          <button type="button" disabled={busy} onClick={() => { if (!reason.trim()) { setError("Enter a correction reason."); return; } void onSave(reason.trim()); }} className="min-h-10 rounded-btn bg-brand-blue px-4 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">{busy ? "Saving…" : "Confirm attendance"}</button>
+        </div>
       </Card>
     </div>
   );

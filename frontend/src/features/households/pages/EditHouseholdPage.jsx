@@ -298,6 +298,32 @@ export default function EditHouseholdPage() {
     finally { setRecordingVisit(false); }
   };
 
+  const sectionChangesPending = Boolean(form) && SECTIONS.some((section) => section.fields.some(([field]) =>
+    JSON.stringify(form[field] ?? null) !== JSON.stringify(savedForm?.[field] ?? null)));
+  const memberChangesPending = members.some((member) => {
+    const saved = savedMembers.find((item) => item.id === member.id);
+    return MEMBER_FIELDS.some(([field]) => JSON.stringify(member[field] ?? null) !== JSON.stringify(saved?.[field] ?? null));
+  });
+  const resubmitHousehold = async () => {
+    if (user?.role !== 'bhw' || form?.verificationStatus !== 'Returned for Correction' || savingSection || savingMember || sectionChangesPending || memberChangesPending) return;
+    if (!window.confirm('Resubmit this corrected household profile to the Health Supervisor for verification?')) return;
+    setError(''); setNotice(''); setSavingSection('resubmit');
+    try {
+      const result = await updateHouseholdOffline({ ownerId: user?.id, serverId: householdId, payload: { hhStatus: 'Submitted' }, baseRevision: revision });
+      const updated = result?.household || {};
+      setRevision(updated.revision ?? revision);
+      setForm((current) => ({ ...current, ...updated }));
+      setSavedForm((current) => ({ ...current, ...updated }));
+      setNotice(result?.queued
+        ? 'Correction saved on this device and queued for verification submission. It will sync when a connection is available.'
+        : 'Corrected household profile resubmitted for verification.');
+    } catch (submitError) {
+      setError(submitError?.message || 'Could not resubmit the household profile.');
+    } finally {
+      setSavingSection('');
+    }
+  };
+
   const saveLegacy = async (event) => {
     event.preventDefault();
     if (!canAny(['households.create', 'households.verify'])) return setError('You do not have permission to edit this household.');
@@ -331,6 +357,20 @@ export default function EditHouseholdPage() {
     <PageHeader eyebrow="HOUSEHOLD PROFILING" title="Household Profile" subtitle="Review and update the household's registered information." meta={<span className="text-xs text-white/75">{`Household ${householdId}${syncStatus.online ? '' : ' · Working offline'}`}</span>} />
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
+    {user?.role === 'bhw' && form.verificationStatus === 'Returned for Correction' && <Card className="border-amber-300 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-amber-950 dark:text-amber-200">Returned for correction</h2>
+          <p className="mt-1 text-sm text-amber-900 dark:text-amber-100">{form.correctionReason || 'The Health Supervisor requested an update to this household profile.'}</p>
+          <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">Returned by {form.verifiedBy || 'Health Supervisor'}{form.verifiedAt ? ` · ${new Date(form.verifiedAt).toLocaleString()}` : ''}</p>
+          {(sectionChangesPending || memberChangesPending) && <p className="mt-2 text-xs font-medium text-amber-900 dark:text-amber-100">Save all profile and member changes before resubmitting.</p>}
+        </div>
+        <button type="button" onClick={resubmitHousehold} disabled={savingSection === 'resubmit' || Boolean(savingSection) || Boolean(savingMember) || sectionChangesPending || memberChangesPending}
+          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
+          <RotateCcw className="h-4 w-4" />{savingSection === 'resubmit' ? 'Submitting…' : 'Resubmit for verification'}
+        </button>
+      </div>
+    </Card>}
     {user?.role === 'bhw' && <Card className="p-4 sm:p-5">
       <div className="mb-3"><h2 className="text-sm font-semibold text-brand-ink">Visit Tracking</h2><p className="mt-1 text-xs text-brand-gray">Record a household visit without changing its profile.</p></div>
       <form className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); recordVisit(); }}>

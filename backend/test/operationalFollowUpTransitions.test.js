@@ -70,3 +70,28 @@ test('a missed follow-up must be rescheduled before it can be marked ongoing', (
     { today: TODAY },
   ));
 });
+
+test('a rescheduled follow-up waits for resident confirmation before progress continues', () => {
+  const awaiting = {
+    status: 'Scheduled',
+    scheduled_date: TODAY,
+    requires_resident_response: true,
+    resident_decision: 'pending',
+  };
+  for (const nextStatus of ['Ongoing', 'Completed', 'Missed']) {
+    assert.throws(
+      () => assertFollowUpTransition(awaiting, nextStatus, { today: TODAY }),
+      { statusCode: 409 },
+    );
+  }
+  assert.doesNotThrow(() => assertFollowUpTransition(
+    { ...awaiting, resident_decision: 'approved' },
+    'Ongoing',
+    { today: TODAY },
+  ));
+  assert.doesNotThrow(() => assertFollowUpTransition(
+    { ...awaiting, schedule_response_status: 'Attendance Confirmed' },
+    'Ongoing',
+    { today: TODAY },
+  ));
+});

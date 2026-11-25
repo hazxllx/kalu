@@ -74,6 +74,10 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
   const providerList = React.useId();
   const locationList = React.useId();
   const isNew = !initial;
+  const scheduleChanged = Boolean(initial) && (
+    String(form.date || "") !== String(initial.date || "") ||
+    String(form.time || "").slice(0, 5) !== String(initial.time || "").slice(0, 5)
+  );
   const availability = followUpActionAvailability({ ...initial, scheduled_date: form.date, scheduled_time: form.time }, { canEdit: true, canComplete });
   const statuses = FOLLOW_UP_STATUSES.filter((status) => {
     if (status === "Completed") return !isNew && availability.complete;
@@ -100,11 +104,19 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
     if (isNew && !residents.some((resident) => String(resident.id) === String(form.residentId))) next.residentId = "Select a resident from the authorized list.";
     if (!String(form.purpose || "").trim()) next.purpose = "Purpose is required.";
     if (!parseCalendarDate(form.date)) next.date = "Select a valid follow-up date.";
+    else if (form.date < manilaDateKey()) next.date = "Choose a future date; past follow-up schedules cannot be saved.";
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(form.time || "")) next.time = "Select a valid follow-up time.";
     else if (isPastSameDaySchedule(form.date, form.time)) next.time = "That time has already passed today. Choose a later time or another date.";
     if (!String(form.provider || "").trim()) next.provider = "Healthcare provider is required.";
+    if (scheduleChanged && !String(form.scheduleChangeReason || "").trim()) next.scheduleChangeReason = "A reason is required when changing the schedule.";
+    if (initial && !scheduleChanged && form.purpose === initial.purpose && form.provider === initial.provider && form.location === initial.location && form.priority === initial.priority && form.instructions === initial.instructions && form.status === initial.status) {
+      next.form = "There are no changes to save.";
+    }
     setErrors(next);
-    if (!Object.keys(next).length) onSave(form);
+    if (!Object.keys(next).length) {
+      if (scheduleChanged && !window.confirm("Changing this appointment will ask the resident to confirm the new date and time. Continue?")) return;
+      onSave(form);
+    }
   };
 
   return (
@@ -118,6 +130,7 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
           <button type="button" onClick={onClose} disabled={saving} className="supervisor-button is-icon" aria-label="Close follow-up form"><X className="h-4 w-4" aria-hidden="true" /></button>
         </div>
         {error && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
+        {errors.form && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{errors.form}</p>}
         <div className="space-y-3">
           <Field label="Resident" required error={errors.residentId}>
             {isNew ? <select required value={form.residentId} disabled={saving || residentsLoading || Boolean(residentsError)} aria-invalid={Boolean(errors.residentId)} onChange={(event) => {
@@ -143,6 +156,7 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
             <Field label="Priority"><select value={form.priority} onChange={(event) => set("priority", event.target.value)} className={inputCls()}><option>High</option><option>Medium</option><option>Low</option></select></Field>
           </div>
           <Field label="Follow-up instructions"><textarea rows={3} value={form.instructions} onChange={(event) => set("instructions", event.target.value)} className={`${inputCls()} !h-auto resize-y py-2`} /></Field>
+          {!isNew && scheduleChanged && <Field label="Reason for rescheduling" required error={errors.scheduleChangeReason}><textarea rows={3} value={form.scheduleChangeReason || ""} onChange={(event) => set("scheduleChangeReason", event.target.value)} aria-invalid={Boolean(errors.scheduleChangeReason)} className={`${inputCls(errors.scheduleChangeReason)} !h-auto resize-y py-2`} placeholder="Explain why this appointment is changing" /></Field>}
           {isNew && <label className="flex items-start gap-2 border-t border-brand-border pt-3 text-ui">
             <input type="checkbox" checked={form.requiresResidentResponse} onChange={(event) => set("requiresResidentResponse", event.target.checked)} className="mt-1 h-4 w-4" />
             <span>Require resident confirmation<span className="mt-0.5 block text-caption text-brand-gray">The resident must confirm before the follow-up is scheduled. A rejection cancels it; the supervisor cannot change the resident's decision.</span></span>
@@ -651,8 +665,9 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
       purpose: String(form.purpose).trim(), scheduled_date: form.date, scheduled_time: form.time,
       location: String(form.location || "").trim(), priority: form.priority,
       assigned_provider: String(form.provider).trim(), notes: form.instructions,
-      ...(isNew || form.status !== formTarget?.status ? { status: form.status } : {}),
+      ...(isNew || (!scheduleChanged && form.status !== formTarget?.status) ? { status: form.status } : {}),
       ...(isNew ? { residentId: resident?.id, _offlineBarangay: resident?.barangay || "", _offlineResidentName: resident?.name || "", requiresResidentResponse: form.requiresResidentResponse } : {}),
+      ...(!isNew && form.scheduleChangeReason ? { schedule_change_reason: String(form.scheduleChangeReason).trim() } : {}),
     };
     try {
       const event = await persistFollowUp({ target: isNew ? null : formTarget, record, resident,

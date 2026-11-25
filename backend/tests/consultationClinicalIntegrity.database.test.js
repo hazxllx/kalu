@@ -84,7 +84,7 @@ test('new completed records require complete plausible measurements and real Man
 
 test('database BP snapshots use inclusive five-category thresholds and retain pediatric assessment', async () => {
   for (const [systolic, diastolic, category] of [
-    [115, 75, 'Normal'], [125, 78, 'Elevated'], [120, 80, 'Stage 1 Hypertension'],
+    [115, 75, 'Normal'], [120, 80, 'Normal'], [121, 80, 'Elevated'], [120, 81, 'Stage 1 Hypertension'],
     [145, 85, 'Stage 2 Hypertension'], [180, 85, 'Hypertensive Crisis'], [150, 120, 'Hypertensive Crisis'],
   ]) {
     const result = (await pg.query('select public.bp_classification_json($1,$2,false) as classification', [systolic, diastolic])).rows[0].classification;

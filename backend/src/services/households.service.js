@@ -316,7 +316,7 @@ export const searchHouseholdResidents = async ({ user, q = '', repo = repository
  * cross-barangay filter or missing approved barangay assignment) while allowing
  * PHN accounts to query across or filter within their municipality.
  */
-export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, offset = 0 } = {}) => {
+export const listHouseholds = async ({ user, q = '', barangay = '', verificationStatus = '', limit = 50, offset = 0 } = {}) => {
   const scope = assignedBarangay(user);
   const requested = text(barangay);
   const ownBarangayValues = [scope, user?.barangayId]
@@ -327,6 +327,10 @@ export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, 
   }
   const parsedLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 100);
   const parsedOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+  const requestedVerification = text(verificationStatus);
+  if (requestedVerification && (user?.role !== 'bhw' || !VERIFICATION_STATUSES.includes(requestedVerification))) {
+    throw ApiError.forbidden('Returned-household filtering is available only to BHW accounts.');
+  }
   const barangayScoped = ['bhw', 'health_supervisor'].includes(user?.role);
   if (barangayScoped && (
     !scope ||
@@ -345,6 +349,7 @@ export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, 
     barangay: barangayScoped ? null : requested || null,
     barangayId: barangayScoped ? user.barangayId : null,
     municipalityId: user?.municipalityId || null,
+    verificationStatus: requestedVerification || null,
   });
 };
 
@@ -786,6 +791,14 @@ export const updateHousehold = async ({ id, user, patch = {}, expectedRevision =
   }
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 
+  // Resubmitting a returned record is a workflow transition, not a reviewer
+  // decision. Let the assigned BHW submit the existing household while the
+  // server reopens verification and retains the prior correction remarks and
+  // reviewer metadata for the audit/history view.
+  const isReturnedHouseholdResubmission = user?.role === 'bhw'
+    && household.verificationStatus === 'Returned for Correction'
+    && patch.hhStatus === 'Submitted';
+
   // Never persist a client-supplied risk classification — recompute it.
   const { members, errors: memberErrors } = normalizeMembers(patch.members);
   if (memberErrors.length) throw ApiError.unprocessable('Please correct the member details.', memberErrors);
@@ -808,6 +821,7 @@ export const updateHousehold = async ({ id, user, patch = {}, expectedRevision =
   }
 
   const nextPatch = { ...patch };
+  if (isReturnedHouseholdResubmission) nextPatch.verificationStatus = 'Pending Verification';
   for (const field of SERVER_OWNED_UPDATE_FIELDS) delete nextPatch[field];
   if (verificationAudit) Object.assign(nextPatch, verificationAudit);
   delete nextPatch.riskScore;

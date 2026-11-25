@@ -74,6 +74,29 @@ test("resident-pending follow-ups cannot be completed, missed, or recorded as a 
   assert.equal(actions.complete, false);
   assert.equal(actions.missed, false);
   assert.equal(actions.recordVisit, false);
+  const confirmed = followUpActionAvailability({
+    status: "Scheduled",
+    scheduledDateRaw: "2026-10-15",
+    requires_resident_response: true,
+    resident_decision: "pending",
+    schedule_response_status: "Attendance Confirmed",
+  }, supervisorPermissions, TODAY);
+  assert.equal(confirmed.recordVisit, true);
+});
+
+test("rescheduled appointments require fresh resident confirmation even while service progress stays scheduled", () => {
+  const actions = followUpActionAvailability({
+    status: "Scheduled",
+    scheduledDateRaw: "2026-10-15",
+    requires_resident_response: true,
+    resident_decision: "pending",
+    schedule_response_status: "Awaiting Response",
+  }, supervisorPermissions, TODAY);
+
+  assert.equal(actions.edit, true);
+  assert.equal(actions.complete, false);
+  assert.equal(actions.missed, false);
+  assert.equal(actions.recordVisit, false);
 });
 
 test("actions remain gated by the user's permissions", () => {

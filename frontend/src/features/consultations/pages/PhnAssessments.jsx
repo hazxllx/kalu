@@ -14,6 +14,7 @@ import { matchesCheckupSearch, isScheduledToday } from "@/features/consultations
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { formatClinicalDateTime } from "@/lib/dateUtils";
 import { useAuth } from "@/context/AuthContext";
+import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import { Search, CheckCircle2, Stethoscope, ClipboardCheck, Eye, RefreshCw } from "lucide-react";
 
 const EMPTY_STATE = {
@@ -92,7 +93,7 @@ export default function PhnCheckups() {
   const location = useLocation();
   // BUG-008: the check-up pipeline is the persistent PHN queue (DB-backed), not
   // a browser store. Mutations persist to /phn and refresh from the database.
-  const { patients: workflowPatients, loading, error, refresh, startCheckup, completeCheckup } =
+  const { patients: workflowPatients, loading, error, refresh, startCheckup, completeCheckup, routeToConsultation } =
     usePhnWorkflow({ source: "queue" });
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -102,6 +103,11 @@ export default function PhnCheckups() {
   const [todayOnly, setTodayOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [activePatientId, setActivePatientId] = useState(null);
+  const [routeTarget, setRouteTarget] = useState(null);
+  const [routeFacilities, setRouteFacilities] = useState([]);
+  const [routeFacilityId, setRouteFacilityId] = useState("");
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [routeError, setRouteError] = useState("");
   const [toast, setToast] = useState(null);
 
   const visiblePatients = useMemo(
@@ -202,6 +208,44 @@ export default function PhnCheckups() {
     setActivePatientId(patient.id);
   };
 
+  const handleRouteToRhu = async (patient) => {
+    if (!patient?.id || routeBusy) return;
+    setRouteBusy(true);
+    setRouteError("");
+    try {
+      const facilities = await phnWorkflowApi.listConsultationFacilities();
+      if (!facilities.length) throw new Error("No RHU Consultation facility is configured for your municipality.");
+      if (facilities.length === 1) {
+        await routeToConsultation(patient.id, facilities[0].id);
+        showToast("Sent to " + facilities[0].name + " for consultation.");
+      } else {
+        setRouteTarget(patient);
+        setRouteFacilities(facilities);
+        setRouteFacilityId(facilities[0].id);
+      }
+    } catch (err) {
+      showToast(err?.message || "Could not route this encounter to RHU Consultation.");
+    } finally {
+      setRouteBusy(false);
+    }
+  };
+
+  const confirmRhuRoute = async () => {
+    if (!routeTarget || !routeFacilityId || routeBusy) return;
+    setRouteBusy(true);
+    setRouteError("");
+    try {
+      const facility = routeFacilities.find((item) => item.id === routeFacilityId);
+      await routeToConsultation(routeTarget.id, routeFacilityId);
+      showToast("Sent to " + (facility?.name || "RHU Consultation") + " for consultation.");
+      setRouteTarget(null);
+    } catch (err) {
+      setRouteError(err?.message || "Could not route this encounter.");
+    } finally {
+      setRouteBusy(false);
+    }
+  };
+
   const handleComplete = async (patientId, recorded) => {
     try {
       await completeCheckup(patientId, recorded);
@@ -231,12 +275,14 @@ export default function PhnCheckups() {
   };
 
   const actionMeta = (p) => {
+    if (p.consultationRoutedAt) return { label: "Routed to RHU Consultation", short: "Routed", Glyph: CheckCircle2 };
     if (p.status === CHECKUP_STATUS.WAITING) return { label: "Start Check-up", short: "Start", Glyph: Stethoscope };
     if (p.status === CHECKUP_STATUS.IN_CHECKUP) return { label: "Continue Check-up", short: "Continue", Glyph: ClipboardCheck };
     return { label: "View Check-up", short: "View", Glyph: Eye };
   };
 
   const handleAction = (p) => {
+    if (p.consultationRoutedAt) return;
     if (p.status === CHECKUP_STATUS.WAITING) handleStart(p);
     else if (p.status === CHECKUP_STATUS.IN_CHECKUP) handleContinue(p);
     else handleView(p);
@@ -449,15 +495,12 @@ export default function PhnCheckups() {
                         )}
                       </td>
                       <td className="px-2 py-2.5 text-right lg:px-3">
-                        <button
-                          onClick={() => handleAction(p)}
-                          aria-label={meta.label}
-                          title={meta.label}
-                          className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border px-2.5 py-1.5 text-xs font-medium text-brand-blue hover:bg-brand-blue/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 whitespace-nowrap"
-                        >
-                          <meta.Glyph className="w-3.5 h-3.5" />
-                          <span>{meta.short}</span>
-                        </button>
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <button type="button" onClick={() => handleAction(p)} disabled={Boolean(p.consultationRoutedAt)} aria-label={meta.label} title={meta.label} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border px-2.5 py-1.5 text-xs font-medium text-brand-blue hover:bg-brand-blue/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 whitespace-nowrap disabled:cursor-default disabled:opacity-70">
+                            <meta.Glyph className="w-3.5 h-3.5" /><span>{meta.short}</span>
+                          </button>
+                          {user?.role === "phn" && p.status === CHECKUP_STATUS.IN_CHECKUP && !p.consultationRoutedAt && <button type="button" onClick={() => void handleRouteToRhu(p)} disabled={routeBusy} className="inline-flex items-center rounded-btn bg-brand-blue px-2.5 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60">{routeBusy ? "Sending…" : "Route to RHU"}</button>}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -510,13 +553,10 @@ export default function PhnCheckups() {
                       <p className="break-words text-sm font-semibold text-brand-ink">{p.patient}</p>
                       <p className="mt-0.5 text-xs text-brand-gray">{p.age ? `${p.age} yrs` : "—"}{p.sex ? ` · ${p.sex}` : ""}</p>
                     </div>
-                    <button
-                      onClick={() => handleAction(p)}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-btn border border-brand-border px-2.5 py-1.5 text-xs font-medium text-brand-blue"
-                    >
-                      <meta.Glyph className="h-3.5 w-3.5" />
-                      {meta.short}
-                    </button>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      <button type="button" onClick={() => handleAction(p)} disabled={Boolean(p.consultationRoutedAt)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border px-2.5 py-1.5 text-xs font-medium text-brand-blue disabled:cursor-default disabled:opacity-70"><meta.Glyph className="h-3.5 w-3.5" />{meta.short}</button>
+                      {user?.role === "phn" && p.status === CHECKUP_STATUS.IN_CHECKUP && !p.consultationRoutedAt && <button type="button" onClick={() => void handleRouteToRhu(p)} disabled={routeBusy} className="min-h-8 rounded-btn bg-brand-blue px-2.5 text-xs font-medium text-white disabled:opacity-60">{routeBusy ? "Sending…" : "Route to RHU"}</button>}
+                    </div>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${p.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>{scopeLabel(p, user)}</span>
@@ -549,6 +589,25 @@ export default function PhnCheckups() {
           )}
         </Card>
       </div>
+
+      {routeTarget && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="route-consultation-title">
+          <Card className="w-full max-w-md p-5 sm:p-6">
+            <h3 id="route-consultation-title" className="text-base font-semibold text-brand-ink">Route to RHU Consultation</h3>
+            <p className="mt-2 text-sm text-brand-gray">Choose the receiving RHU station for {routeTarget.patient}.</p>
+            <label className="mt-4 block space-y-1.5 text-sm font-medium text-brand-ink">RHU facility
+              <select value={routeFacilityId} onChange={(event) => setRouteFacilityId(event.target.value)} className="w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink dark:border-border dark:bg-input">
+                {routeFacilities.map((facility) => <option key={facility.id} value={facility.id}>{facility.name}</option>)}
+              </select>
+            </label>
+            {routeError && <p role="alert" className="mt-3 text-sm text-brand-danger">{routeError}</p>}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setRouteTarget(null)} className="min-h-10 rounded-btn border border-brand-border px-4 text-sm text-brand-ink hover:bg-brand-bg dark:border-border dark:hover:bg-hover">Cancel</button>
+              <button type="button" onClick={() => void confirmRhuRoute()} disabled={routeBusy || !routeFacilityId} className="min-h-10 rounded-btn bg-brand-blue px-4 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">{routeBusy ? "Sending…" : "Send to RHU"}</button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* Check-up workbench (start / continue / view) */}
       {activePatient && (

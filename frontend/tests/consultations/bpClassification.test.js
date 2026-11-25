@@ -7,7 +7,10 @@ import {
 
 test("classifies the requested routine category examples", () => {
   assert.equal(classifyBloodPressure("110/70").category, "Normal Blood Pressure");
-  assert.equal(classifyBloodPressure("120/75").category, "Elevated Blood Pressure");
+  assert.equal(classifyBloodPressure("120/75").category, "Normal Blood Pressure");
+  assert.equal(classifyBloodPressure("120/80").category, "Normal Blood Pressure");
+  assert.equal(classifyBloodPressure("121/80").category, "Elevated Blood Pressure");
+  assert.equal(classifyBloodPressure("120/81").category, "Stage 1 Hypertension");
   assert.equal(classifyBloodPressure("135/85").category, "Stage 1 Hypertension");
   assert.equal(classifyBloodPressure("150/95").category, "Stage 2 Hypertension");
   assert.equal(classifyBloodPressure("180/100").category, "Hypertensive Urgency or Emergency");
@@ -16,7 +19,8 @@ test("classifies the requested routine category examples", () => {
 
 test("applies systolic boundary values", () => {
   assert.equal(classifyBloodPressure("119/70").code, "normal");
-  assert.equal(classifyBloodPressure("120/70").code, "elevated");
+  assert.equal(classifyBloodPressure("120/70").code, "normal");
+  assert.equal(classifyBloodPressure("121/70").code, "elevated");
   assert.equal(classifyBloodPressure("129/70").code, "elevated");
   assert.equal(classifyBloodPressure("130/70").code, "stage1");
   assert.equal(classifyBloodPressure("139/70").code, "stage1");
@@ -25,8 +29,9 @@ test("applies systolic boundary values", () => {
 
 test("applies diastolic boundaries and uses the more severe mixed category", () => {
   assert.equal(classifyBloodPressure("110/79").code, "normal");
-  assert.equal(classifyBloodPressure("110/80").code, "stage1");
-  assert.equal(classifyBloodPressure("120/80").code, "stage1");
+  assert.equal(classifyBloodPressure("110/80").code, "normal");
+  assert.equal(classifyBloodPressure("120/80").code, "normal");
+  assert.equal(classifyBloodPressure("110/81").code, "stage1");
   assert.equal(classifyBloodPressure("130/89").code, "stage1");
   assert.equal(classifyBloodPressure("130/90").code, "stage2");
   assert.equal(classifyBloodPressure("125/85").code, "stage1");

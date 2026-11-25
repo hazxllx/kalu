@@ -153,11 +153,10 @@ export const zone = (value, { label = 'Zone', isRequired = true } = {}) => {
 };
 
 /** Date of birth: required, not in the future, plausible age (empty allowed unless required). */
-export const dateOfBirth = (value, { isRequired = true, maxAge = 120, label = 'Date of birth' } = {}) => {
+export const dateOfBirth = (value, { isRequired = true, maxAge = 120, label = 'Date of birth', now = new Date() } = {}) => {
   if (isBlank(value)) return isRequired ? `${label} is required.` : '';
   const date = parseDateOnly(value);
   if (!date) return `${label} is invalid.`;
-  const now = new Date();
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   if (date.getTime() > today) return 'Date of birth cannot be in the future.';
   const age = ageFromDateOnly(value, now);

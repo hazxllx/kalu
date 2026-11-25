@@ -14,6 +14,7 @@
 import * as residentsService from '../services/residents.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 import ApiError from '../utils/apiError.js';
+import { getResidentRiskSummaryRecords } from '../services/residentRisk.service.js';
 
 /**
  * Handles `GET /residents` — lists resident records within `req.user`'s geographic
@@ -57,6 +58,62 @@ export const listResidents = async (req, res) => {
 export const getDirectoryFilters = async (req, res) => {
   const filters = await residentsService.getResidentDirectoryFilters({ user: req.user });
   sendData(res, filters);
+};
+
+const optionalText = (value, max = 120) => {
+  if (value === undefined || value === '') return null;
+  if (typeof value !== 'string' || value.trim().length > max) {
+    throw ApiError.badRequest('One or more resident risk filters are invalid.');
+  }
+  return value.trim() || null;
+};
+
+const optionalDate = (value, name) => {
+  if (value === undefined || value === '') return null;
+  const date = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00.000Z`) : null;
+  if (!date || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw ApiError.badRequest(`${name} must be a valid YYYY-MM-DD date.`);
+  }
+  return value;
+};
+
+const boundedInteger = (value, fallback, min, max, name) => {
+  if (value === undefined || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) throw ApiError.badRequest(`${name} is invalid.`);
+  return number;
+};
+
+export const getResidentRiskSummary = async (req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  const from = optionalDate(req.query.from, 'Start date');
+  const to = optionalDate(req.query.to, 'End date');
+  if (from && to && from > to) throw ApiError.badRequest('Start date must be on or before end date.');
+  const zoneText = optionalText(req.query.zone, 8);
+  const zone = zoneText === null ? null : boundedInteger(zoneText, null, 1, 32767, 'Zone');
+  const limit = boundedInteger(req.query.limit, 25, 1, 100, 'Page size');
+  const offset = boundedInteger(req.query.offset, 0, 0, 1000000, 'Page offset');
+  const barangayId = optionalText(req.query.barangayId, 80);
+  if (barangayId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(barangayId)) {
+    throw ApiError.badRequest('Barangay filter is invalid.');
+  }
+  const result = await getResidentRiskSummaryRecords({
+    user: req.user,
+    filters: {
+      barangayId,
+      zone,
+      riskLevel: optionalText(req.query.riskLevel, 20),
+      assessmentStatus: optionalText(req.query.assessmentStatus, 20),
+      from,
+      to,
+      indicator: optionalText(req.query.indicator, 40),
+      search: optionalText(req.query.search, 120),
+      limit,
+      offset,
+    },
+  });
+  sendData(res, result);
 };
 
 /**

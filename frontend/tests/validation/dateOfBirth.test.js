@@ -3,8 +3,9 @@ import test from 'node:test';
 
 import { ageFromDateOnly, dateOfBirth, personName } from '../../src/utils/validation/index.js';
 
-// Helper to freeze the calendar day "today" (UTC) for stable assertions.
-const fakeNow = { getUTCFullYear: () => 2026, getUTCMonth: () => 9 /* Oct */, getUTCDate: () => 14 };
+// Use an explicit clock for boundary checks so midnight/timezone changes cannot
+// make a "tomorrow" fixture become today's date during a long test run.
+const fakeNow = new Date('2026-10-14T12:00:00.000Z');
 
 const isoTomorrow = '2026-10-15';
 const isoToday = '2026-10-14';
@@ -64,12 +65,10 @@ test('rejects future birth dates', () => {
 });
 
 test('rejects future date via the today comparison (tomorrow)', () => {
-  // Use a value that is "tomorrow" relative to the current wall clock. This is
-  // stable because the suite runs at build time when "today" is the actual date.
-  const tomorrow = new Date();
+  const tomorrow = new Date(fakeNow);
   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   const iso = tomorrow.toISOString().slice(0, 10);
-  assert.match(dateOfBirth(iso, { label: 'Date of birth' }), /future/i);
+  assert.match(dateOfBirth(iso, { label: 'Date of birth', now: fakeNow }), /future/i);
 });
 
 test('rejects dates whose computed age exceeds maxAge (default 120)', () => {

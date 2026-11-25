@@ -37,6 +37,10 @@ const fieldNames = {
 const vitalFields = ["bloodPressure", "temperature", "pulseRate", "respiratoryRate", "height", "weight", "oxygenSaturation"];
 const textFields = ["chiefComplaint", "findings", "diagnosis"];
 const riskLabel = (level) => level === "Moderate" ? "Medium" : level || "Unassessed";
+const consultationDateIsPast = (record) => {
+  const date = String(record?.consultationDate || "").slice(0, 10);
+  return Boolean(date && date < getManilaDateTime().date);
+};
 const generalIndicators = [
   ["severeBreathingDifficulty", "Severe breathing difficulty"], ["suspectedStroke", "Suspected stroke"],
   ["severeBleeding", "Severe bleeding"], ["alteredConsciousness", "Altered consciousness"], ["convulsions", "Convulsions"],
@@ -214,12 +218,20 @@ export default function PhnHealthRecords() {
 
   const openRecord = async (record, edit) => {
     if (busy) return;
+    if (edit && consultationDateIsPast(record)) {
+      setNotice({ error: true, message: "Past clinical records are view-only. Records dated today can still be edited." });
+      return;
+    }
     if (!online && edit) { setNotice({ error: true, message: "Clinical edits require a fresh server record and an online confirmed update. Cached history has not been changed." }); return; }
     const guard = captureOwnerGuard(user.id);
     setBusy(true); setFailure(""); setNotice(null);
     try {
       const full = requireServerConsultation(online ? await api.get(`/consultations/${record.id}`, { ownerId: user.id }) : { consultation: record }, record.id);
       if (!guard()) return;
+      if (edit && consultationDateIsPast(full)) {
+        setNotice({ error: true, message: "Past clinical records are view-only. Records dated today can still be edited." });
+        return;
+      }
       if (edit) { setOriginal(full); setForm(consultationForm(full)); setContextState(null); setErrors({}); setEditor("edit"); }
       else setViewing(full);
     } catch (error) { if (guard()) setNotice({ error: true, message: error?.message || "Could not load the complete consultation." }); }
@@ -326,12 +338,12 @@ export default function PhnHealthRecords() {
   const field = (name, type = "text") => {
     if (name === "bloodPressure") return <label key={name} className="block min-w-0 text-xs font-medium text-brand-gray">{fieldNames[name]}{requireClinical && " *"}
       <input type="text" inputMode="numeric" maxLength={9} disabled={busy} aria-label={fieldNames[name]} aria-required={requireClinical} aria-invalid={Boolean(errors[name])} aria-describedby={errors[name] ? `phn-${name}-error` : undefined} value={form[name]} placeholder="120/80" onChange={(event) => {
-        const input = event.currentTarget;
+        const input = event.currentTarget || event.target;
         if (/[^0-9/]/.test(input.value)) {
           updateField(name, input.value.replace(/[^0-9/]/g, ""));
           return;
         }
-        const formatted = formatBloodPressureInput(input.value, input.selectionStart, input.selectionEnd, event.nativeEvent.inputType);
+        const formatted = formatBloodPressureInput(input.value, input.selectionStart, input.selectionEnd, event.nativeEvent?.inputType || "insertText");
         if (formatted) {
           input.value = formatted.value;
           input.setSelectionRange(formatted.caret, formatted.caret);
@@ -501,7 +513,7 @@ export default function PhnHealthRecords() {
                                 <Eye className="h-4 w-4 flex-shrink-0 text-315f91" />
                                 <span>View Record</span>
                               </button>
-                              <button
+                              {!consultationDateIsPast(record) && <button
                                 disabled={busy}
                                 onClick={() => {
                                   setOpenMenuId(null);
@@ -511,7 +523,7 @@ export default function PhnHealthRecords() {
                               >
                                 <Edit2 className="h-4 w-4 flex-shrink-0 text-315f91" />
                                 <span>Edit Record</span>
-                              </button>
+                              </button>}
                               {patientsByVisit.has(String(record.id)) && (
                                 <button
                                   onClick={() => {
@@ -568,7 +580,7 @@ export default function PhnHealthRecords() {
                   </div>
                   {openMenuId === record.id && <div className="mt-3 grid grid-cols-1 gap-2 border-t border-brand-border pt-3">
                     <button type="button" onClick={() => { setOpenMenuId(null); openRecord(record, false); }} className="text-left text-sm font-medium text-brand-blue">View Record</button>
-                    <button type="button" onClick={() => { setOpenMenuId(null); openRecord(record, true); }} className="text-left text-sm font-medium text-brand-blue">Edit Record</button>
+                    {!consultationDateIsPast(record) && <button type="button" onClick={() => { setOpenMenuId(null); openRecord(record, true); }} className="text-left text-sm font-medium text-brand-blue">Edit Record</button>}
                   </div>}
                   <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3">
                     <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Barangay</dt><dd className="mt-1 break-words text-sm text-brand-ink">{resident.barangay || "Not recorded"}</dd></div>

@@ -542,12 +542,17 @@ export default function MidwifeFollowUp() {
   const handleStartFollowUp = async (followUp) => {
     if (!canEditFollowUp && !canCompleteFollowUp) { showToast("You do not have permission to start this follow-up."); return; }
     if (String(followUp.scheduledDateRaw || "").slice(0, 10) > todayISO()) { showToast("This follow-up is scheduled for a future date."); return; }
+    if (followUp.consultation?.id) {
+      navigate(`/app/health_supervisor/consultations?consultation=${encodeURIComponent(followUp.consultation.id)}`);
+      return;
+    }
     try {
       await persistFollowUp(followUp.id, { status: "Ongoing" }, "Follow-up started. The service remains In Progress until recorded in its care workflow.");
       const context = { followUpStart: { id: followUp.id, residentId: followUp.residentId, residentName: followUp.residentName, scheduledDate: followUp.scheduledDateRaw, purpose: followUp.purpose || "Follow-up" } };
       const purpose = String(followUp.purpose || "").toLowerCase();
       if (/vaccin|immuniz/.test(purpose)) navigate("/app/health_supervisor/immunization", { state: context });
-      else navigate("/app/health_supervisor/consultations", { state: context });
+      else if (/consult|check.?up|clinical/.test(purpose)) navigate("/app/health_supervisor/consultations", { state: context });
+      else navigate("/app/health_supervisor/services", { state: context });
     } catch { /* persistFollowUp displays the save error */ }
   };
 
@@ -795,7 +800,7 @@ export default function MidwifeFollowUp() {
                   onClick={() => handleActionClick('recordVisit', followUp)}
                   className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
                 >
-                  Start Follow-Up
+                  {followUp.consultation?.id ? "Continue Consultation" : followUp.status === "Ongoing" ? "Continue Follow-Up" : /vaccin|immuniz/i.test(String(followUp.purpose || "")) ? "Start Vaccination" : /consult|check.?up|clinical/i.test(String(followUp.purpose || "")) ? "Start Consultation" : "Start Follow-Up"}
                 </button>
               )}
               {actions.cancel && (

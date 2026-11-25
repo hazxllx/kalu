@@ -143,6 +143,13 @@ export const assertFollowUpTransition = (existing = {}, nextStatus, { today = ma
     throw ApiError.conflict('A missed follow-up must be rescheduled before it can be marked Ongoing.');
   }
 
+  if (['Ongoing', 'Completed', 'Missed'].includes(target)
+      && existing.requires_resident_response
+      && existing.resident_decision !== 'approved'
+      && existing.schedule_response_status !== 'Attendance Confirmed') {
+    throw ApiError.conflict('The resident must confirm the updated schedule before service progress can continue.');
+  }
+
   if (target === 'Missed') {
     const scheduledDate = text(existing.scheduled_date);
     const scheduledTime = text(existing.scheduled_time).slice(0, 5);
@@ -986,12 +993,22 @@ export const update = async ({
   if (requestedScheduleChange && !scheduleChangeReason) {
     throw ApiError.unprocessable('A reason is required when directly changing a follow-up schedule.');
   }
+  // A direct staff schedule change invalidates the old attendance response.
+  // Keep service progress separate and place the resident decision back into
+  // the existing confirmation workflow for the newly scheduled appointment.
   delete row.resident_decision;
   delete row.resident_decision_at;
   delete row.resident_decision_reason;
   delete row.requires_resident_response;
   delete row.requiresResidentResponse;
   delete row.schedule_response_status;
+  if (requestedScheduleChange) {
+    row.requires_resident_response = true;
+    row.resident_decision = 'pending';
+    row.resident_decision_at = null;
+    row.resident_decision_reason = '';
+    row.schedule_response_status = 'Awaiting Response';
+  }
   if (normalizedKind === 'maternal') Object.assign(row, validateMaternalRecord(row));
   if (normalizedKind === 'followups' && text(row.status) === 'Completed' && !existing.completed_at) {
     row.completed_at = new Date().toISOString();
@@ -1054,6 +1071,9 @@ export const update = async ({
           reason: scheduleChangeReason,
           from: { date: existing.scheduled_date, time: existing.scheduled_time },
           to: { date: data.scheduled_date, time: data.scheduled_time },
+          previousScheduleResponseStatus: existing.schedule_response_status || null,
+          previousResidentDecision: existing.resident_decision || null,
+          previousResidentDecisionAt: existing.resident_decision_at || null,
         },
       });
       throwOnError(scheduleAuditError, 'Could not record follow-up schedule history');

@@ -709,6 +709,16 @@ test('M1Records.jsx: maternal records, resident-scoped visits, and module grid c
   });
 
   let renderer;
+  const waitForModuleCounts = async () => {
+    const deadline = Date.now() + 3000;
+    let rendered = '';
+    while (Date.now() < deadline) {
+      await flush();
+      rendered = JSON.stringify(renderer?.toJSON());
+      if (rendered.includes('prenatal:2')) return rendered;
+    }
+    return rendered;
+  };
   try {
     // 1. Online maternal-tcl route loads & caches maternal records, open detail caches visits
     await act(async () => { renderer = create(React.createElement(mod.default)); });
@@ -736,14 +746,12 @@ test('M1Records.jsx: maternal records, resident-scoped visits, and module grid c
     pathname = '/app/health_supervisor/m1';
     online = true;
     await act(async () => { renderer = create(React.createElement(mod.default)); });
-    await flush();
-    assert.match(JSON.stringify(renderer.toJSON()), /prenatal:2/);
+    assert.match(await waitForModuleCounts(), /prenatal:2/);
     act(() => renderer.unmount());
 
     online = false;
     await act(async () => { renderer = create(React.createElement(mod.default)); });
-    await flush();
-    text = JSON.stringify(renderer.toJSON());
+    text = await waitForModuleCounts();
     assert.match(text, /Offline — Showing saved records/);
     assert.match(text, /prenatal:2/);
   } finally {

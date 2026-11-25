@@ -1,12 +1,13 @@
-// Reference categories, shared by entry, server validation and saved snapshots.
+// KALUSAGAP screening categories shared by entry, server validation and saved snapshots.
 export const DEFAULT_BP_THRESHOLDS = Object.freeze({
   // Retained for the legacy settings payload; low readings use the Normal
   // category and receive a separate clinical-review message.
   lowSystolicMax: 89,
   lowDiastolicMax: 59,
-  elevatedSystolicMin: 120,
+  // KALUSAGAP screening convention: 120/80 is included in Normal.
+  elevatedSystolicMin: 121,
   stage1SystolicMin: 130,
-  stage1DiastolicMin: 80,
+  stage1DiastolicMin: 81,
   stage2SystolicMin: 140,
   stage2DiastolicMin: 90,
   crisisSystolicMin: 180,
@@ -16,7 +17,7 @@ export const DEFAULT_BP_THRESHOLDS = Object.freeze({
 export const BP_READING_BOUNDS = Object.freeze({ min: 40, max: 300, diastolicMin: 20, diastolicMax: 200 });
 
 export const BP_CATEGORIES = Object.freeze({
-  normal: { code: 'normal', label: 'Normal Blood Pressure', severity: 0, alertLevel: 'normal', message: 'Blood pressure is within the reference range.' },
+  normal: { code: 'normal', label: 'Normal Blood Pressure', severity: 0, alertLevel: 'normal', message: 'Blood pressure is within the configured screening range.' },
   elevated: { code: 'elevated', label: 'Elevated Blood Pressure', severity: 1, alertLevel: 'monitor', message: 'Elevated reading. Recheck and monitor according to the clinical protocol.' },
   stage1: { code: 'stage1', label: 'Stage 1 Hypertension', severity: 2, alertLevel: 'assessment', message: 'High blood pressure reading. Arrange appropriate clinical assessment.' },
   stage2: { code: 'stage2', label: 'Stage 2 Hypertension', severity: 3, alertLevel: 'urgent', message: 'Very high blood pressure reading. Prompt clinical assessment is needed.' },

@@ -221,9 +221,11 @@ export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
   let total = null;
   let local = [];
   const query = String(params.q || '').trim().toLowerCase();
+  const verificationStatus = String(params.verificationStatus || '').trim();
   const matchesQuery = (row) => !query ||
     [row.id, row.headName, row.purok, row.streetAddress, row.collectorName]
       .some((value) => String(value || '').toLowerCase().includes(query));
+  const matchesStatus = (row) => !verificationStatus || String(row.verificationStatus || 'Pending Verification') === verificationStatus;
 
   const drafts = await listDrafts(ownerId, 'household');
   local = drafts
@@ -242,7 +244,7 @@ export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
           : 'Pending Sync',
       };
     })
-    .filter(matchesQuery);
+    .filter((row) => matchesQuery(row) && matchesStatus(row));
 
   let networkError = isNavigatorOnline()
     ? null
@@ -284,7 +286,7 @@ export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
   }
   const operations = await getDecryptedOperations(ownerId);
   const existing = households.map((row) => mergePendingHouseholdUpdates(row, operations));
-  const rows = [...local, ...existing].filter(matchesQuery);
+  const rows = [...local, ...existing].filter((row) => matchesQuery(row) && matchesStatus(row));
   if (total === null) {
     total = rows.length;
     return {

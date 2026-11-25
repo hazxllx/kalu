@@ -48,7 +48,8 @@ const residents = [
   { id: 'RES-NO-BARANGAY', first_name: 'Private Missing', municipality_id: municipalityId, barangay_id: null, barangay: 'San Isidro' },
 ];
 const attendance = residents.map((resident, index) => ({ id: uuid(501 + index), service_id: serviceId,
-  resident_id: resident.id, scheduled_date: '2026-11-07', attendance_status: 'scheduled', notes: `${resident.first_name} notes` }));
+  resident_id: resident.id, scheduled_date: '2026-11-07', attendance_status: 'scheduled', is_current_record: true,
+  notes: `${resident.first_name} notes` }));
 const plan = (id, residentId, patch = {}) => ({ id: uuid(id), service_id: serviceId, resident_id: residentId,
   barangay_id: barangayId, facility_type: 'RHU', planned_date: '2026-11-07', note: `${residentId} private registration note`, status: 'Planned', ...patch });
 

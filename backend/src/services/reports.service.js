@@ -7,8 +7,8 @@
  *
  * Delivery model (recipient is a ROLE within the sender's scope, never a
  * hard-coded PHN):
+ *   Health Supervisor  -> PHN            (barangay report to municipality)
  *   PHN                -> MHO            (municipality-wide)
- *   Health Supervisor  -> RHU Personnel  (municipality RHU; PHN/MHO oversight)
  *
  * SECURITY MODEL (defense in depth, mirroring referrals/medicalCertificates):
  *   - the sender is always the authenticated user; created_by is never trusted
@@ -35,6 +35,7 @@ export const REPORT_STATUS = Object.freeze({
   SUBMITTED: 'Submitted',
   RECEIVED: 'Received',
   REVIEWED: 'Reviewed',
+  ACCEPTED: 'Accepted',
   NEEDS_REVISION: 'Needs Revision',
   REJECTED: 'Rejected',
 });
@@ -47,7 +48,8 @@ export const REPORT_TRANSITIONS = Object.freeze({
   [REPORT_STATUS.SUBMITTED]: [REPORT_STATUS.RECEIVED],
   [REPORT_STATUS.RECEIVED]: [REPORT_STATUS.REVIEWED, REPORT_STATUS.NEEDS_REVISION, REPORT_STATUS.REJECTED],
   [REPORT_STATUS.NEEDS_REVISION]: [REPORT_STATUS.SUBMITTED],
-  [REPORT_STATUS.REVIEWED]: [],
+  [REPORT_STATUS.REVIEWED]: [REPORT_STATUS.ACCEPTED, REPORT_STATUS.NEEDS_REVISION, REPORT_STATUS.REJECTED],
+  [REPORT_STATUS.ACCEPTED]: [],
   [REPORT_STATUS.REJECTED]: [],
 });
 
@@ -103,12 +105,10 @@ export const reportContentError = (content, reportType, reportPeriod) => {
 /** Recipient roles a given sender role is allowed to route a report to. */
 export const REPORT_ROUTES = Object.freeze({
   [ROLES.PHN]: [ROLES.MHO],
-  [ROLES.HEALTH_SUPERVISOR]: [ROLES.RHU_PERSONNEL],
-  [ROLES.MHO]: [ROLES.MHO],
+  [ROLES.HEALTH_SUPERVISOR]: [ROLES.PHN],
 });
 
 export const REPORT_RECIPIENT_ROLES = Object.freeze([
-  ROLES.RHU_PERSONNEL,
   ROLES.PHN,
   ROLES.MHO,
 ]);
@@ -117,6 +117,7 @@ export const REPORT_RECIPIENT_ROLES = Object.freeze([
 const RECIPIENT_DECISIONS = new Set([
   REPORT_STATUS.RECEIVED,
   REPORT_STATUS.REVIEWED,
+  REPORT_STATUS.ACCEPTED,
   REPORT_STATUS.NEEDS_REVISION,
   REPORT_STATUS.REJECTED,
 ]);
@@ -133,7 +134,7 @@ const throwOnError = (error, fallback) => {
  */
 const assertPersonnelApproved = async (supabase, user) => {
   if (!user?.id) return; // Unauthenticated; other checks will catch this
-  if (![ROLES.RHU_PERSONNEL, ROLES.PHN, ROLES.MHO, ROLES.HEALTH_SUPERVISOR].includes(user?.role)) {
+  if (![ROLES.PHN, ROLES.MHO, ROLES.HEALTH_SUPERVISOR].includes(user?.role)) {
     return; // Non-staff roles don't need approval status
   }
 
@@ -300,13 +301,10 @@ export const list = async ({ user, box = 'incoming', status = null, limit = 200,
   if (box === 'outgoing') {
     query = query.eq('created_by', user.id).eq('sender_role', user.role);
   } else {
-    // PHN and MHO have read-only municipal oversight of RHU submissions.
+    // Incoming reports are addressed to this role only. Legacy RHU routes are
+    // retained in storage but are not exposed in the current workflow.
     const recipientRoles = [user.role];
-    if (user.role === ROLES.PHN || user.role === ROLES.MHO) recipientRoles.push(ROLES.RHU_PERSONNEL);
     query = query.in('recipient_role', recipientRoles);
-    if (user.role === ROLES.RHU_PERSONNEL) {
-      query = query.eq('recipient_facility_id', user.facilityId);
-    }
     query = query.neq('created_by', user.id);
     // A submitted report is delivered; drafts never leave the sender.
     query = query.neq('status', REPORT_STATUS.DRAFT);
@@ -323,20 +321,9 @@ export const list = async ({ user, box = 'incoming', status = null, limit = 200,
 
 const isReportRecipient = (user, row) => matchesReportScope(user, row) &&
   row.created_by !== user.id && row.status !== REPORT_STATUS.DRAFT &&
-  (
-    (row.recipient_role === user.role &&
-      (user.role !== ROLES.RHU_PERSONNEL || row.recipient_facility_id === user.facilityId))
-    || (
-      row.recipient_role === ROLES.RHU_PERSONNEL &&
-      user.role === ROLES.PHN &&
-      row.status === REPORT_STATUS.SUBMITTED
-    )
-  );
+  [ROLES.PHN, ROLES.MHO].includes(user.role) && row.recipient_role === user.role;
 
-const canReadReport = (user, row) => isReportSender(user, row) || isReportRecipient(user, row) || (
-  matchesReportScope(user, row) && row.created_by !== user.id && row.status !== REPORT_STATUS.DRAFT &&
-  row.recipient_role === ROLES.RHU_PERSONNEL && [ROLES.PHN, ROLES.MHO].includes(user.role)
-);
+const canReadReport = (user, row) => isReportSender(user, row) || isReportRecipient(user, row);
 
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   assertStaff(user);
@@ -433,6 +420,10 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
         recipientRole,
         municipalityId: user.municipalityId,
       });
+  if (!asDraft && recipientIds.length === 0) {
+    const recipientLabel = recipientRole === ROLES.PHN ? 'PHN' : recipientRole === ROLES.RHU_PERSONNEL ? 'RHU Personnel' : 'MHO';
+    throw ApiError.unprocessable(`There is no active ${recipientLabel} account available to receive this report.`);
+  }
   const row = {
     report_type: reportType,
     report_period: reportPeriod,
@@ -507,6 +498,9 @@ export const submitDraft = async ({ user, id, supabase = getServiceClient() }) =
     barangayId: existing.barangay_id,
     facilityId: existing.recipient_facility_id,
   });
+  if (!recipientIds.length) {
+    throw ApiError.unprocessable('There is no active account available to receive this report.');
+  }
   if (existing.recipient_role === ROLES.RHU_PERSONNEL &&
       (!user.barangayId || !existing.recipient_facility_id || recipientIds.length === 0)) {
     throw ApiError.unprocessable('The assigned RHU facility is not available to receive this report.');
@@ -628,6 +622,8 @@ export const resubmit = async ({ user, id, content, supabase = getServiceClient(
       submitted_at: now,
       reviewed_by: null,
       reviewed_at: null,
+      received_by: null,
+      received_at: null,
     })
     .eq('id', id)
     .select(DETAIL_SELECT)

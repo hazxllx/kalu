@@ -89,6 +89,12 @@ processing.get(
 processing.put('/submissions/:id', findingsWriters, consultationStation, asyncHandler(phnQueueController.updateSubmission));
 processing.post('/submissions/:id/receive', consultationConductors, consultationStation, asyncHandler(phnQueueController.receiveSubmission));
 processing.post('/submissions/:id/review', consultationConductors, consultationStation, asyncHandler(phnQueueController.markInReview));
+processing.post('/submissions/:id/route-consultation',
+  authorize(FEATURE_ROLES.phnProcessing, { permission: 'consultation.conduct' }),
+  asyncHandler(phnQueueController.routeSubmissionToConsultation));
+processing.get('/consultation-facilities',
+  authorize(FEATURE_ROLES.phnProcessing, { permission: 'consultation.requests.view' }),
+  asyncHandler(phnQueueController.listConsultationFacilities));
 processing.post('/submissions/:id/complete', consultationConductors, consultationStation,
   (req, res, next) => req.body?.submission !== undefined ? findingsWriters(req, res, next) : next(),
   asyncHandler(phnQueueController.completeSubmission));

@@ -18,7 +18,10 @@ export const followUpActionAvailability = (
   const responseStatus = String(followUp?.schedule_response_status || followUp?.scheduleResponseStatus || "");
   const pendingResidentRequest = ["Reschedule Requested", "Cancellation Requested"].includes(responseStatus);
   const legacyRejected = (followUp?.resident_decision || followUp?.residentDecision) === "rejected";
-  const residentApproved = !pendingResidentRequest && !legacyRejected;
+  const decision = followUp?.resident_decision || followUp?.residentDecision;
+  const awaitingScheduleConfirmation = Boolean(followUp?.requires_resident_response || followUp?.requiresResidentResponse) &&
+    decision !== "approved" && responseStatus !== "Attendance Confirmed";
+  const residentApproved = !pendingResidentRequest && !legacyRejected && !awaitingScheduleConfirmation;
 
   return {
     view: true,

@@ -29,7 +29,7 @@ import {
  */
 
 const isActionable = (followUp) => getResidentFollowUpPresentation(followUp).actionable;
-const scheduleResponseLabel = (value) => value === "Default Confirmed" || value === "Awaiting Response"
+const scheduleResponseLabel = (value) => value === "Default Confirmed"
   ? "Confirmed by default"
   : value || "Confirmed by default";
 

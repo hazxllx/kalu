@@ -31,7 +31,7 @@ import * as controller from '../controllers/referrals.controller.js';
  */
 const router = Router();
 
-const READ_ROLES = [...FEATURE_ROLES.referrals, 'resident', 'resident-limited'];
+const RESIDENT_READ_ROLES = new Set(['resident', 'resident-limited']);
 const WRITE_ROLES = ['health_supervisor', 'phn'];
 const RECIPIENT_ROLES = ['health_supervisor', 'phn', 'rhu_personnel'];
 
@@ -49,9 +49,17 @@ export const statusPermission = (req) => {
   if (status === 'Rejected') return ['referrals.reject'];
   return ['referrals.status.update'];
 };
-const referralReaders = authorize(READ_ROLES, {
+const referralReaders = authorize(FEATURE_ROLES.referrals, {
   anyPermission: ['referrals.view', 'referrals.history.view'],
 });
+// Residents do not need staff referral permissions to read a referral from
+// their own health record. The service still verifies the resident-to-account
+// link on every request and returns 404 for anyone else's referral.
+const residentReferralReader = authorize([...RESIDENT_READ_ROLES]);
+const referralReader = (req, res, next) => {
+  const reader = RESIDENT_READ_ROLES.has(req.user?.role) ? residentReferralReader : referralReaders;
+  return reader(req, res, next);
+};
 
 router.use(authenticate, resolveBarangayScope);
 
@@ -61,11 +69,11 @@ router.use(authenticate, resolveBarangayScope);
 // - GET /recipients      : Lists eligible recipient accounts/stations for authoring or re-routing a referral.
 // - GET /visits/:visitId : Retrieves the referral linked to clinical visit/submission `:visitId`.
 // - GET /:id             : Retrieves full details of referral `:id`.
-router.get('/', referralReaders, asyncHandler(controller.list));
+router.get('/', referralReader, asyncHandler(controller.list));
 router.get('/incoming', authorize(RECIPIENT_ROLES, { permission: 'referrals.view' }), asyncHandler(controller.incoming));
 router.get('/recipients', authorize(WRITE_ROLES, { anyPermission: ['referrals.create', 'referrals.assign'] }), asyncHandler(controller.recipients));
-router.get('/visits/:visitId', referralReaders, asyncHandler(controller.getByVisit));
-router.get('/:id', referralReaders, asyncHandler(controller.get));
+router.get('/visits/:visitId', referralReader, asyncHandler(controller.getByVisit));
+router.get('/:id', referralReader, asyncHandler(controller.get));
 
 // Sender & recipient mutation endpoints:
 // - POST   /           : Creates and routes a new referral from `req.body` (`WRITE_ROLES` + `referrals.create`).

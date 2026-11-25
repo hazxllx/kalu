@@ -29,7 +29,7 @@ const SEX_OPTIONS = ["Female", "Male"];
 const SUFFIX_OPTIONS = ["", "Jr.", "Sr.", "II", "III", "IV"];
 const ZONE_OPTIONS = Array.from({ length: 8 }, (_, index) => String(index + 1));
 const RELIGION_OPTIONS = ["Roman Catholic", "Protestant", "Iglesia ni Cristo", "Born Again", "Muslim", "Other"];
-const RISK_FILTERS = ["All", "High", "Moderate", "Low", "Unassessed"];
+const RISK_FILTERS = ["All", "High", "Moderate", "Low", "Incomplete", "Unassessed"];
 const MANILA_DATE_FORMATTER = new Intl.DateTimeFormat("en", {
   timeZone: "Asia/Manila",
   year: "numeric",
@@ -559,7 +559,11 @@ export default function ResidentsPage() {
     return residents.filter((r) => !supervisor || String(r.barangay || "").trim().toLowerCase() === assignedBarangay.toLowerCase()).map(mapRecord);
   }, [residents, directoryOwner, user?.id, supervisor, assignedBarangay]);
   const visibleRows = supervisor && riskFilter !== "All"
-    ? rows.filter((row) => riskFilter === "Unassessed" ? !row.riskLevel : row.riskLevel === riskFilter)
+    ? rows.filter((row) => riskFilter === "Unassessed"
+      ? !row.riskLevel && row.riskAssessmentStatus !== "incomplete"
+      : riskFilter === "Incomplete"
+        ? !row.riskLevel && row.riskAssessmentStatus === "incomplete"
+        : row.riskLevel === riskFilter)
     : rows;
   const pageRows = visibleRows.slice((directoryPage - 1) * directoryPageSize, directoryPage * directoryPageSize);
 
@@ -1159,7 +1163,7 @@ export default function ResidentsPage() {
                   </div>
                 );
               if (key === "status") return <StatusBadge value={row.status} />;
-              if (key === "riskLevel") return <RiskBadge level={row.riskLevel} />;
+              if (key === "riskLevel") return <RiskBadge level={row.riskLevel} assessmentStatus={row.riskAssessmentStatus} />;
               if (key === "account") return <AccountStatusPill status={row.accountStatus} />;
               if (key === "actions")
                 return (
@@ -1206,7 +1210,7 @@ export default function ResidentsPage() {
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                   <div><dt className="text-brand-gray">Barangay</dt><dd className="truncate font-medium text-brand-ink">{row.barangay || "—"}</dd></div>
                   <div><dt className="text-brand-gray">Health Record No.</dt><dd className="truncate font-medium text-brand-ink">{row.healthRecordNo || "—"}</dd></div>
-                  <div><dt className="text-brand-gray">Risk</dt><dd><RiskBadge level={row.riskLevel} /></dd></div>
+                  <div><dt className="text-brand-gray">Risk</dt><dd><RiskBadge level={row.riskLevel} assessmentStatus={row.riskAssessmentStatus} /></dd></div>
                   <div><dt className="text-brand-gray">Verification</dt><dd><StatusBadge value={row.status} /></dd></div>
                   <div><dt className="text-brand-gray">Account</dt><dd><AccountStatusPill status={row.accountStatus} /></dd></div>
                 </dl>
@@ -1608,7 +1612,7 @@ export default function ResidentsPage() {
                 <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Current Risk</p>
-                    <div className="mt-1"><RiskBadge level={selected.riskLevel} mediumLabel="Medium" /></div>
+                    <div className="mt-1"><RiskBadge level={selected.riskLevel} assessmentStatus={selected.riskAssessmentStatus} mediumLabel="Medium" /></div>
                   </div>
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Risk Score</p>

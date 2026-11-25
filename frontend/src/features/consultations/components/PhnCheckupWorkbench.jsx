@@ -10,6 +10,7 @@ import ConsultationClinicalFields from "@/features/consultations/components/Cons
 import ConsultationHealthServiceField from "@/features/consultations/components/ConsultationHealthServiceField";
 import { formatClinicalDateTime } from "@/lib/dateUtils";
 import ResidentHealthHistory from "@/features/consultations/components/ResidentHealthHistory";
+import { validateConsultationVitals } from "../../../../../shared/consultationClinical.js";
 
 export const CHECKUP_STATUS_TONES = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -38,12 +39,24 @@ const HEALTH_CONCERNS = [
   "Other",
 ];
 
+const CONSULTATION_VITAL_FIELDS = [
+  { key: "bloodPressure", label: "Blood Pressure", unit: "mmHg", placeholder: "120/80", inputMode: "numeric", triageKey: "bloodPressure" },
+  { key: "temperature", label: "Temperature", unit: "°C", placeholder: "e.g. 36.7", inputMode: "decimal", triageKey: "temperature" },
+  { key: "pulseRate", label: "Pulse Rate", unit: "bpm", placeholder: "e.g. 74", inputMode: "numeric", triageKey: "pulseRate" },
+  { key: "respiratoryRate", label: "Respiratory Rate", unit: "breaths/min", placeholder: "e.g. 18", inputMode: "numeric", triageKey: "respiratoryRate" },
+  { key: "height", label: "Height", unit: "cm", placeholder: "e.g. 158", inputMode: "decimal", triageKey: "heightCm" },
+  { key: "weight", label: "Weight", unit: "kg", placeholder: "e.g. 62", inputMode: "decimal", triageKey: "weight" },
+  { key: "oxygenSaturation", label: "Oxygen Saturation", unit: "%", placeholder: "e.g. 98", inputMode: "decimal", triageKey: "oxygenSaturation" },
+];
+
 const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
     error ? "border-brand-danger" : "border-brand-border"
   }`;
 
 const hasValue = (value) => value !== null && value !== undefined && String(value).trim() !== "";
+const recordedMeasurement = (value) => hasValue(value)
+  && !["—", "-", "not recorded"].includes(String(value).trim().toLowerCase());
 const measurement = (value, unit = "") => hasValue(value) ? `${value}${unit ? ` ${unit}` : ""}` : null;
 
 const InfoItem = ({ label, value, fallback = "Not recorded" }) => (
@@ -87,12 +100,12 @@ const OutcomeItem = ({ label, value }) => (
 );
 
 /**
- * PHN consultation workbench.
+ * Shared PHN check-up / RHU consultation workbench.
  *
  *  - "Patient Information"  — resident profile + consultation location (RHU).
  *  - "Triage Information"   — READ-ONLY snapshot collected by RHU Personnel.
- *  - "PHN Check-up"         — the PHN records assessment / findings / health
- *                             concern / clinical notes / recommendations here.
+ *  - The final consultation section — the assigned clinician records findings,
+ *    health concern, notes and recommendations here.
  *
  * The Risk Level is calculated AUTOMATICALLY from the read-only triage data
  * and the PHN's entries (rule-based, front-end prototype only). When a check-up
@@ -102,10 +115,12 @@ const OutcomeItem = ({ label, value }) => (
 /**
  * @param {{patient: any, onClose: () => void, user?: any, onComplete?: any, onOutcome?: any}} props
  */
-export default function PhnCheckupWorkbench({ patient, onClose, onComplete = undefined, onOutcome = undefined }) {
+export default function PhnCheckupWorkbench({ patient, onClose, onComplete = undefined, onOutcome = undefined, workflow = "phn" }) {
   const [assessment, setAssessment] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
   const [healthConcern, setHealthConcern] = useState("");
+  const [consultationVitals, setConsultationVitals] = useState({});
+  const [dangerSignsReviewed, setDangerSignsReviewed] = useState(false);
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [recommendations, setRecommendations] = useState("");
   const [healthServiceId, setHealthServiceId] = useState("");
@@ -124,12 +139,27 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   certOpenRef.current = certOpen;
   const { user } = useAuth();
   const { can } = usePermissions();
+  const isRhuConsultation = workflow === "rhu";
+  const workflowLabel = isRhuConsultation ? "RHU Consultation" : "PHN Check-up";
 
   const completed = Boolean(patient?.checkup) || patient?.status === "Consultation Completed";
   const checkup = patient?.checkup;
 
   const residenceBarangay = patient?.residenceBarangay || patient?.barangay || null;
   const consultationLocation = consultationLocationFor(patient || {});
+  const missingVitalFields = CONSULTATION_VITAL_FIELDS.filter((field) =>
+    !recordedMeasurement(patient?.triage?.[field.triageKey])
+  );
+  const consultationVitalValues = {
+    bloodPressure: patient?.triage?.bloodPressure,
+    temperature: patient?.triage?.temperature,
+    pulseRate: patient?.triage?.pulseRate,
+    respiratoryRate: patient?.triage?.respiratoryRate,
+    height: patient?.triage?.heightCm,
+    weight: patient?.triage?.weight,
+    oxygenSaturation: patient?.triage?.oxygenSaturation,
+    ...Object.fromEntries(missingVitalFields.map(({ key }) => [key, consultationVitals[key]])),
+  };
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -152,13 +182,15 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     setAssessment(saved?.assessment || "");
     setDiagnosis(saved?.diagnosis || "");
     setHealthConcern(saved?.healthConcern || "");
+    setConsultationVitals(patient?.consultationVitals || patient?.raw?.consultationDetails?.consultationVitals || {});
+    setDangerSignsReviewed(patient?.raw?.consultationDetails?.clinicalIndicators?.dangerSignsReviewed === true);
     setClinicalNotes(saved?.clinicalNotes || "");
     setRecommendations(saved?.recommendations || "");
     setMedications(Array.isArray(saved?.medications) ? saved.medications : []);
     setErrors({});
     setSubmitError("");
     setJustCompleted(false);
-  }, [patient?.id, patient?.checkupDraft, checkup, completed]);
+  }, [patient?.id, patient?.checkupDraft, patient?.consultationVitals, patient?.raw?.consultationDetails?.consultationVitals, checkup, completed]);
 
   useEffect(() => {
     setHealthServiceId(patient?.serviceId || patient?.raw?.healthServiceId || "");
@@ -203,6 +235,14 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     if (!assessment.trim()) next.assessment = "Please record your assessment or findings.";
     if (!healthConcern.trim()) next.healthConcern = "Health concern is required.";
     if (!recommendations.trim()) next.recommendations = "Record the actual treatment or recommendations before completing the consultation.";
+    if (!dangerSignsReviewed) next.dangerSignsReviewed = "Confirm that danger signs were reviewed and any positive findings were recorded.";
+    const vitalErrors = validateConsultationVitals(consultationVitalValues);
+    for (const field of missingVitalFields) {
+      if (vitalErrors[field.key]) next[field.key] = vitalErrors[field.key];
+    }
+    if (Object.keys(vitalErrors).some((field) => !missingVitalFields.some((missing) => missing.key === field))) {
+      next.vitalSigns = "One or more readings already recorded during triage need to be verified before this consultation can be completed.";
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -220,6 +260,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       recommendations: recommendations.trim(),
       medications,
       healthServiceId: healthServiceId || null,
+      dangerSignsReviewed,
+      consultationVitals: Object.fromEntries(missingVitalFields
+        .map(({ key }) => [key, consultationVitals[key]])
+        .filter(([, value]) => hasValue(value))),
       expectedUpdatedAt: patient?.raw?.updatedAt,
     };
     setSubmitting(true);
@@ -230,7 +274,12 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       setJustCompleted(true);
     } catch (error) {
       const fieldErrors = error?.payload?.error?.errors || error?.payload?.error?.details || {};
-      setErrors(Object.fromEntries(Object.entries(fieldErrors).filter(([field]) => field.startsWith("medications"))));
+      setErrors(Object.fromEntries(Object.entries(fieldErrors).flatMap(([field, message]) => {
+        if (field.startsWith("medications")) return [[field, message]];
+        if (field.startsWith("consultationVitals.")) return [[field.slice("consultationVitals.".length), message]];
+        if (field === "clinicalIndicators.dangerSignsReviewed") return [["dangerSignsReviewed", message]];
+        return [];
+      })));
       setSubmitError(error?.message || "Could not save this check-up. Your entries are still available; retry when ready.");
     } finally {
       submittingRef.current = false;
@@ -239,6 +288,11 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   };
 
   const statusTone = CHECKUP_STATUS_TONES[patient?.status] || "bg-slate-100 text-slate-600";
+  const displayedStatus = isRhuConsultation
+    ? patient?.status === "Waiting for PHN" ? "Waiting for Consultation"
+      : patient?.status === "In Check-up" ? "In Consultation"
+        : patient?.status === "Consultation Completed" ? "Completed" : patient?.status
+    : patient?.status;
 
   const renderOutcomeActions = () => (
     <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-brand-border pt-4">
@@ -279,7 +333,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4" onClick={() => { if (!submitting) onClose(); }}>
       <div className="w-full max-w-4xl min-w-0" onClick={(e) => e.stopPropagation()}>
-        <Card role="dialog" aria-modal="true" aria-label={`PHN check-up for ${patient?.patient}`} className="flex h-[min(90dvh,820px)] min-h-0 flex-col overflow-hidden sm:max-h-[90dvh]">
+        <Card role="dialog" aria-modal="true" aria-label={`${workflowLabel} for ${patient?.patient}`} className="flex h-[min(90dvh,820px)] min-h-0 flex-col overflow-hidden sm:max-h-[90dvh]">
           {/* Header */}
           <div className="flex shrink-0 items-start gap-3 border-b border-brand-border px-4 py-3 sm:items-center sm:px-6 sm:py-4">
             <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -293,10 +347,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
               <div className="min-w-0">
                 <h3 className="break-words text-base font-semibold leading-snug text-brand-ink" title={patient?.patient}>{patient?.patient}</h3>
                 <p className="text-xs text-brand-gray">
-                  PHN Check-up {completed ? "Record" : "in progress"}
+                  {workflowLabel} {completed ? "Record" : "in progress"}
                 </p>
                 <span className={`mt-1 inline-flex max-w-full whitespace-normal rounded-full px-2.5 py-1 text-[11px] font-medium leading-tight sm:whitespace-nowrap sm:text-xs ${statusTone}`}>
-                  {patient?.status}
+                  {displayedStatus}
                 </span>
               </div>
             </div>
@@ -309,6 +363,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
 
           <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-4">
             {submitError && <p className="mb-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3 py-2.5 text-sm text-brand-danger" role="alert">{submitError}</p>}
+            {errors.vitalSigns && missingVitalFields.length === 0 && <p className="mb-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3 py-2.5 text-sm text-brand-danger" role="alert">{errors.vitalSigns}</p>}
             {/* Patient Information */}
             <div className="mb-4">
               <SectionTitle step={1} title="Patient Information" />
@@ -367,10 +422,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                     scopeKey={JSON.stringify([user.role, user.municipalityId, user.barangayId])} revision={`${patient.id}:${completed || justCompleted}`} />
                 </details>
               )}
-            {/* PHN Check-up */}
+            {/* Clinician assessment / consultation */}
             {completed && checkup ? (
               <div>
-                <SectionTitle step={3} title="PHN Check-up Record" />
+                <SectionTitle step={3} title={`${workflowLabel} Record`} />
                 <div className="space-y-3">
                   <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
                     <h5 className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Assessment</h5>
@@ -388,6 +443,17 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                       <span className="text-xs text-brand-gray">Risk Reason: </span>{checkup.riskReason || autoRisk.reason}
                     </p>
                   </section>
+
+                  {Object.keys(consultationVitals || {}).length > 0 && (
+                    <section className="rounded-btn border border-brand-border bg-white px-4 py-3 dark:bg-card">
+                      <h5 className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Vital signs added during consultation</h5>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        {CONSULTATION_VITAL_FIELDS.filter((field) => hasValue(consultationVitals[field.key])).map((field) => (
+                          <InfoItem key={field.key} label={field.label} value={measurement(consultationVitals[field.key], field.unit)} />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
                   <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
                     <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Clinical Notes</h5>
@@ -451,7 +517,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
               </div>
             ) : completed ? (
               <div>
-                <SectionTitle step={3} title="PHN Check-up Record" />
+                <SectionTitle step={3} title={`${workflowLabel} Record`} />
                 <p className="rounded-btn border border-brand-border bg-brand-bg/40 px-4 py-3 text-sm text-brand-gray" role="status">
                   This consultation is marked completed, but the clinical summary is unavailable. No new record will be created from this view.
                 </p>
@@ -459,13 +525,68 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
               </div>
             ) : (
               <div>
-                <SectionTitle step={3} title="PHN Check-up" />
+                <SectionTitle step={3} title={workflowLabel} />
                 <p className="mb-3 flex items-start gap-2 rounded-btn border border-brand-blue/10 bg-brand-blue/5 px-3 py-2 text-xs text-brand-gray">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-brand-accent" />
-                  Do not re-enter information already collected during triage. Record only your assessment and
-                  recommendations for this check-up.
+                  Triage readings are read-only. Complete only the missing readings below, then record your assessment and
+                  recommendations for this consultation.
                 </p>
                 <div className="space-y-3">
+                  {missingVitalFields.length > 0 && (
+                    <section className="rounded-btn border border-brand-border bg-white px-3 py-3 dark:bg-card sm:px-4">
+                      <div className="mb-3">
+                        <h5 className="text-sm font-semibold text-brand-ink">Vital signs missing from triage</h5>
+                        <p className="mt-1 text-xs text-brand-gray">Enter only readings that were not recorded during triage. Existing triage readings stay unchanged.</p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+                        {missingVitalFields.map((field) => (
+                          <label key={field.key} htmlFor={`consultation-vital-${field.key}`} className="block min-w-0 text-xs font-medium text-brand-gray">
+                            {field.label} ({field.unit}) <span className="text-brand-danger">*</span>
+                            <input
+                              id={`consultation-vital-${field.key}`}
+                              type="text"
+                              inputMode={field.inputMode}
+                              required
+                              autoComplete="off"
+                              placeholder={field.placeholder}
+                              value={consultationVitals[field.key] ?? ""}
+                              aria-invalid={Boolean(errors[field.key])}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setConsultationVitals((previous) => ({ ...previous, [field.key]: value }));
+                                if (errors[field.key] || errors.vitalSigns) {
+                                  setErrors((previous) => ({ ...previous, [field.key]: "", vitalSigns: "" }));
+                                }
+                              }}
+                              className={`${inputCls(errors[field.key])} mt-1 dark:bg-card dark:text-foreground dark:placeholder:text-muted-foreground`}
+                            />
+                            {errors[field.key] && <span className="mt-1 block text-xs font-normal text-brand-danger" role="alert">{errors[field.key]}</span>}
+                          </label>
+                        ))}
+                      </div>
+                      {errors.vitalSigns && <p className="mt-3 text-xs text-brand-danger" role="alert">{errors.vitalSigns}</p>}
+                    </section>
+                  )}
+                  <section className={`rounded-btn border px-3 py-3 dark:bg-card sm:px-4 ${errors.dangerSignsReviewed ? "border-brand-danger/50 bg-brand-danger/5" : "border-brand-border bg-white"}`}>
+                    <label htmlFor="consultation-danger-signs-reviewed" className="flex cursor-pointer items-start gap-2.5 text-sm text-brand-ink">
+                      <input
+                        id="consultation-danger-signs-reviewed"
+                        type="checkbox"
+                        checked={dangerSignsReviewed}
+                        aria-invalid={Boolean(errors.dangerSignsReviewed)}
+                        onChange={(event) => {
+                          setDangerSignsReviewed(event.target.checked);
+                          if (event.target.checked) setErrors((previous) => ({ ...previous, dangerSignsReviewed: "" }));
+                        }}
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-brand-blue"
+                      />
+                      <span>
+                        <span className="block font-medium">Danger signs reviewed <span className="text-brand-danger">*</span></span>
+                        <span className="mt-0.5 block text-xs text-brand-gray">Confirm that danger signs were assessed and any positive findings were documented.</span>
+                      </span>
+                    </label>
+                    {errors.dangerSignsReviewed && <p className="mt-2 text-xs text-brand-danger" role="alert">{errors.dangerSignsReviewed}</p>}
+                  </section>
                   <div>
                     <ConsultationHealthServiceField
                       value={healthServiceId}
@@ -521,7 +642,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                     <div className="flex items-center gap-2 mb-1.5">
                       <label className="text-sm font-medium text-brand-ink">Risk Level</label>
                     <span className="text-[11px] text-brand-gray">
-                        Backend assessment from the recorded triage measurements.
+                        Risk classification is recalculated after the consultation is saved.
                       </span>
                     </div>
                     <div className="flex flex-col items-start gap-2 rounded-btn border border-brand-border bg-brand-bg/40 px-3 py-3 sm:flex-row sm:items-center sm:gap-3 sm:px-4">
@@ -575,7 +696,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                 className="flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-green px-3 py-2 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:cursor-wait disabled:opacity-60 sm:px-4 sm:text-sm"
               >
                 {submitting ? <Activity className="h-4 w-4 animate-pulse" /> : <CheckCircle2 className="w-4 h-4" />}
-                {submitting ? "Saving…" : "Complete Check-up"}
+                {submitting ? "Saving…" : isRhuConsultation ? "Complete Consultation" : "Complete Check-up"}
               </button>
             )}
           </div>

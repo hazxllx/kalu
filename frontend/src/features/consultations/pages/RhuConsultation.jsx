@@ -123,7 +123,7 @@ export default function RhuConsultation() {
     openingRef.current = true;
     setOpeningId(p.id);
     try {
-      if (p.status === CHECKUP_STATUS.WAITING) {
+      if (p.status === CHECKUP_STATUS.WAITING || (p.consultationRoutedAt && !p.consultationStartedAt)) {
         await startCheckup(p.id);
       }
       // Always load this specific persisted encounter. Cached queue rows are
@@ -401,6 +401,7 @@ export default function RhuConsultation() {
 
       {activePatient && (
         <PhnCheckupWorkbench
+          workflow="rhu"
           key={activePatient.id}
           patient={activePatient}
           onClose={() => setActivePatient(null)}

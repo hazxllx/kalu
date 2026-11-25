@@ -15,16 +15,27 @@ import {
   ArrowRight,
   Bell,
   FileText,
+  Stethoscope,
+  Users,
+  RefreshCw,
 } from "lucide-react";
 
 // Shared shortcuts only. Station pages remain available from the role
 // navigation, without duplicating them as quick-action cards here.
 const QUICK_ACTIONS = [
   {
-    icon: FileText,
-    label: "Incoming Referrals",
-    path: "/app/rhu_personnel/incoming-referrals",
-    description: "Respond to referrals assigned to your account and facility.",
+    icon: Stethoscope,
+    label: "Open Triage",
+    path: "/app/rhu_personnel/triage",
+    description: "Record a screening and send the patient to consultation.",
+    station: "triage",
+  },
+  {
+    icon: Users,
+    label: "Open Consultation Queue",
+    path: "/app/rhu_personnel/consultation",
+    description: "Review patients handed off for consultation.",
+    station: "consultation",
   },
   {
     icon: FileText,
@@ -103,11 +114,11 @@ export default function RHUDashboard() {
   const quickActions = useMemo(
     () =>
       QUICK_ACTIONS.filter((action) => {
-        if (action.station === "triage") return canTriage(user);
-        if (action.station === "consultation") return canConsult(user);
+        if (action.station === "triage") return triageStation;
+        if (action.station === "consultation") return consultationStation;
         return true;
       }),
-    [user]
+    [triageStation, consultationStation]
   );
 
   const patientList = Array.isArray(patients) ? patients : [];
@@ -151,15 +162,15 @@ export default function RHUDashboard() {
 
   const stats = consultationStation
     ? [
-        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "amber" },
-        { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
-        { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
+        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading || error ? "—" : counts.waiting.toLocaleString(), tone: "amber" },
+        { icon: "Stethoscope", label: "In Consultation", value: loading || error ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
+        { icon: "CheckCircle2", label: "Completed Consultations", value: loading || error ? "—" : counts.completed.toLocaleString(), tone: "green" },
       ]
     : [
-        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "amber" },
-        { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
-        { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
-        { icon: "ClipboardList", label: "Triage Screenings Today", value: loading ? "—" : visitsToday.length.toLocaleString(), tone: "slate" },
+        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading || error ? "—" : counts.waiting.toLocaleString(), tone: "amber" },
+        { icon: "Stethoscope", label: "In Consultation", value: loading || error ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
+        { icon: "CheckCircle2", label: "Completed Consultations", value: loading || error ? "—" : counts.completed.toLocaleString(), tone: "green" },
+        { icon: "ClipboardList", label: "Triage Screenings Today", value: loading || error ? "—" : visitsToday.length.toLocaleString(), tone: "slate" },
       ];
 
   const columns = [
@@ -215,8 +226,11 @@ export default function RHUDashboard() {
       />
 
       {error && (
-        <Card className="p-4 text-sm text-brand-danger">
-          {error}
+        <Card className="flex flex-col gap-3 border-brand-danger/30 p-4 text-sm text-brand-danger sm:flex-row sm:items-center sm:justify-between">
+          <span>{error}</span>
+          <button type="button" onClick={() => void refresh()} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-btn border border-brand-danger/30 px-3 py-2 font-medium hover:bg-brand-danger/5">
+            <RefreshCw className="h-4 w-4" /> Retry
+          </button>
         </Card>
       )}
       <section aria-labelledby="summary-heading">
@@ -307,6 +321,8 @@ export default function RHUDashboard() {
 
           {loading ? (
             <SkeletonList rows={5} />
+          ) : error ? (
+            <p className="py-6 text-center text-sm text-brand-gray">Refresh the dashboard to load the latest queue records.</p>
           ) : recent.length === 0 ? (
             <p className="py-6 text-center text-sm text-brand-gray">
               {consultationStation ? "No consultation queue records yet." : "No screening hand-offs yet."}
@@ -339,12 +355,14 @@ export default function RHUDashboard() {
 
           {loading ? (
             <SkeletonList rows={3} />
+          ) : error ? (
+            <p className="py-6 text-center text-sm text-brand-gray">Activity is unavailable until the queue reloads.</p>
           ) : todayActivity.length === 0 ? (
             <p className="py-6 text-center text-sm text-brand-gray">
               No {consultationStation ? "consultation" : "triage"} activity recorded today.
             </p>
           ) : (
-            <ul className="divide-y divide-slate-100">
+            <ul className="divide-y divide-brand-border/70">
               {todayActivity.slice(0, 5).map((item, index) => (
                 <li
                   key={`${item.id || "activity"}-${index}`}

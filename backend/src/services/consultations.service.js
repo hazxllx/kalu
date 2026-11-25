@@ -5,6 +5,8 @@ import { assignedBarangay } from '../config/scope.js';
 import { getServiceClient } from '../config/supabase.js';
 import * as operational from './operational.service.js';
 import { persistResidentRisk } from './residentRisk.service.js';
+import { getRiskConfig } from './riskConfig.service.js';
+import { assessVisitRisk } from '../utils/residentRisk.js';
 import { notifyResidentOnce } from './notifications.service.js';
 import { computeBMI } from '../utils/bmi.js';
 import { normalizeMedications } from './medicines.service.js';
@@ -573,7 +575,7 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => {
  * @param {Object|null} [supabase] - Supabase service client (null when using the file driver).
  * @returns {Promise<Object>} Hydrated consultation response object.
  */
-export const fromVisit = async (visit, supabase = serviceClientFor()) => {
+export const fromVisit = async (visit, supabase = serviceClientFor(), riskConfig = null) => {
   const resident = visit.resident || {};
   const details = visit.consultationDetails || {};
   const findings = text(visit.findings);
@@ -587,6 +589,7 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
   const followUpRequired = details.followUpRequired ?? (nextVisitDate ? 'Yes' : 'No');
   const clinicalAssessment = savedEncounterAssessment(details);
   const displayAssessment = savedConsultationAssessment(details);
+  const encounterRisk = assessVisitRisk(visit, riskConfig || undefined);
   const localDateTime = visit.visitDate ? getManilaDateTime(visit.visitDate) : { date: '', time: '' };
 
   let attendingPersonnel = visit.recordedById || visit.recordedByName ? {
@@ -681,6 +684,13 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
     riskLevel: encounterRiskLevel(displayAssessment),
     riskAssessmentStatus: displayAssessment?.status || 'unavailable',
     riskReasons: consultationAssessmentReasons(displayAssessment),
+    encounterRiskAssessment: {
+      level: encounterRisk.level || null,
+      status: encounterRisk.status || 'unavailable',
+      reasons: encounterRisk.factors || [],
+      missingMeasurements: encounterRisk.missingMeasurements || [],
+      riskSource: encounterRisk.riskSource || 'configured_encounter_vitals',
+    },
     bloodPressureClassification,
     vitals: {
       ...(visit.vitals || {}),
@@ -914,6 +924,7 @@ export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0
   if (user?.role === 'resident') {
     const resident = await repo.getResidentByAuthUserId(user.id);
     if (!resident) return { rows: [], total: 0 };
+    const riskConfig = await getRiskConfig({ repo });
     // The resident id comes from the authenticated session (auth user id ->
     // residents.auth_user_id), never from a request parameter, so a resident can
     // only ever list their OWN consultations no matter what ids they send.
@@ -927,10 +938,11 @@ export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0
       offset: pageOffset,
     });
     const visits = await withHistoryLinks(result.rows, repo);
-    return { rows: await Promise.all(visits.map((v) => fromVisit(v, supabase))), total: result.total };
+    return { rows: await Promise.all(visits.map((v) => fromVisit(v, supabase, riskConfig))), total: result.total };
   }
 
   assertHistoryScope(user);
+  const riskConfig = await getRiskConfig({ repo });
   const result = await repo.listVisits({ q: text(q), ...filters, limit: pageSize, offset: pageOffset, orderBy: 'clinicalDate',
     statuses: filters.statuses || (filters.residentId ? ['completed'] : null),
     municipalityId: user.municipalityId,
@@ -941,7 +953,7 @@ export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0
     try { assertResidentScope(user, visit.resident); filtered.push(visit); } catch {}
   }
   const visits = await withHistoryLinks(filtered, repo);
-  return { rows: await Promise.all(visits.map((v) => fromVisit(v, supabase))),
+  return { rows: await Promise.all(visits.map((v) => fromVisit(v, supabase, riskConfig))),
     total: filtered.length === result.rows.length ? result.total : filtered.length };
 };
 
@@ -964,7 +976,8 @@ export const get = async ({ user, id, repo = repository, supabase = serviceClien
     assertResidentScope(user, visit.resident);
   }
   const [linkedVisit] = await withHistoryLinks([visit], repo);
-  return fromVisit(linkedVisit, supabase);
+  const riskConfig = await getRiskConfig({ repo });
+  return fromVisit(linkedVisit, supabase, riskConfig);
 };
 
 /**
@@ -995,6 +1008,9 @@ export const consultationFieldErrors = (payload = {}, { requireResident = false,
   if (requireClinical) {
     required('chiefComplaint', 'Chief complaint is required.');
     if (!normalizeClinicalFindings(payload).findings) errors.findings = 'Clinical findings are required.';
+    if (payload.clinicalIndicators?.dangerSignsReviewed !== true) {
+      errors['clinicalIndicators.dangerSignsReviewed'] = 'Confirm danger-sign screening and record any positive findings before saving.';
+    }
   }
   for (const [field, label] of [
     ['treatmentGiven', 'Treatment provided'],
@@ -1247,6 +1263,8 @@ export const update = async ({ user, id, payload = {}, repo = repository, supaba
   const previous = visit.consultationDetails || {};
   const submittedVitals = Object.fromEntries(Object.entries(consultationVitalValues(payload)).filter(([, value]) => value !== undefined));
   const clinicalText = normalizeClinicalFindings(payload);
+  const submittedConditions = payload.clinicalContext?.existingConditions ?? [];
+  const savedConditions = previous.clinicalContext?.submitted?.existingConditions ?? [];
   const cleanPayload = {
     ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => [field, existing[field]])),
     ...Object.fromEntries(Object.entries(VITAL_FIELDS).map(([field, key]) => [field, existing.vitals[key]])),
@@ -1264,7 +1282,10 @@ export const update = async ({ user, id, payload = {}, repo = repository, supaba
       : String(submittedVitals[field] ?? '') !== String(existing.vitals[VITAL_FIELDS[field]] ?? '')))
     || !isDeepStrictEqual(cleanPayload.clinicalIndicators, previous.clinicalIndicators || {})
     || (payload.medications !== undefined && !isDeepStrictEqual(payload.medications, existing.medications))
-    || (payload.clinicalContext !== undefined && !isDeepStrictEqual(payload.clinicalContext, previous.clinicalContext?.submitted))
+    // The editor always sends an empty existingConditions array when a legacy
+    // encounter had no saved context. Treat those shapes as equivalent so a
+    // metadata edit does not trigger a full clinical reassessment.
+    || (payload.clinicalContext !== undefined && !isDeepStrictEqual(submittedConditions, savedConditions))
     || (payload.maternal !== undefined && !isDeepStrictEqual(payload.maternal, previous.maternal)) || payload.riskReview !== undefined;
   const updatesFollowUp = payload.followUpRequired !== undefined || payload.nextVisitDate !== undefined;
   if (!updatesFollowUp) delete cleanPayload.nextVisitDate;
