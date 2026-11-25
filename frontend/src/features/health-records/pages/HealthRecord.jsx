@@ -588,7 +588,6 @@ export default function HealthRecord() {
                 </dl>
               </section>
             </div>
-            </div>
           </div>
         </div>
       )}
