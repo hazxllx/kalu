@@ -8,6 +8,10 @@ import { transform } from 'esbuild';
 import { db, setOfflineOwnerResolver, getOfflineOwnerId, captureOwnerGuard, assertCurrentOwner } from '../../src/services/offline/db.js';
 import { configureSyncEngine, resetSyncEngine } from '../../src/services/offline/syncEngine.js';
 import { createAuthOwnerLifecycle } from '../../src/services/auth/authOwnerLifecycle.js';
+import { cacheRecord } from '../../src/services/offline/records.js';
+import { queueCreate } from '../../src/services/offline/queue.js';
+import { MUTATION_TIER } from '../../src/services/offline/mutationPolicy.js';
+import { clearPersistedSupabaseSession, SUPABASE_AUTH_STORAGE_KEY } from '../../src/lib/supabase.js';
 
 const authUrl = new URL('../../src/context/AuthContext.jsx', import.meta.url);
 const sourceRoot = new URL('../../src/', import.meta.url);
@@ -28,6 +32,22 @@ afterEach(async () => {
   delete globalThis.__signInSessionTest;
 });
 
+test('persisted Supabase logout cleanup removes the configured auth storage key', () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const removedKeys = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { localStorage: { removeItem: (key) => removedKeys.push(key) } },
+  });
+  try {
+    clearPersistedSupabaseSession();
+    assert.deepEqual(removedKeys, [SUPABASE_AUTH_STORAGE_KEY]);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else delete globalThis.window;
+  }
+});
+
 const settleEvents = async (ready = () => true) => {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -46,16 +66,18 @@ const deferred = () => {
   return { promise, resolve };
 };
 
-const mountAuth = async ({ initial = null, profile = null, passwordGrant = null, restoration = null } = {}) => {
+const mountAuth = async ({ initial = null, profile = null, passwordGrant = null, restoration = null, signOutFailure = null } = {}) => {
   const listeners = new Set();
-  const calls = { credentials: 0, profile: 0, signOut: 0 };
+  const calls = { credentials: 0, profile: 0, signOut: 0, persistedStorageClears: 0 };
   let sdkSession = initial;
+  let persistedSession = initial;
   const emit = (event, session) => {
     sdkSession = session;
+    persistedSession = session;
     for (const listener of listeners) listener(event, session);
   };
   const sdk = { auth: {
-    getSession: async () => restoration ? restoration() : { data: { session: sdkSession }, error: null },
+    getSession: async () => restoration ? restoration() : { data: { session: persistedSession }, error: null },
     onAuthStateChange(callback) {
       listeners.add(callback);
       queueMicrotask(() => callback('INITIAL_SESSION', sdkSession));
@@ -67,7 +89,15 @@ const mountAuth = async ({ initial = null, profile = null, passwordGrant = null,
       if (result.data?.session) emit('SIGNED_IN', result.data.session);
       return result;
     },
-    async signOut() { calls.signOut += 1; emit('SIGNED_OUT', null); return { error: null }; },
+    async signOut(options) {
+      calls.signOut += 1;
+      if (signOutFailure && options?.scope !== 'local') {
+        if (signOutFailure instanceof Error) throw signOutFailure;
+        return { error: signOutFailure };
+      }
+      emit('SIGNED_OUT', null);
+      return { error: null };
+    },
   } };
   const api = {
     async me({ ownerId }) {
@@ -80,11 +110,18 @@ const mountAuth = async ({ initial = null, profile = null, passwordGrant = null,
     },
     logout: async () => ({ success: true }),
   };
-  globalThis.__signInSessionTest = { supabase: sdk, authApi: api };
+  globalThis.__signInSessionTest = {
+    supabase: sdk,
+    authApi: api,
+    clearPersistedSupabaseSession: () => {
+      calls.persistedStorageClears += 1;
+      persistedSession = null;
+    },
+  };
   let source = await readFile(authUrl, 'utf8');
   source = source
-    .replace(/import\s*\{\s*supabase\s*,\s*isSupabaseConfigured\s*\}\s*from\s*['"][^'"]+['"];?/,
-      'const { supabase } = globalThis.__signInSessionTest; const isSupabaseConfigured = true;')
+    .replace(/import\s*\{\s*supabase\s*,\s*isSupabaseConfigured\s*,\s*clearPersistedSupabaseSession\s*\}\s*from\s*['"][^'"]+['"];?/,
+      'const { supabase, clearPersistedSupabaseSession } = globalThis.__signInSessionTest; const isSupabaseConfigured = true;')
     .replace(/import \{ authApi \} from '[^']+';/, 'const { authApi } = globalThis.__signInSessionTest;')
     .replace(/from (['"])(@\/[^'"]+|\.{1,2}\/[^'"]+)\1/g, (_match, _quote, path) => {
       const resolved = path.startsWith('@/') ? new URL(`${path.slice(2)}.js`, sourceRoot) : new URL(path, authUrl);
@@ -96,7 +133,7 @@ const mountAuth = async ({ initial = null, profile = null, passwordGrant = null,
   let current;
   function Probe() { current = module.useAuth(); return null; }
   await act(async () => { renderer = create(React.createElement(module.AuthProvider, null, React.createElement(Probe))); });
-  return { calls, emit, get state() { return current; }, listeners };
+  return { calls, emit, get state() { return current; }, get persistedSession() { return persistedSession; }, listeners };
 };
 
 test('establishing authentication must survive the sync reset performed by its owner lifecycle', async () => {
@@ -237,6 +274,60 @@ test('logout cancels an outstanding password grant and never lets it authenticat
   assert.equal(auth.state.isAuthenticated, false);
   assert.equal(auth.state.session, null);
   assert.equal(auth.calls.signOut, 1);
+  assert.equal(auth.persistedSession, null);
+});
+
+test('logout clears local auth and owner cache when Supabase sign-out fails, without losing pending work', async () => {
+  const auth = await mountAuth({
+    initial: sessionFor('account-a'),
+    signOutFailure: new TypeError('Failed to fetch'),
+  });
+  await settleEvents(() => auth.state.isAuthenticated && !auth.state.isResolvingProfile);
+  await cacheRecord({
+    entity: 'resident',
+    remoteId: 'cached-resident',
+    ownerId: 'account-a',
+    data: { id: 'cached-resident', name: 'Synthetic resident' },
+  });
+  const pending = await queueCreate({
+    entity: 'household',
+    ownerId: 'account-a',
+    data: { headName: 'Synthetic pending household' },
+    mutationType: MUTATION_TIER.SAFE_SYNC,
+  });
+
+  await act(async () => { await auth.state.logout(false); });
+
+  assert.equal(auth.state.isAuthenticated, false);
+  assert.equal(auth.state.session, null);
+  assert.equal(auth.state.user, null);
+  assert.equal(auth.persistedSession, null);
+  assert.equal(auth.calls.persistedStorageClears, 1);
+  assert.equal(auth.calls.signOut, 2, 'a local SDK sign-out follows the failed global sign-out');
+  assert.equal(await db.records.where('ownerId').equals('account-a').count(), 0, 'owner-scoped disposable cache is cleaned');
+  assert.equal((await db.outbox.get(pending.operation.opId)).status, 'pending', 'unsynced work is retained');
+
+  await act(async () => { renderer.unmount(); });
+  renderer = null;
+  const reloaded = await mountAuth({ initial: auth.persistedSession });
+  await settleEvents(() => reloaded.state.authChecked && !reloaded.state.isResolvingProfile);
+  assert.equal(reloaded.state.isAuthenticated, false, 'a reload cannot restore the logged-out session');
+  assert.equal(reloaded.calls.profile, 0);
+});
+
+test('logout clears persisted auth when Supabase returns a sign-out error', async () => {
+  const auth = await mountAuth({
+    initial: sessionFor('account-a'),
+    signOutFailure: { message: 'Remote sign-out failed' },
+  });
+  await settleEvents(() => auth.state.isAuthenticated && !auth.state.isResolvingProfile);
+
+  await act(async () => { await auth.state.logout(false); });
+
+  assert.equal(auth.state.isAuthenticated, false);
+  assert.equal(auth.persistedSession, null);
+  assert.equal(auth.calls.persistedStorageClears, 1);
+  assert.equal(auth.calls.signOut, 2);
 });
 
 test('a genuine server account rejection remains blocked and ends only its own session', async () => {

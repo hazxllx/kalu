@@ -106,6 +106,7 @@ const mountPortal = async ({ initial = sessionFor(), profile = async (id) => pro
       },
       signOut: async () => { calls.signOut += 1; emit('SIGNED_OUT', null); return { error: null }; },
     } },
+    clearPersistedSupabaseSession: () => { sdkSession = null; },
     authApi: {
       me: async ({ ownerId, headers }) => {
         calls.profile += 1;
@@ -134,7 +135,7 @@ const mountPortal = async ({ initial = sessionFor(), profile = async (id) => pro
       builder.onResolve({ filter: /^@\/services\/api$/ }, () => ({ path: 'authApi', namespace: 'portal-mock' }));
       builder.onResolve({ filter: /^@\/services\/api\/rolesApi$/ }, () => ({ path: 'rolesApi', namespace: 'portal-mock' }));
       builder.onLoad({ filter: /.*/, namespace: 'portal-mock' }, ({ path: name }) => ({ contents: name === 'supabase'
-        ? 'export const supabase=globalThis.__verifiedProfileStartup.supabase; export const isSupabaseConfigured=true; export const supabaseConfigurationError=null;'
+        ? 'export const supabase=globalThis.__verifiedProfileStartup.supabase; export const clearPersistedSupabaseSession=globalThis.__verifiedProfileStartup.clearPersistedSupabaseSession; export const isSupabaseConfigured=true; export const supabaseConfigurationError=null;'
         : `export const ${name}=globalThis.__verifiedProfileStartup.${name};`, loader: 'js' }));
       // These are the real shared Dexie/crypto/lifecycle/cache APIs, not copied
       // provider state or handcrafted permission/Auth implementations.

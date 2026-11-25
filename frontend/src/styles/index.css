@@ -3097,6 +3097,16 @@ body,
   min-width: 0;
 }
 
+.app-content-shell {
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .app-content-shell {
+    margin-left: var(--app-sidebar-width);
+  }
+}
+
 .app-header {
   min-width: 0;
   padding-left: max(0.75rem, env(safe-area-inset-left));

@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured, clearPersistedSupabaseSession } from '@/lib/supabase';
 import { authApi } from '@/services/api';
 import { authFailureMessage, isAuthNetworkFailure } from '../../../shared/authConnectivity.js';
 import { createAuthOwnerLifecycle } from '@/services/auth/authOwnerLifecycle';
@@ -569,34 +569,77 @@ export const AuthProvider = ({ children }) => {
     if (loginRequest) loginRequest.cancelReason = 'AUTH_SIGN_IN_CANCELLED';
     setIsSigningOut(true);
     const job = (async () => {
-      // Wait only for the non-abortable password grant, not its profile I/O.
-      if (loginRequest?.credentials) {
-        const result = await loginRequest.credentials.catch(() => null);
-        if (result?.data?.session) loginRequest.session = result.data.session;
-      }
-      const ownerId = lifecycleRef.current.ownerId;
-      const guard = ownerId ? sessionGuard(ownerId) : () => !currentSessionRef.current;
-      await invalidateProfileAccess(ownerId).catch(() => {});
-      resetSyncEngine();
-      resetLegacyWorkingSets();
-      if (isSupabaseConfigured && supabase) {
+      let ownerId = null;
+      let expectedOwner = null;
+      let sessionHandled = false;
+      try {
+        // Wait only for the non-abortable password grant, not its profile I/O.
+        if (loginRequest?.credentials) {
+          const result = await loginRequest.credentials.catch(() => null);
+          if (result?.data?.session) loginRequest.session = result.data.session;
+        }
+        ownerId = lifecycleRef.current.ownerId;
+        expectedOwner = ownerId || loginRequest?.session?.user?.id || null;
+        await invalidateProfileAccess(ownerId).catch(() => {});
+        resetSyncEngine();
+        resetLegacyWorkingSets();
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await authApi.logout(ownerId ? { ownerId } : undefined);
+          } catch { /* best-effort; the local session still needs to end */ }
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          const sessionOwner = data?.session?.user?.id || null;
+          if (!sessionOwner || sessionOwner !== expectedOwner) {
+            sessionHandled = true;
+          } else {
+            const { error } = await supabase.auth.signOut();
+            if (error) console.warn('Remote Supabase sign-out failed; local logout will continue.');
+            sessionHandled = !error;
+          }
+        } else {
+          sessionHandled = true;
+        }
+      } catch {
+        console.warn('Could not complete remote sign-out; local logout will continue.');
+      } finally {
+        const lifecycle = lifecycleRef.current;
+        const activeOwner = lifecycle.ownerId || currentSessionRef.current?.user?.id || null;
+        const ownsCurrentSession = expectedOwner
+          ? !activeOwner || activeOwner === expectedOwner
+          : !activeOwner;
+
+        if (isSupabaseConfigured && supabase && !sessionHandled && ownsCurrentSession) {
+          try {
+            clearPersistedSupabaseSession();
+          } catch {
+            console.warn('Could not remove the persisted authentication session.');
+          }
+          try {
+            const { error } = await supabase.auth.signOut({ scope: 'local' });
+            if (error) console.warn('Could not clear the local Supabase session.');
+          } catch {
+            console.warn('Could not clear the local Supabase session.');
+          }
+        }
+
         try {
-          await authApi.logout(ownerId ? { ownerId } : undefined);
-        } catch { /* best-effort; SDK sign-out still ends this session */ }
-        const { data } = await supabase.auth.getSession();
-        const expectedOwner = ownerId || loginRequest?.session?.user?.id;
-        if ((guard() || !ownerId) && data?.session?.user?.id === expectedOwner) await supabase.auth.signOut();
+          if (ownsCurrentSession) {
+            resolvedProfileUser.current = null;
+            resolvingForRef.current = null;
+            setIsResolvingProfile(false);
+            setAuthNotice(null);
+            applyUser(null, null);
+          }
+        } finally {
+          try {
+            await lifecycle.cleanup(ownerId);
+          } catch {
+            console.error('Could not clean disposable account cache. Pending work was retained.');
+          }
+          if (shouldRedirect && !lifecycle.ownerId) window.location.href = '/login';
+        }
       }
-      if (guard() || !lifecycleRef.current.ownerId) {
-        resolvedProfileUser.current = null;
-        resolvingForRef.current = null;
-        setIsResolvingProfile(false);
-        setAuthNotice(null);
-        applyUser(null, null);
-      }
-      try { await lifecycleRef.current.cleanup(ownerId); }
-      catch (error) { console.error('Could not clean disposable account cache. Pending work was retained.', error); }
-      if (shouldRedirect && !lifecycleRef.current.ownerId) window.location.href = '/login';
     })();
     logoutRequestRef.current = job;
     try { return await job; }

@@ -11,7 +11,7 @@ import { Skeleton, SkeletonTable } from "@/components/common/Skeleton";
 import { useAuth } from "@/context/AuthContext";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { filterRowsByScope } from "@/lib/phnScope";
-import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
+import { CHECKUP_STATUS, checkupStatusLabel } from "@/lib/phnWorkflowMap";
 import {
   countFollowUpsDue,
   countPendingReferrals,
@@ -91,10 +91,10 @@ const welcomeFor = (user) => {
 
 /* ------------------------------- Primitives ------------------------------- */
 
-function Pill({ value, tones }) {
+function Pill({ value, tones, noWrap = false }) {
   const tone = tones[value] || "bg-slate-100 text-slate-600";
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${tone}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${noWrap ? "whitespace-nowrap" : ""} ${tone}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
       {value}
     </span>
@@ -282,7 +282,7 @@ export default function PHNDashboard() {
               <h3 className="text-sm font-semibold text-brand-ink sm:text-base">Patients for Check-up (RHU)</h3>
               {!queue.loading && !queue.error && (
                 <span className="rounded-full bg-brand-accent/10 px-2.5 py-0.5 text-xs font-semibold text-brand-accent">
-                  {counts.waiting} waiting · {counts.inCheckup} in check-up
+                  {counts.waiting} waiting · {counts.inCheckup} in progress
                 </span>
               )}
             </div>
@@ -316,7 +316,15 @@ export default function PHNDashboard() {
           />
         ) : (
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[1000px] table-fixed text-sm">
+              <colgroup>
+                <col className="w-[21%]" />
+                <col className="w-[15%]" />
+                <col className="w-[23%]" />
+                <col className="w-[12%]" />
+                <col className="w-[13%]" />
+                <col className="w-[16%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-brand-border bg-brand-bg text-left">
                   {["Patient", "Barangay", "Reason for Visit", "Risk", "Status", ""].map((h) => (
@@ -334,21 +342,21 @@ export default function PHNDashboard() {
                   const risk = q.riskLevel || 'Unassessed';
                   return (
                     <tr key={q.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50">
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 align-middle">
                         <p className="font-medium text-brand-ink">{q.patient}</p>
                         <p className="text-xs text-brand-gray">
                           {[q.age && `${q.age} yrs`, q.sex].filter(Boolean).join(" · ")}
                         </p>
                       </td>
-                      <td className="px-4 py-3 text-brand-ink">{q.barangay || "RHU"}</td>
-                      <td className="px-4 py-3 text-brand-ink">{q.reason || q.triage?.chiefComplaint || "—"}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 align-middle text-brand-ink">{q.barangay || "RHU"}</td>
+                      <td className="px-4 py-3 align-middle text-left text-brand-ink [overflow-wrap:anywhere]">{q.reason || q.triage?.chiefComplaint || "—"}</td>
+                      <td className="px-4 py-3 align-middle">
                         <Pill value={risk} tones={RISK_TONES} />
                       </td>
-                      <td className="px-4 py-3">
-                        <Pill value={q.status} tones={{}} />
+                      <td className="px-4 py-3 align-middle">
+                        <Pill value={checkupStatusLabel(q.status)} tones={{}} noWrap />
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right align-middle">
                         <button
                           type="button"
                           onClick={() => handleStartCheckup(q)}
@@ -465,8 +473,8 @@ export default function PHNDashboard() {
           <SectionHeader title="Check-up Progress" subtitle="RHU activity today" icon={Activity} />
           <div className="space-y-2.5">
             {[
-              { label: "Waiting for PHN", value: counts.waiting, tone: "text-brand-accent bg-brand-accent/10" },
-              { label: "In Check-up", value: counts.inCheckup, tone: "text-brand-blue bg-brand-blue/10" },
+              { label: checkupStatusLabel(CHECKUP_STATUS.WAITING), value: counts.waiting, tone: "text-brand-accent bg-brand-accent/10" },
+              { label: checkupStatusLabel(CHECKUP_STATUS.IN_CHECKUP), value: counts.inCheckup, tone: "text-brand-blue bg-brand-blue/10" },
               { label: "Completed Today", value: counts.completedToday, tone: "text-brand-green bg-brand-green/10" },
             ].map((row) => (
               <div

@@ -82,6 +82,7 @@ export default function DashboardLayout({ roleKey }) {
         window.matchMedia("(min-width: 768px) and (max-width: 1023px)").matches;
     }
   });
+  const sidebarWidth = sidebarCollapsed ? "5rem" : roleKey === "admin" ? "17rem" : isSupervisor ? "16rem" : "18rem";
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Expanded submenu groups (e.g., "User & Personnel Management" expanded state)
@@ -663,10 +664,14 @@ export default function DashboardLayout({ roleKey }) {
   );
 
   return (
-    <div className={`kalusagap-shell min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""} ${roleKey === "admin" ? "admin-shell" : ""}`}>
+    <div
+      className={`kalusagap-shell min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""} ${roleKey === "admin" ? "admin-shell" : ""}`}
+      style={{ "--app-sidebar-width": sidebarWidth }}
+    >
       <aside
-        className={`app-sidebar hidden md:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : roleKey === "admin" ? "w-[272px]" : isSupervisor ? "w-64" : "w-72"}`}
+        className="app-sidebar fixed left-0 top-0 z-30 hidden h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar md:flex"
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
+        style={{ width: sidebarWidth }}
       >
         {/* Brand header — fixed */}
         <div className={`relative shrink-0 flex h-16 items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `${sidebarCollapsed ? "justify-center px-2" : "px-4 pr-11"}` : `${sidebarCollapsed ? "justify-center gap-0 px-2" : isSupervisor ? "justify-between gap-3 px-4" : "justify-between gap-3 px-5"}`}`}>
@@ -769,7 +774,7 @@ export default function DashboardLayout({ roleKey }) {
         )}
       </AnimatePresence>
 
-      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "md:pl-20" : roleKey === "admin" ? "md:pl-[272px]" : isSupervisor ? "md:pl-64" : "md:pl-72"}`}>
+      <div className="app-content-shell min-w-0 transition-[margin] duration-200 ease-out">
         <header className={`app-header sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 ${roleKey === "admin" ? "md:px-5" : "md:px-6"}`}>
           <button
             onClick={() => setOpen(true)}

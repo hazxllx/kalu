@@ -7,6 +7,8 @@ import {
 import { Card } from "@/components/common/Card";
 import { HOUSEHOLD_RETURN_REASONS } from "@/services/local/householdVerifications";
 
+import HouseholdFeedback from '@/features/households/components/HouseholdFeedback';
+
 const formatReviewDate = (date) =>
   date.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -43,6 +45,9 @@ export default function HouseholdVerificationReviewDrawer({
   reviewerName,
   reviewerRoleLabel,
   saving = false,
+  requestError = "",
+  correctionError = "",
+  onEdit = () => {},
   onClose,
   onDecision,
 }) {
@@ -78,6 +83,7 @@ export default function HouseholdVerificationReviewDrawer({
   }, [showVerifyConfirm, returning, onClose]);
 
   const confirmReturn = () => {
+    if (saving) return;
     if (!reason) {
       setError("Please select a reason for returning the household profile.");
       return;
@@ -240,10 +246,11 @@ export default function HouseholdVerificationReviewDrawer({
           {/* Review actions follow the household details, matching the scrollable reference layout. */}
           {household.verificationStatus === "Pending Verification" && (
             <section className="border-t border-brand-border pt-5">
+              {!showVerifyConfirm && <HouseholdFeedback message={requestError} tone="error" />}
               {returning ? (
                 <div className="space-y-3">
                   <p className="text-sm text-brand-gray">Reason for returning household {household.householdId}</p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div role="group" aria-label="Reason for returning household" aria-invalid={Boolean(error && !reason)} aria-describedby={error && !reason ? "return-reason-error" : undefined} className={`grid grid-cols-1 gap-2 sm:grid-cols-2 ${error && !reason ? "rounded border border-red-300 p-2" : ""}`}>
                     {HOUSEHOLD_RETURN_REASONS.map((r) => (
                       <label
                         key={r}
@@ -253,28 +260,33 @@ export default function HouseholdVerificationReviewDrawer({
                       >
                         <input
                           type="radio"
+                          disabled={saving}
                           name="household-return-reason"
                           checked={reason === r}
-                          onChange={() => { setReason(r); setError(""); }}
+                          onChange={() => { setReason(r); setError(""); onEdit(); }}
                           className="h-4 w-4 accent-brand-danger"
                         />
                         {r}
                       </label>
                     ))}
                   </div>
+                  {error && !reason && <p id="return-reason-error" className="text-xs text-red-700">{error}</p>}
                   <label className="block">
                     <span className="mb-1.5 block text-sm font-medium text-brand-ink">Remarks {reason === "Other" && <span className="text-red-500">*</span>}</span>
                     <textarea
                       rows={3}
                       value={remarks}
-                      onChange={(e) => { setRemarks(e.target.value); setError(""); }}
+                      disabled={saving}
+                      aria-invalid={Boolean(correctionError || (error && reason === "Other"))}
+                      aria-describedby={(correctionError || (error && reason === "Other")) ? "return-remarks-error" : undefined}
+                      onChange={(e) => { setRemarks(e.target.value); onEdit(); if (e.target.value.trim()) setError(""); }}
                       placeholder="Explain the correction needed"
-                      className="w-full resize-none rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card-nested"
+                      className={`w-full resize-none rounded-btn border ${(correctionError || (error && reason === "Other")) ? "border-red-400" : "border-brand-border"} bg-white px-3 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card-nested`}
                     />
                   </label>
-                  {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+                  {(correctionError || (error && reason === "Other")) && <p id="return-remarks-error" className="text-xs text-red-700">{correctionError || error}</p>}
                   <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
-                    <button type="button" onClick={() => setReturning(false)} className="h-11 rounded-btn px-4 text-sm font-medium text-brand-gray">Cancel</button>
+                    <button type="button" disabled={saving} onClick={() => setReturning(false)} className="h-11 rounded-btn px-4 text-sm font-medium text-brand-gray">Cancel</button>
                     <button type="button" onClick={confirmReturn} disabled={saving} className="h-11 rounded-btn bg-brand-danger px-5 text-sm font-medium text-white disabled:opacity-60">
                       {saving ? "Saving…" : "Confirm Return"}
                     </button>
@@ -323,8 +335,10 @@ export default function HouseholdVerificationReviewDrawer({
                   </div>
                 </div>
               </div>
+              {requestError && <div className="px-6 pb-3"><HouseholdFeedback message={requestError} tone="error" /></div>}
               <div className="flex justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
                 <button
+                  disabled={saving}
                   onClick={() => setShowVerifyConfirm(false)}
                   className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg"
                 >

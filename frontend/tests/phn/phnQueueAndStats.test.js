@@ -10,7 +10,7 @@ import test from 'node:test';
 
 import { queueCounts, sortQueueByRisk } from '../../src/lib/phnDashboard.js';
 import { manilaDateKey } from '../../src/lib/phnDashboard.js';
-import { CHECKUP_STATUS } from '../../src/lib/phnWorkflowMap.js';
+import { CHECKUP_STATUS, checkupStatusLabel } from '../../src/lib/phnWorkflowMap.js';
 import { mapVisitsToPatients } from '../../src/lib/phnWorkflowMap.js';
 import { classifySyncError, SYNC_ERROR } from '../../src/services/offline/errors.js';
 
@@ -21,6 +21,14 @@ const patient = (overrides = {}) => ({
   patient: overrides.patient || 'Juan Dela Cruz',
   barangay: overrides.barangay || 'Barangay 1',
   checkup: overrides.checkup,
+});
+
+test('check-up status labels are shortened without changing workflow values', () => {
+  assert.equal(checkupStatusLabel(CHECKUP_STATUS.WAITING), 'Waiting');
+  assert.equal(checkupStatusLabel(CHECKUP_STATUS.IN_CHECKUP), 'In Progress');
+  assert.equal(checkupStatusLabel(CHECKUP_STATUS.COMPLETED), CHECKUP_STATUS.COMPLETED);
+  assert.equal(CHECKUP_STATUS.WAITING, 'Waiting for PHN');
+  assert.equal(CHECKUP_STATUS.IN_CHECKUP, 'In Check-up');
 });
 
 test('queueCounts computes Waiting for PHN from waiting patients only', () => {

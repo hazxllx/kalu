@@ -4,9 +4,9 @@ import PageHeader from "@/components/common/PageHeader";
 import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
-import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
+import { CHECKUP_STATUS, checkupStatusLabel } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
-import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
+import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupWorkbench";
 import { filterRowsByScope, scopeLabel, phnFilterOptions, rowMatchesOption } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { riskOfPatient } from "@/lib/riskRules";
@@ -16,12 +16,6 @@ import { formatClinicalDateTime } from "@/lib/dateUtils";
 import { useAuth } from "@/context/AuthContext";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import { Search, CheckCircle2, Stethoscope, ClipboardCheck, Eye, RefreshCw } from "lucide-react";
-
-const EMPTY_STATE = {
-  "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
-  "In Check-up": "bg-brand-blue/10 text-brand-blue",
-  "Consultation Completed": "bg-brand-green/10 text-brand-green",
-};
 
 const RISK_TONES = {
   High: "bg-brand-danger/10 text-brand-danger",
@@ -290,7 +284,7 @@ export default function PhnCheckups() {
 
   const kpis = [
     {
-      label: "Waiting for PHN",
+      label: checkupStatusLabel(CHECKUP_STATUS.WAITING),
       value: stats.waiting,
       icon: "Users",
       tone: "blue",
@@ -298,7 +292,7 @@ export default function PhnCheckups() {
       onClick: () => toggleStatus(CHECKUP_STATUS.WAITING),
     },
     {
-      label: "In Check-up",
+      label: checkupStatusLabel(CHECKUP_STATUS.IN_CHECKUP),
       value: stats.inCheckup,
       icon: "ClipboardCheck",
       tone: "green",
@@ -396,7 +390,7 @@ export default function PhnCheckups() {
                 <option value="All">All Status</option>
                 {Object.values(CHECKUP_STATUS).map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {checkupStatusLabel(s)}
                   </option>
                 ))}
               </select>
@@ -479,9 +473,9 @@ export default function PhnCheckups() {
                         </span>
                       </td>
                       <td className="px-2 py-2.5 lg:px-3">
-                        <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight ${CHECKUP_STATUS_TONES[p.status] || EMPTY_STATE[p.status] || "bg-slate-100 text-slate-600"}`}>
+                        <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium leading-tight text-slate-600 ${p.status === CHECKUP_STATUS.COMPLETED ? "whitespace-normal" : "whitespace-nowrap"}`}>
                           <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
-                          {p.status}
+                          {checkupStatusLabel(p.status)}
                         </span>
                       </td>
                       <td className="px-2 py-2.5 lg:px-3">
@@ -561,7 +555,10 @@ export default function PhnCheckups() {
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${p.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>{scopeLabel(p, user)}</span>
                     <RiskBadge level={risk.level} />
-                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${CHECKUP_STATUS_TONES[p.status] || "bg-slate-100 text-slate-600"}`}>{p.status}</span>
+                    <span className={`inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ${p.status === CHECKUP_STATUS.COMPLETED ? "whitespace-normal" : "whitespace-nowrap"}`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                      {checkupStatusLabel(p.status)}
+                    </span>
                   </div>
                   <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                     <div className="col-span-2"><dt className="text-brand-gray">Reason for check-up</dt><dd className="mt-0.5 break-words font-medium text-brand-ink">{reason}</dd></div>

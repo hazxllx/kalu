@@ -33,6 +33,31 @@ export const HH_STATUSES = [
 ];
 
 export const APPROVAL_STATUSES = ["Not yet approved", "Approved", "Needs revision"];
+export const HOUSEHOLD_DISPLAY_STATUSES = ["Pending", "Approved", "Needs Update", "Rejected"];
+
+/**
+ * Derive a single list status without changing the underlying workflow values.
+ * Approval is complete only after both verification and approval are complete.
+ * @param {{verificationStatus?: string, approvalStatus?: string, hhStatus?: string}} household
+ */
+export function getHouseholdDisplayStatus({ verificationStatus, approvalStatus, hhStatus } = {}) {
+  const verification = String(verificationStatus || "").trim().toLowerCase();
+  const approval = String(approvalStatus || "").trim().toLowerCase();
+  const household = String(hhStatus || "").trim().toLowerCase();
+
+  if ([verification, approval, household].includes("rejected") || household === "refused") {
+    return "Rejected";
+  }
+  if (
+    verification === "returned for correction"
+    || approval === "needs revision"
+    || household === "needs update"
+  ) {
+    return "Needs Update";
+  }
+  if (verification === "verified" && approval === "approved") return "Approved";
+  return "Pending";
+}
 
 export const PUROKS = ["Purok 1", "Purok 2", "Purok 3", "Purok 4", "Purok 5", "Purok 6", "Purok 7"];
 
@@ -175,6 +200,7 @@ const TONES = {
   Submitted: "bg-emerald-50 text-emerald-700",
   Approved: "bg-emerald-50 text-emerald-700",
   "Needs Update": "bg-amber-50 text-amber-700",
+  Rejected: "bg-rose-50 text-rose-700",
   "For Masterlist Update": "bg-amber-50 text-amber-700",
   Refused: "bg-rose-50 text-rose-700",
   "Non-Eligible": "bg-rose-50 text-rose-700",

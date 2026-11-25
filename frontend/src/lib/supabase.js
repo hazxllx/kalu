@@ -21,6 +21,12 @@ if (import.meta.env?.MODE && import.meta.env.MODE !== 'production') {
 
 export const supabaseConfigurationError = publicSupabaseConfigurationError(url, anonKey);
 export const isSupabaseConfigured = !supabaseConfigurationError;
+export const SUPABASE_AUTH_STORAGE_KEY = import.meta.env?.MODE && import.meta.env.MODE !== 'production'
+  ? 'kalusagap.local.auth' : 'kalusagap.auth';
+
+export const clearPersistedSupabaseSession = () => {
+  if (typeof window !== 'undefined') window.localStorage.removeItem(SUPABASE_AUTH_STORAGE_KEY);
+};
 
 if (!isSupabaseConfigured && import.meta.env?.DEV) {
   console.warn('Supabase authentication is not configured for this frontend build.');
@@ -32,8 +38,7 @@ export const supabase = isSupabaseConfigured
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storageKey: import.meta.env?.MODE && import.meta.env.MODE !== 'production'
-          ? 'kalusagap.local.auth' : 'kalusagap.auth',
+        storageKey: SUPABASE_AUTH_STORAGE_KEY,
       },
     })
   : null;

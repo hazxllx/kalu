@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -11,7 +11,10 @@ import { useAuth } from "@/context/AuthContext";
 import { householdsApi } from "@/services/api";
 import { ROLES } from "@/lib/brand";
 import { canonicalRiskLevel } from "@/lib/riskLevel";
-import { CheckCircle2, ChevronRight, History, Home } from "lucide-react";
+import { ChevronRight, History, Home } from "lucide-react";
+
+import HouseholdFeedback from '@/features/households/components/HouseholdFeedback';
+import { safeHouseholdError, householdFieldErrors } from '@/features/households/lib/householdFeedback';
 
 const PAGE_SIZE = 10;
 const HOUSEHOLD_STATUS_FILTERS = [
@@ -101,8 +104,12 @@ export default function HouseholdVerifications({
   const [reviewing, setReviewing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  const [decisionError, setDecisionError] = useState("");
+  const [correctionError, setCorrectionError] = useState("");
+  const decisionLock = useRef(false);
+  const dismissToast = useCallback(() => setToast(null), []);
 
-  const showToast = (message) => { setToast(message); setTimeout(() => setToast(null), 4000); };
+  const showToast = (message) => setToast(message);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,7 +131,7 @@ export default function HouseholdVerifications({
         mappedRows.filter((household) => household.verificationStatus === "Pending Verification").length,
       );
     } catch (err) {
-      setLoadError(err?.message || "Unable to load households. Please try again.");
+      setLoadError(safeHouseholdError(err, "Unable to load households. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -171,17 +178,20 @@ export default function HouseholdVerifications({
   }, [filtered.length, page]);
 
   const openReview = async (row) => {
+    setToast(null); setDecisionError(""); setCorrectionError("");
     try {
       const result = await householdsApi.get(row.householdId);
       setReviewing(toDrawer(result?.household || result));
     } catch (err) {
-      showToast(err?.message || "Could not open the household.");
+      setLoadError(safeHouseholdError(err, "Could not open the household. Please retry."));
     }
   };
 
   const handleDecision = async ({ decision, reason, remarks }) => {
     const record = reviewing;
-    if (!record) return;
+    if (!record || decisionLock.current) return;
+    decisionLock.current = true;
+    setDecisionError(""); setCorrectionError(""); setToast(null);
     const verificationStatus = decision === "approved" ? "Verified" : "Returned for Correction";
     const correctionReason =
       decision === "approved" ? "" : remarks ? `${reason} — ${remarks}` : reason;
@@ -196,12 +206,11 @@ export default function HouseholdVerifications({
       );
       await load();
     } catch (err) {
-      const details = err?.payload?.error?.details;
-      const detailMessage = Array.isArray(details) && details.length
-        ? ` Missing information: ${details.join(", ")}.`
-        : "";
-      showToast(`${err?.message || "Could not save the verification decision."}${detailMessage}`);
+      const fieldErrors = householdFieldErrors(err);
+      setCorrectionError(fieldErrors.correctionReason || "");
+      setDecisionError(fieldErrors.correctionReason ? "" : safeHouseholdError(err, "Could not save the decision. Please try again."));
     } finally {
+      decisionLock.current = false;
       setSaving(false);
     }
   };
@@ -216,18 +225,13 @@ export default function HouseholdVerifications({
         />
       )}
 
-      {toast && (
-        <div className="fixed bottom-4 right-4 z-50 flex animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
-          <CheckCircle2 className="h-4 w-4 text-brand-green" />
-          <span className="text-sm text-white">{toast}</span>
-        </div>
-      )}
+      {toast && <div className="mb-3"><HouseholdFeedback message={toast} onDismiss={dismissToast} /></div>}
 
       <Card className="overflow-hidden">
         <VerificationQueueToolbar
           filters={HOUSEHOLD_STATUS_FILTERS}
           status={statusFilter}
-          onStatusChange={(value) => { setPage(1); setStatusFilter(value); }}
+          onStatusChange={(value) => { setToast(null); setPage(1); setStatusFilter(value); }}
           searchValue={query}
           onSearchChange={(value) => { setPage(1); setQuery(value); }}
           searchPlaceholder="Search by household head, household ID, or barangay"
@@ -480,7 +484,10 @@ export default function HouseholdVerifications({
             reviewerName={reviewerName}
             reviewerRoleLabel={reviewerRoleLabel}
             saving={saving}
-            onClose={() => setReviewing(null)}
+            requestError={decisionError}
+            correctionError={correctionError}
+            onEdit={() => { setDecisionError(""); setCorrectionError(""); }}
+            onClose={() => { if (!decisionLock.current) setReviewing(null); }}
             onDecision={handleDecision}
           />
         )}

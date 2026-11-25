@@ -17,6 +17,17 @@ export const CHECKUP_STATUS = Object.freeze({
   COMPLETED: "Consultation Completed",
 });
 
+export const checkupStatusLabel = (status) => {
+  switch (status) {
+    case CHECKUP_STATUS.WAITING:
+      return "Waiting";
+    case CHECKUP_STATUS.IN_CHECKUP:
+      return "In Progress";
+    default:
+      return status;
+  }
+};
+
 /** Map a backend visit status to the UI pipeline status. */
 export const mapVisitStatus = (status) => {
   switch (status) {

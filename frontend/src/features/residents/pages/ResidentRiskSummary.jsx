@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Activity, AlertTriangle, Eye, Search, X } from 'lucide-react';
+import { AlertTriangle, Search, X } from 'lucide-react';
 import PageHeader from '@/components/common/PageHeader';
 import TablePagination from '@/components/tables/TablePagination';
 import { residentsApi } from '@/services/api/residentsApi';
@@ -15,7 +15,7 @@ const labelClass = 'grid min-w-0 gap-1.5 text-xs font-medium text-brand-gray dar
 const riskTone = {
   High: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
   Moderate: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
-  Low: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+  Low: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
   Incomplete: 'bg-orange-50 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300',
   Unassessed: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
 };
@@ -46,11 +46,11 @@ const measurementUnits = {
   bp: ' mmHg', bloodPressure: ' mmHg', systolic: ' mmHg', diastolic: ' mmHg', hr: ' bpm', heartRate: ' bpm',
   rr: ' breaths/min', respiratoryRate: ' breaths/min', o2sat: '%', oxygenSaturation: '%',
   temperature: ' °C', heightCm: ' cm', height: ' cm', weightKg: ' kg', weight: ' kg',
-  bloodSugar: ' mg/dL', bmi: ' kg/m²',
+  bmi: ' kg/m²',
 };
 const measurementLabels = {
   bp: 'Blood pressure', hr: 'Heart rate', rr: 'Respiratory rate', o2sat: 'Oxygen saturation',
-  heightCm: 'Height', weightKg: 'Weight', bmiCategory: 'BMI category', bloodSugar: 'Blood sugar',
+  heightCm: 'Height', weightKg: 'Weight', bmi: 'BMI',
 };
 const clinicalValue = (key, value) => {
   if (!isRecorded(value)) return 'Not assessed';
@@ -60,7 +60,7 @@ const clinicalValue = (key, value) => {
 };
 const classificationKey = {
   bp: 'bloodPressure', hr: 'heartRate', rr: 'respiratoryRate', o2sat: 'oxygenSaturation',
-  height: 'heightCm', weight: 'weightKg', bloodSugar: 'bloodSugar',
+  height: 'heightCm', weight: 'weightKg',
 };
 const fieldEntries = (value, prefix = '') => {
   if (value !== null && typeof value === 'object') {
@@ -79,16 +79,8 @@ function RiskLabel({ value }) {
 }
 
 function ScreeningFlags({ row }) {
-  const flagTone = {
-    critical: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300',
-    high: 'border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-300',
-    moderate: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300',
-    monitor: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300',
-    low: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300',
-    review: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-border dark:bg-card-nested dark:text-muted-foreground',
-    unknown: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-border dark:bg-card-nested dark:text-muted-foreground',
-    none: 'border-brand-border bg-white text-brand-ink dark:border-border dark:bg-card dark:text-foreground',
-  };
+  const neutralTone = 'border-brand-border bg-white text-brand-ink dark:border-border dark:bg-card dark:text-foreground';
+  const criticalTone = 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300';
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState(null);
   const [selectedId, setSelectedId] = useState('');
@@ -128,6 +120,7 @@ function ScreeningFlags({ row }) {
   const screeningRows = new Map();
   for (const [key, value] of measurementEntries) {
     const normalizedKey = classificationKey[key] || key;
+    if (!['bloodPressure', 'heartRate', 'respiratoryRate', 'bmi', 'oxygenSaturation', 'temperature', 'heightCm', 'weightKg'].includes(normalizedKey)) continue;
     screeningRows.set(normalizedKey, {
       key: normalizedKey,
       label: measurementLabels[key] || labelize(key),
@@ -137,15 +130,16 @@ function ScreeningFlags({ row }) {
     });
   }
   for (const [key, item] of Object.entries(screeningClasses)) {
-    if (!screeningRows.has(key)) screeningRows.set(key, {
+    if (!['bloodPressure', 'heartRate', 'respiratoryRate', 'bmi', 'oxygenSaturation', 'temperature', 'heightCm', 'weightKg'].includes(key)) continue;
+    if (!isRecorded(screeningRows.get(key)?.value)) screeningRows.set(key, {
       key,
-      label: labelize(key),
+      label: measurementLabels[key] || labelize(key),
       value: item?.value,
       classification: item?.classification,
       severity: item?.severity,
     });
   }
-  const currentScreeningRows = [...screeningRows.values()];
+  const currentScreeningRows = [...screeningRows.values()].filter(({ value }) => isRecorded(value));
   const selectedDate = selectedAssessment?.assessmentAt || selectedAssessment?.createdAt;
   const dateTime = selectedDate
     ? `${prettyDate(selectedDate)}${Number.isFinite(new Date(selectedDate).getTime()) ? ` · ${new Date(selectedDate).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`
@@ -155,7 +149,6 @@ function ScreeningFlags({ row }) {
   return <Dialog.Root open={open} onOpenChange={setOpen}>
     <Dialog.Trigger asChild>
       <button type="button" className="inline-flex min-h-9 items-center gap-2 rounded-full border border-brand-border bg-white px-3 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:bg-card dark:text-blue-300 dark:hover:bg-hover">
-        <Activity className="h-4 w-4" aria-hidden="true" />
         <span>View details</span>
       </button>
     </Dialog.Trigger>
@@ -171,7 +164,7 @@ function ScreeningFlags({ row }) {
         </header>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
           <section aria-label="Resident information">
-            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Resident information</h3>
+            <h3 className="text-sm font-semibold text-brand-blue dark:text-blue-300">Resident information</h3>
             {details?.resident ? <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
               {[
                 ['Full name', details.resident.name],
@@ -191,7 +184,7 @@ function ScreeningFlags({ row }) {
           </section>
           <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Clinical screening classifications">
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Clinical screening</h3>
+              <h3 className="text-sm font-semibold text-brand-blue dark:text-blue-300">Clinical screening</h3>
               {details?.assessments?.length > 0 && <label className="flex items-center gap-2 text-xs text-brand-gray dark:text-muted-foreground">
                 Assessment
                 <select aria-label="Select clinical assessment" className={`${filterClass} h-9 w-auto max-w-full min-w-[12rem]`}
@@ -204,29 +197,22 @@ function ScreeningFlags({ row }) {
               </label>}
             </div>
             {loading && <p className="flex items-center gap-2 py-2 text-sm text-brand-gray dark:text-muted-foreground" role="status">
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-blue/30 border-t-brand-blue" aria-hidden="true" />
               Loading clinical details…
             </p>}
-            {error && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300" role="alert">
+            {error && <div className={`rounded-lg border p-3 text-sm ${neutralTone}`} role="alert">
               <p>{error}</p><button type="button" onClick={() => setRetry((count) => count + 1)} className="mt-2 font-semibold underline">Retry</button>
             </div>}
             {!loading && !error && !selectedAssessment && <p className="rounded-lg border border-dashed border-brand-border px-3 py-4 text-sm text-brand-gray dark:border-border dark:text-muted-foreground">No clinical screening record is available for this resident.</p>}
             {!loading && !error && selectedAssessment && <>
               <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {currentScreeningRows.map(({ key, label, value, classification, severity }) => {
-                  const bmiComputed = key === 'bmi' && !isRecorded(value)
-                    && isRecorded(screeningClasses.bmi?.value)
-                    && isRecorded(selectedAssessment.measurements?.heightCm)
-                    && isRecorded(selectedAssessment.measurements?.weightKg);
-                  const displayedValue = bmiComputed ? screeningClasses.bmi.value : value;
-                  const recorded = isRecorded(displayedValue);
-                  return <li key={key} className={`min-w-0 rounded-lg border px-3 py-2.5 ${recorded ? flagTone[severity] || flagTone.unknown : flagTone.unknown}`}>
+                  return <li key={key} className={`min-w-0 rounded-lg border px-3 py-2.5 ${['critical', 'emergency'].includes(severity) || (key === 'bloodPressure' && ['high', 'moderate'].includes(severity)) ? criticalTone : key === 'bloodPressure' && severity === 'low' ? 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300' : neutralTone}`}>
                     <div className="flex min-w-0 items-start justify-between gap-2">
                       <span className="shrink-0 text-sm font-semibold">{label}</span>
-                      <span className="min-w-0 break-words text-right text-sm font-medium">{classification || 'Classification not available'}</span>
+                      {key === 'bloodPressure' && isRecorded(classification) && !/^(classification not available|not classified|not assessed|unknown|unavailable|n\/a)$/i.test(String(classification).trim()) && <span className="min-w-0 break-words text-right text-sm font-medium">{classification}</span>}
                     </div>
-                    <p className={`mt-1 break-words text-xs tabular-nums ${recorded ? 'font-semibold opacity-100' : 'opacity-75'}`}>
-                      {bmiComputed ? `${clinicalValue(key, displayedValue)} (calculated from recorded height and weight)` : clinicalValue(key, displayedValue)}
+                    <p className="mt-1 break-words text-xs font-semibold tabular-nums">
+                      {clinicalValue(key, value)}
                     </p>
                   </li>;
                 })}
@@ -235,12 +221,12 @@ function ScreeningFlags({ row }) {
             </>}
           </section>
           <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Overall risk summary">
-            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Overall risk summary</h3>
+            <h3 className="text-sm font-semibold text-brand-blue dark:text-blue-300">Overall risk summary</h3>
             {details && <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${riskTone[details.riskLevel] || riskTone.Unassessed}`}>
                 {details.riskLevel || 'Unassessed'}
               </span>
-              <span className="text-sm text-brand-gray dark:text-muted-foreground">
+              <span className={`text-sm ${details.riskAssessmentStatus === 'assessed' ? 'text-emerald-700 dark:text-emerald-300' : 'text-brand-gray dark:text-muted-foreground'}`}>
                 Status: {labelize(details.riskAssessmentStatus || 'unassessed')}
               </span>
               {details.riskAssessedAt && <span className="text-sm text-brand-gray dark:text-muted-foreground">
@@ -252,12 +238,11 @@ function ScreeningFlags({ row }) {
             </p>}
           </section>
           <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Assessment information">
-            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Assessment information</h3>
+            <h3 className="text-sm font-semibold text-brand-blue dark:text-blue-300">Assessment information</h3>
             {selectedAssessment ? <>
               <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-2.5 text-sm sm:grid-cols-2">
                 <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Assessment date and time</dt><dd className="mt-0.5 font-medium text-brand-ink dark:text-foreground">{dateTime}</dd></div>
-                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Assessment status</dt><dd className="mt-0.5 font-medium text-brand-ink dark:text-foreground">{labelize(selectedAssessment.status || 'not recorded')}</dd></div>
-                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Overall risk level</dt><dd className="mt-0.5 font-medium text-brand-ink dark:text-foreground">{details?.riskLevel || 'Unassessed'}</dd></div>
+                <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Assessment status</dt><dd className={`mt-0.5 font-medium ${['completed', 'complete', 'assessed'].includes(selectedAssessment.status) ? 'text-emerald-700 dark:text-emerald-300' : 'text-brand-ink dark:text-foreground'}`}>{labelize(selectedAssessment.status || 'not recorded')}</dd></div>
                 <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Recorded by</dt><dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">{selectedAssessment.recordedBy || 'Not recorded'}</dd></div>
                 <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Personnel</dt><dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">{selectedAssessment.performedBy || 'Not recorded'}</dd></div>
                 <div><dt className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Assessment type / category</dt><dd className="mt-0.5 break-words font-medium text-brand-ink dark:text-foreground">{[selectedAssessment.assessmentType, selectedAssessment.assessmentCategory].filter(Boolean).join(' · ') || 'Not recorded'}</dd></div>
@@ -267,7 +252,7 @@ function ScreeningFlags({ row }) {
             </p>}
           </section>
           <section className="border-t border-brand-border pt-3 dark:border-border" aria-label="Findings and PHN assessment">
-            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Findings and PHN assessment</h3>
+            <h3 className="text-sm font-semibold text-brand-blue dark:text-blue-300">Findings and PHN assessment</h3>
             {selectedAssessment ? (() => {
               const assessmentDetails = selectedAssessment.assessmentDetails || {};
               const findings = assessmentDetails.findings;
@@ -326,7 +311,6 @@ function RiskFactors({ details }) {
     ? Object.entries(factors).filter(([, value]) => value !== null && value !== undefined && value !== false)
     : [];
   if (!entries.length) return <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">No recorded risk factors.</p>;
-  const fieldLabels = { systolic: 'Systolic blood pressure', diastolic: 'Diastolic blood pressure', o2sat: 'Oxygen saturation', pulse: 'Heart rate', respiratory: 'Respiratory rate', bmi: 'Body mass index' };
   const normalized = entries.map((entry) => Array.isArray(entry) ? { code: entry[0], ...((entry[1] && typeof entry[1] === 'object') ? entry[1] : { measured: entry[1] }) }
     : (entry && typeof entry === 'object' ? entry : { code: entry }));
   const uniqueFactors = [...new Map(normalized.map((factor) => [
@@ -337,14 +321,10 @@ function RiskFactors({ details }) {
     {uniqueFactors.map((factor, index) => {
       const code = String(factor.code || factor.ruleId || '').toLowerCase();
       const name = factor.name || factor.label || (code === 'bp_severe' ? 'Blood Pressure – Severe' : labelize(code || factor.field));
-      const field = factor.field ? fieldLabels[factor.field] || labelize(factor.field) : '';
       return <li key={`${factor.code || factor.name || factor.field}-${index}`} className="min-w-0 border-t border-brand-border py-2 first:border-0 dark:border-border">
         <p className="break-words text-sm font-semibold text-brand-ink dark:text-foreground">{name}</p>
         {factor.description && <p className="mt-1 break-words text-xs text-brand-gray dark:text-muted-foreground">{factor.description}</p>}
-        {(field || isRecorded(factor.measured)) && <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-          {field && <div><dt className="text-brand-gray dark:text-muted-foreground">Clinical indicator</dt><dd className="font-medium text-brand-ink dark:text-foreground">{field}</dd></div>}
-          {isRecorded(factor.measured) && <div><dt className="text-brand-gray dark:text-muted-foreground">Recorded value</dt><dd className="font-medium text-brand-ink dark:text-foreground">{clinicalValue(factor.field || '', factor.measured)}</dd></div>}
-        </dl>}
+
       </li>;
     })}
   </ul>;
@@ -411,17 +391,17 @@ export default function ResidentRiskSummary() {
   return <div className="space-y-5">
     <PageHeader eyebrow="Community Risk" title="Resident Risk Summary" subtitle="Review current resident risk classifications and clinical screening flags within your authorized area." />
 
-    <section aria-label="Resident operational metrics" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <div className="min-w-0 rounded-card border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
+    <section aria-label="Resident operational metrics" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="flex min-h-28 min-w-0 flex-col rounded-card border border-brand-border bg-white p-4 dark:border-border dark:bg-card">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Residents in Scope</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums text-brand-blue dark:text-blue-300">{totalResidents}</p>
       </div>
-      <div className="min-w-0 rounded-card border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
+      <div className="flex min-h-28 min-w-0 flex-col rounded-card border border-brand-border bg-white p-4 dark:border-border dark:bg-card">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Assessment Coverage</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums text-brand-blue dark:text-blue-300">{assessmentCoverage}%</p>
         <p className="mt-0.5 text-xs text-brand-gray dark:text-muted-foreground">{assessedResidents} of {totalResidents} assessed</p>
       </div>
-      <div className="min-w-0 rounded-card border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
+      <div className="flex min-h-28 min-w-0 flex-col rounded-card border border-brand-border bg-white p-4 dark:border-border dark:bg-card">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Pending Follow-ups</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums text-amber-700 dark:text-amber-400">{pendingFollowUps ?? '—'}</p>
         <p className="mt-0.5 text-xs text-brand-gray dark:text-muted-foreground">
@@ -439,10 +419,10 @@ export default function ResidentRiskSummary() {
         {distribution.map(([label, rawValue, tone]) => {
           const value = Number(rawValue);
           const percent = totalResidents ? Math.min(100, (value / totalResidents) * 100) : 0;
-          return <div key={label} className="grid grid-cols-[7rem_minmax(0,1fr)_2.5rem] items-center gap-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_3rem]">
-            <span className="text-brand-gray dark:text-muted-foreground">{label}</span>
+          return <div key={label} className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)_2.5rem] items-center gap-3 text-sm sm:grid-cols-[minmax(0,8rem)_minmax(0,1fr)_3rem]">
+            <span className="break-words text-brand-gray dark:text-muted-foreground">{label}</span>
             {value > 0
-              ? <div className="h-2.5 overflow-hidden rounded-full bg-brand-bg dark:bg-card-nested" role="img" aria-label={`${label}: ${value} of ${totalResidents} residents`}>
+              ? <div className="h-2.5 min-w-0 overflow-hidden rounded-full bg-brand-bg dark:bg-card-nested" role="img" aria-label={`${label}: ${value} of ${totalResidents} residents`}>
                 <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
               </div>
               : <span className="text-xs text-brand-gray dark:text-muted-foreground">No residents</span>}
@@ -453,7 +433,7 @@ export default function ResidentRiskSummary() {
     </section>
 
     <section className="rounded-card border border-brand-border bg-white p-4 dark:border-border dark:bg-card" aria-label="Filter resident risk summary">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         <label className={labelClass}>Search residents
           <span className="relative"><Search aria-hidden="true" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
             <input className={`${filterClass} pl-9`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Name or resident ID" />
@@ -502,7 +482,7 @@ export default function ResidentRiskSummary() {
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[900px] border-collapse text-left text-sm">
             <thead className="bg-brand-bg text-xs uppercase tracking-wide text-brand-gray dark:bg-card-nested dark:text-muted-foreground"><tr>
-              <th className="px-4 py-3">Resident</th><th className="px-4 py-3">Barangay</th><th className="px-4 py-3">Health record no.</th><th className="px-4 py-3">Risk</th><th className="px-4 py-3">Assessment</th><th className="px-4 py-3">Clinical flags</th><th className="px-4 py-3 text-right">Actions</th>
+              <th className="px-4 py-3">Resident</th><th className="px-4 py-3">Barangay</th><th className="px-4 py-3">Health record no.</th><th className="px-4 py-3">Risk</th><th className="px-4 py-3">Assessment</th><th className="px-4 py-3">Clinical flags</th>
             </tr></thead>
             <tbody className="divide-y divide-brand-border dark:divide-border">{rows.map((row) => <tr key={row.residentId} className="align-top transition-colors hover:bg-brand-bg/60 dark:hover:bg-hover/50">
               <td className="px-4 py-3.5"><p className="font-semibold leading-5 text-brand-ink dark:text-foreground">{row.name || 'Resident'}</p><p className="mt-1 text-xs leading-4 text-brand-gray dark:text-muted-foreground">{row.age ?? 'Age unavailable'} <span aria-hidden="true">·</span> {row.sex || 'Sex not recorded'}</p></td>
@@ -511,14 +491,13 @@ export default function ResidentRiskSummary() {
               <td className="px-4 py-3.5"><RiskLabel value={row.riskLevel || (row.riskAssessmentStatus === 'incomplete' ? 'Incomplete' : 'Unassessed')} /></td>
               <td className="px-4 py-3.5"><span className="block whitespace-nowrap text-sm tabular-nums text-brand-ink dark:text-foreground">{prettyDate(row.assessmentAt)}</span><span className="mt-1 block text-xs capitalize text-brand-gray dark:text-muted-foreground">{row.riskAssessmentStatus || 'unassessed'}</span></td>
               <td className="px-4 py-3.5"><ScreeningFlags row={row} /></td>
-              <td className="px-4 py-3.5 text-right"><Link to={`/app/${role}/residents?residentId=${encodeURIComponent(row.residentId)}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg dark:border-border dark:text-blue-300 dark:hover:bg-hover"><Eye className="h-4 w-4" />View</Link></td>
             </tr>)}</tbody>
           </table>
         </div>
         <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 md:hidden">{rows.map((row) => <article className="min-w-0 rounded-card border border-brand-border bg-white p-3.5 dark:border-border dark:bg-card" key={row.residentId}>
           <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="break-words text-base font-semibold leading-5 text-brand-ink dark:text-foreground">{row.name || 'Resident'}</h2><p className="mt-1 text-xs leading-4 text-brand-gray dark:text-muted-foreground">{row.residentId} <span aria-hidden="true">·</span> {row.age ?? 'Age unavailable'} <span aria-hidden="true">·</span> {row.sex || 'Sex not recorded'}</p></div><RiskLabel value={row.riskLevel || (row.riskAssessmentStatus === 'incomplete' ? 'Incomplete' : 'Unassessed')} /></div>
           <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-brand-border pt-3 text-sm dark:border-border"><div className="min-w-0"><dt className="text-[11px] font-medium uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Barangay</dt><dd className="mt-0.5 break-words font-medium leading-5 text-brand-ink dark:text-foreground">{row.barangay || '—'}{row.zone ? ` · Zone ${row.zone}` : ''}</dd></div><div className="min-w-0"><dt className="text-[11px] font-medium uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Assessment</dt><dd className="mt-0.5 font-medium leading-5 text-brand-ink dark:text-foreground">{prettyDate(row.assessmentAt)}</dd></div></dl>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-brand-border pt-3 dark:border-border"><ScreeningFlags row={row} /><Link to={`/app/${role}/residents?residentId=${encodeURIComponent(row.residentId)}`} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg dark:border-border dark:text-blue-300 dark:hover:bg-hover"><Eye className="h-4 w-4" />View</Link></div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-brand-border pt-3 dark:border-border"><ScreeningFlags row={row} /></div>
         </article>)}</div>
         {!rows.length && <p className="p-8 text-center text-sm text-brand-gray dark:text-muted-foreground">No resident records match these filters.</p>}
         <TablePagination total={payload.total || 0} page={page} pageSize={pageSize} onPageChange={setPage} showPageSize={false} itemLabel="residents" className="m-3" />
