@@ -41,6 +41,8 @@ const MEDICATION_FIELDS = Object.freeze({
   strength: 80,
   dosageForm: 80,
   dose: 120,
+  doseAmount: 20,
+  doseUnit: 40,
   route: 80,
   frequency: 120,
   duration: 120,
@@ -230,6 +232,13 @@ export const normalizeMedications = (medications) => {
 
     const entry = Object.fromEntries(Object.entries(MEDICATION_FIELDS).map(([field, max]) => {
       const value = field === 'genericName' ? (raw.genericName ?? raw.name) : raw[field];
+      if (['doseAmount', 'duration', 'quantity'].includes(field) && value !== undefined && value !== null && value !== '') {
+        const number = Number(value);
+        if (!Number.isFinite(number) || (field !== 'doseAmount' && (!Number.isInteger(number) || number < 1))) {
+          errors[`${prefix}.${field}`] = 'Enter a valid positive number.';
+        }
+        return [field, String(value)];
+      }
       return [field, validatedText(value, max, `${prefix}.${field}`, errors, {
         required: field === 'genericName',
         preserve: !['genericName', 'medicineId'].includes(field),

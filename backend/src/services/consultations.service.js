@@ -395,7 +395,7 @@ export const resolveConsultationMedications = async ({ medications = [], previou
   if (Object.keys(fieldErrors).length) throw ApiError.unprocessable('Please correct the prescription entries.', fieldErrors);
   const errors = {};
   const used = new Set();
-  const fields = ['genericName', 'brandName', 'strength', 'dosageForm', 'dose', 'route', 'frequency', 'duration', 'quantity', 'instructions', 'medicineId'];
+  const fields = ['genericName', 'brandName', 'strength', 'dosageForm', 'dose', 'doseAmount', 'doseUnit', 'route', 'frequency', 'duration', 'quantity', 'instructions', 'medicineId'];
   const comparable = (row) => Object.fromEntries(fields.map((field) => [field, row?.[field] ?? (field === 'medicineId' ? null : '')]));
   const output = [];
   for (const [index, raw] of medications.entries()) {

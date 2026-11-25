@@ -19,6 +19,8 @@ const emptyMedication = (overrides = {}) => ({
   strength: "",
   dosageForm: "",
   dose: "",
+  doseAmount: "",
+  doseUnit: "",
   route: "",
   frequency: "",
   duration: "",
@@ -79,6 +81,28 @@ export default function MedicineSelector({
   const wrapRef = useRef(null);
   const searchInputRef = useRef(null);
   const debounceRef = useRef(null);
+  const calculatedQuantitiesRef = useRef(new Map());
+
+  useEffect(() => {
+    const dosesPerDay = (frequency) => ({
+      "Once daily": 1, "Twice daily": 2, "Three times daily": 3, "Every 4 hours": 6,
+      "Every 6 hours": 4, "Every 8 hours": 3, "Every 12 hours": 2,
+    })[frequency];
+    medications.forEach((m, index) => {
+      const units = Number(m.doseAmount);
+      const days = Number(m.duration);
+      const perDay = dosesPerDay(m.frequency);
+      if (!Number.isFinite(units) || units <= 0 || !Number.isInteger(days) || days <= 0 || !perDay) return;
+      const calculated = String(Math.ceil(units * perDay * days));
+      const previousCalculated = calculatedQuantitiesRef.current.get(index);
+      if (!m.quantity || m.quantity === previousCalculated) {
+        calculatedQuantitiesRef.current.set(index, calculated);
+        updateAt(index, { quantity: calculated });
+      }
+    });
+  // The effect intentionally reacts to the structured fields only; updateAt is stable for this component's lifetime.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [medications.map((m) => `${m.doseAmount}|${m.frequency}|${m.duration}|${m.quantity}`).join(";")]);
 
   // Debounced catalog search (matches generic name, brand name, strength, form).
   useEffect(() => {
@@ -298,7 +322,10 @@ export default function MedicineSelector({
                   </p>
                 )}
                 <label className="text-xs text-brand-gray">Dose <span className="text-brand-danger">*</span>
-                  <input aria-label="Dose" disabled={disabled} value={m.dose} onChange={(e) => updateAt(i, { dose: e.target.value })} placeholder="e.g. 1 tablet" className={`${inputCls} mt-1.5`} />
+                  <div className="mt-1.5 flex gap-2">
+                    <input aria-label="Dose amount" type="number" min="0.01" step="any" disabled={disabled} value={m.doseAmount ?? ""} onChange={(e) => updateAt(i, { doseAmount: e.target.value, dose: e.target.value && (m.doseUnit || m.dosageForm) ? `${e.target.value} ${m.doseUnit || m.dosageForm}` : e.target.value })} placeholder="Amount" className={inputCls} />
+                    <input aria-label="Dose unit" disabled={disabled} value={m.doseUnit ?? ""} onChange={(e) => updateAt(i, { doseUnit: e.target.value, dose: m.doseAmount ? `${m.doseAmount} ${e.target.value}` : m.dose })} placeholder={m.dosageForm || "unit"} className={inputCls} />
+                  </div>
                 </label>
                 <SearchableSelect
                   label="Route" ariaLabel="Route" value={m.route || ""} required
@@ -313,10 +340,10 @@ export default function MedicineSelector({
                   error={errors[`medications[${i}].frequency`] || ""} disabled={disabled} compact portalDropdown
                 />
                 <label className="text-xs text-brand-gray">Duration <span className="text-brand-danger">*</span>
-                  <input aria-label="Duration" disabled={disabled} value={m.duration} onChange={(e) => updateAt(i, { duration: e.target.value })} placeholder="e.g. 7 days" className={`${inputCls} mt-1.5`} />
+                  <input aria-label="Duration" type="number" min="1" step="1" disabled={disabled} value={m.duration} onChange={(e) => updateAt(i, { duration: e.target.value })} placeholder="Days" className={`${inputCls} mt-1.5`} />
                 </label>
                 <label className="text-xs text-brand-gray">Quantity <span className="text-brand-danger">*</span>
-                  <input aria-label="Quantity" inputMode="numeric" disabled={disabled} value={m.quantity} onChange={(e) => updateAt(i, { quantity: e.target.value })} placeholder="e.g. 21" className={`${inputCls} mt-1.5`} />
+                  <input aria-label="Quantity" type="number" min="1" max="10000" step="1" inputMode="numeric" disabled={disabled} value={m.quantity} onChange={(e) => updateAt(i, { quantity: e.target.value })} placeholder="Auto-calculated" className={`${inputCls} mt-1.5`} />
                 </label>
                 <label className="col-span-2 text-xs text-brand-gray sm:col-span-3">Instructions
                   <input aria-label="Additional instructions" disabled={disabled} value={m.instructions} onChange={(e) => updateAt(i, { instructions: e.target.value })} placeholder="Medicine-specific instructions" className={`${inputCls} mt-1.5`} />
