@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { residentsApi, visitPlansApi, referralsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
-import { openReferralPdf } from "@/features/referrals/lib/referralPdf";
 import { downloadHealthRecordPdf, medicalHistoryForRecord } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
@@ -129,7 +128,6 @@ export default function HealthRecord() {
   const [healthServiceRecords, setHealthServiceRecords] = useState([]);
   const [referrals, setReferrals] = useState([]);
   const [selectedReferral, setSelectedReferral] = useState(null);
-  const [selectedReferralPdf, setSelectedReferralPdf] = useState("");
   const [selectedFollowUp, setSelectedFollowUp] = useState(null);
   useEffect(() => {
     if (!selectedFollowUp) return undefined;
@@ -145,7 +143,6 @@ export default function HealthRecord() {
     };
   }, [selectedFollowUp]);
   const [referralDetailLoading, setReferralDetailLoading] = useState(false);
-  const [referralDownloadId, setReferralDownloadId] = useState("");
   const [referralActionError, setReferralActionError] = useState("");
   const [followUps, setFollowUps] = useState([]);
   const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
@@ -352,28 +349,6 @@ export default function HealthRecord() {
       setReferralDetailLoading(false);
     }
   }, [user?.id]);
-
-  const viewReferralSlip = useCallback(async (record) => {
-    if (!record?.id || !user?.id) return;
-    setReferralDownloadId(record.id);
-    setReferralActionError("");
-    try {
-      const data = await referralsApi.get(record.id, { ownerId: user.id, cache: "no-store" });
-      if (!data?.record?.id) throw new Error("Could not load the saved referral.");
-      const url = await openReferralPdf(data.record);
-      if (!url) throw new Error("Could not generate the referral document.");
-      setSelectedReferralPdf(String(url));
-    } catch (err) {
-      setReferralActionError(err?.message || "Could not open the referral slip.");
-    } finally {
-      setReferralDownloadId("");
-    }
-  }, [user?.id, referralDownloadId]);
-
-  const closeReferralSlip = useCallback(() => {
-    if (selectedReferralPdf?.startsWith("blob:")) URL.revokeObjectURL(selectedReferralPdf);
-    setSelectedReferralPdf("");
-  }, [selectedReferralPdf]);
 
   /**
    * Export the resident's own health record as a formatted PDF document. The
@@ -1037,7 +1012,6 @@ export default function HealthRecord() {
                           <p className="mt-1 text-sm text-brand-gray">{record.reason || "Reason not recorded"}</p>
                           <p className="mt-1 text-xs text-brand-gray">{formatDate(record.referralDate || record.date)} · {record.assignedPersonnel || "Personnel not recorded"} · {record.serviceProgressStatus || "Pending"}</p>
                         </div>
-                        <button type="button" onClick={() => viewReferralSlip(record)} disabled={referralDownloadId === record.id} className="inline-flex h-10 w-full items-center justify-center rounded-btn border border-brand-blue px-3 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-bg disabled:opacity-50 sm:h-9 sm:w-auto">View Referral Slip</button>
                       </article>
                     ))}
                   </div>
@@ -1090,18 +1064,6 @@ export default function HealthRecord() {
                 )}
               </Card>
             </>
-          )}
-          {selectedReferralPdf && (
-            <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-white sm:inset-6 sm:h-auto sm:rounded-xl sm:border sm:border-brand-border sm:shadow-2xl" role="dialog" aria-modal="true" aria-label="Referral slip">
-              <div className="flex h-14 shrink-0 items-center justify-between border-b border-brand-border px-4 sm:px-5">
-                <h3 className="text-sm font-semibold text-brand-ink">Referral Slip</h3>
-                <div className="flex items-center gap-2">
-                  <a href={selectedReferralPdf} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center rounded-btn border border-brand-border px-3 text-sm font-semibold text-brand-blue">Open / Print</a>
-                  <button type="button" onClick={closeReferralSlip} className="grid h-9 w-9 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close referral slip"><X className="h-4 w-4" /></button>
-                </div>
-              </div>
-              <iframe title="Official referral slip" src={selectedReferralPdf} className="min-h-0 w-full flex-1 border-0" />
-            </div>
           )}
           {selectedFollowUp && (
             <div className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden bg-black/50 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label="Follow-up details">

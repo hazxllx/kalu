@@ -210,7 +210,7 @@ export default function Households() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const isBhw = user?.role === "bhw";
+  const isBhw = String(user?.role || "").trim().toLowerCase() === "bhw";
   const { lastSyncedAt } = useSyncStatus();
   const { can, canAny } = usePermissions();
   const canCreateHousehold = can("households.create");
