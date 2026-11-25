@@ -79,6 +79,8 @@ const workerEnvironmentAllowed = (config) => {
   } catch { return false; }
 };
 
+export const isPersonnelNotificationWorkerAllowed = (config = env) => workerEnvironmentAllowed(config);
+
 const eventStillValid = (job, account) => ACCESS_EVENTS.has(job.event_type)
   ? account.approval_status === 'approved' && !account.suspended_at
   : job.event_type === 'rejected' ? account.approval_status === 'rejected'

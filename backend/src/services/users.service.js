@@ -17,7 +17,10 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/supabaseRepository.js';
 import { randomUUID } from 'node:crypto';
-import { processPersonnelNotifications } from './personnelNotifications.service.js';
+import {
+  isPersonnelNotificationWorkerAllowed,
+  processPersonnelNotifications,
+} from './personnelNotifications.service.js';
 import { ROLES, isValidRole } from '../config/roles.js';
 import { RHU_STATION_VALUES, STATION_ASSIGNED_ROLES, normalizeStations, stationLabel } from '../config/rhuStations.js';
 import { isEmail, isStrictMobile, isUuid, isValidPersonName } from '../validators/common.js';
@@ -305,11 +308,22 @@ const accountStatus = (value, fallback, allowPending = false) => {
   return status;
 };
 
-const requireInvitationDelivery = (user) => {
+const requireInvitationDelivery = (user, { resend = false } = {}) => {
   if (user?.notification?.status === 'sent') return user;
   const status = String(user?.notification?.status || '').toLowerCase();
   const rawDeliveryCode = String(user?.notification?.lastErrorCode || status || '').toUpperCase();
   const deliveryCode = /^[A-Z0-9_]{1,64}$/.test(rawDeliveryCode) ? rawDeliveryCode : 'DELIVERY_UNCONFIRMED';
+  if (resend) {
+    const queued = ['pending', 'processing'].includes(status);
+    const guidance = queued
+      ? 'Wait for the backend notification worker, then refresh this account’s email status.'
+      : status === 'failed'
+        ? 'Correct the email configuration, then use Resend setup link again.'
+        : 'Check the backend notification worker and email status before retrying.';
+    throw new ApiError(503,
+      `The password setup invitation ${queued ? 'is queued but has not been confirmed as sent' : 'was not confirmed'} (${deliveryCode}). ${guidance} This account already exists; do not create another account.`)
+      .withCode('ACCOUNT_INVITATION_DELIVERY_UNCONFIRMED');
+  }
   const guidance = ['delivery_unknown', 'sending'].includes(status)
     ? 'Check Brevo delivery logs before resending to avoid a duplicate email.'
     : status === 'failed'
@@ -656,10 +670,15 @@ export const transitionUserLifecycle = async ({ id, actor = null, actorId = acto
     const target = await repository.getProfileById(id);
     if (!target) throw ApiError.notFound('Personnel account not found in your authorized scope.');
     assertCanManageTarget(actor, target);
+    if (!isPersonnelNotificationWorkerAllowed()) {
+      throw new ApiError(503,
+        'This local backend is connected to hosted Supabase and is not allowed to send its notification jobs. The invitation will not be resent from this server; use the deployed KALUSAGAP backend or a local Supabase stack. Do not create another account.')
+        .withCode('NOTIFICATION_WORKER_ENVIRONMENT_NOT_ALLOWED');
+    }
     const invited = await repository.resendScopedPersonnelInvitation({ id, actorId, operationId: action.operationId });
     if (!invited) throw ApiError.notFound('Personnel account not found in your authorized scope.');
     await processPersonnelNotifications({ targetId: id });
-    return requireInvitationDelivery((await repository.getProfileById(id)) || invited);
+    return requireInvitationDelivery((await repository.getProfileById(id)) || invited, { resend: true });
   }
   if (actorId === id && ['approve', 'reject', 'suspend', 'reactivate'].includes(action.action)) {
     throw ApiError.conflict('You cannot approve or change your own administrator access.');

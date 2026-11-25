@@ -578,6 +578,36 @@ test('managed setup-required access reset queues an invitation instead of sendin
   });
 });
 
+test('hosted-Supabase development blocks invitation resend before queuing another email', async () => {
+  const original = { nodeEnv: env.nodeEnv, supabaseMode: env.supabaseMode };
+  env.nodeEnv = 'development';
+  env.supabaseMode = 'hosted-development';
+  let queued = false;
+  try {
+    await withMethods(repository, {
+      getProfileById: async () => profile({ role: 'health_supervisor', municipalityId: MUNICIPALITY }),
+      resendScopedPersonnelInvitation: async () => { queued = true; return profile(); },
+    }, async () => {
+      await assert.rejects(() => users.transitionUserLifecycle({
+        id: TARGET,
+        actor: { id: ACTOR, role: 'phn', municipalityId: MUNICIPALITY },
+        actorId: ACTOR,
+        input: { action: 'invite', operationId: OPERATION },
+      }), (error) => {
+        assert.equal(error.statusCode, 503);
+        assert.equal(error.code, 'NOTIFICATION_WORKER_ENVIRONMENT_NOT_ALLOWED');
+        assert.match(error.message, /hosted Supabase/);
+        assert.match(error.message, /Do not create another account/);
+        return true;
+      });
+    });
+    assert.equal(queued, false);
+  } finally {
+    env.nodeEnv = original.nodeEnv;
+    env.supabaseMode = original.supabaseMode;
+  }
+});
+
 test('legacy access reset requests Supabase recovery without claiming verified email acceptance', async () => {
   await withMethods(repository, {
     getProfileById: async () => profile({ setupRequired: false }),
