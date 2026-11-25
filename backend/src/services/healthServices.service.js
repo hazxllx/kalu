@@ -45,7 +45,7 @@ const APPOINTMENTS_TABLE = 'appointments';
 const PLAN_TABLE = 'visit_plans';
 const ATTACHMENTS_TABLE = 'health_service_attachments';
 const PAGE_SIZE = 500;
-const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
+const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'missed', 'cancelled', 'rescheduled', 'walk_in']);
 const ALLOWED_MEMO_TYPES = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
 const ALLOWED_PUBMAT_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -458,6 +458,28 @@ const attendanceDate = (value) =>
   && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`))
   && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 
+const PH_OFFSET_MS = 8 * 60 * 60 * 1000;
+const manilaWallClock = (now = new Date()) => new Date(now.getTime() + PH_OFFSET_MS);
+const localDate = (now = new Date()) => manilaWallClock(now).toISOString().slice(0, 10);
+const localTime = (now = new Date()) => manilaWallClock(now).toISOString().slice(11, 19);
+const missedWindowHasPassed = (service, scheduledDate, now = new Date()) => {
+  if (scheduledDate < localDate(now)) return true;
+  if (scheduledDate > localDate(now)) return false;
+  const endTime = hhmm(service?.end_time) || '23:59';
+  return localTime(now) >= `${endTime}:00`;
+};
+const serviceWindowHasPassed = (service, now = new Date()) => {
+  if (!service?.end_date) return false;
+  const today = localDate(now);
+  if (service.end_date < today) return true;
+  if (service.end_date > today) return false;
+  const endTime = hhmm(service.end_time);
+  return Boolean(endTime && localTime(now) >= `${endTime}:00`);
+};
+const serviceDateInRange = (service, date) =>
+  (!service?.start_date || date >= service.start_date)
+  && (!service?.end_date || date <= service.end_date);
+
 const isImmunizationService = (service) => text(service?.category).toLowerCase() === 'immunization';
 
 /**
@@ -499,11 +521,9 @@ const applyAttendanceDateRange = (query, { from, to }) => {
  * Record or update (idempotent per `service_id + resident_id + scheduled_date`)
  * a resident's attendance for a health service.
  *
- * Enforces manager authorization, service management scope (`manageableService`),
- * resident visibility (`residentVisibleTo`), mandatory `service_provided` (and
- * `vaccine` for Immunization services) when marking `attended`, follow-up date
- * consistency, automatic `attended_at` / `provided_by` stamping, and linked
- * `immunizations` synchronization.
+ * Attendance and service delivery are separate states. Actual delivery requires
+ * its own flag, date, actor, and (when late) correction reason. Writes use a
+ * database-serialized RPC to avoid duplicate current records under concurrency.
  */
 export const createHealthServiceAttendance = async ({ user, payload = {}, supabase = getServiceClient() }) => {
   assertManager(user);
@@ -513,6 +533,9 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   const status = text(payload.status);
   const notes = text(payload.notes);
   const serviceProvided = text(payload.service_provided);
+  const serviceProvidedDate = text(payload.service_provided_date) || scheduledDate;
+  const correctionReason = text(payload.correction_reason);
+  const serviceCompleted = payload.service_completed === true;
   const assessment = text(payload.assessment);
   const recommendations = text(payload.recommendations);
   const followUpRequired = payload.follow_up_required === true;
@@ -524,11 +547,23 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   if (!ATTENDANCE_STATUSES.includes(status)) throw ApiError.unprocessable('Select a valid attendance status.');
   if (notes.length > 2000) throw ApiError.unprocessable('Notes must be 2000 characters or fewer.');
   if (serviceProvided.length > 5000 || assessment.length > 5000 || recommendations.length > 5000) throw ApiError.unprocessable('Service details, assessment, and recommendations must be 5000 characters or fewer.');
-  if (status === 'attended' && !serviceProvided) throw ApiError.unprocessable('Describe the service provided before marking the resident attended.');
+  if (serviceCompleted && !serviceProvided) throw ApiError.unprocessable('Describe the service delivered.');
+  if (!attendanceDate(serviceProvidedDate)) throw ApiError.unprocessable('Enter a valid actual service date.');
+  if (correctionReason.length > 1000) throw ApiError.unprocessable('Correction reason must be 1000 characters or fewer.');
   if (followUpDate && !attendanceDate(followUpDate)) throw ApiError.unprocessable('Enter a valid follow-up date.');
   if (followUpRequired && !followUpDate) throw ApiError.unprocessable('Enter a follow-up date.');
+  if (serviceCompleted && !['attended', 'walk_in'].includes(status)) {
+    throw ApiError.unprocessable('A completed service must also record the resident as attended.');
+  }
 
   const service = await manageableService(user, serviceId, supabase);
+  if ((service.start_date && scheduledDate < service.start_date) || (service.end_date && scheduledDate > service.end_date)) {
+    throw ApiError.unprocessable('The attendance date must fall within the health service schedule.');
+  }
+  if (serviceCompleted && !serviceDateInRange(service, serviceProvidedDate)) {
+    throw ApiError.unprocessable('The actual service date must fall within the health service schedule.');
+  }
+  if (serviceProvidedDate > localDate()) throw ApiError.unprocessable('The actual service date cannot be in the future.');
   const { data: resident, error: residentError } = await supabase
     .from('residents')
     .select('id, municipality_id, barangay_id, barangay')
@@ -538,10 +573,23 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   if (!resident) throw ApiError.unprocessable('The selected resident does not exist.');
 
   if (!residentVisibleTo(user, resident)) throw ApiError.notFound('Resident not found in your scope.');
-  if (status === 'attended' && isImmunizationService(service) && !payload.vaccine) {
+  if (status === 'missed' && !missedWindowHasPassed(service, scheduledDate)) {
+    throw ApiError.unprocessable('You can mark a resident missed only after the scheduled service time has passed.');
+  }
+  if ((status === 'attended' || serviceCompleted) && scheduledDate > localDate()) {
+    throw ApiError.unprocessable('Attendance cannot be recorded before the scheduled service date.');
+  }
+  const lateAttendanceEntry = status === 'attended'
+    && (scheduledDate < localDate() || missedWindowHasPassed(service, scheduledDate));
+  const lateServiceEntry = serviceCompleted && (scheduledDate < localDate() || serviceProvidedDate !== scheduledDate
+    || serviceProvidedDate < localDate() || missedWindowHasPassed(service, scheduledDate) || serviceWindowHasPassed(service));
+  if ((lateAttendanceEntry || lateServiceEntry) && !correctionReason) {
+    throw ApiError.unprocessable('Add a reason for the late attendance or service entry.');
+  }
+  if (serviceCompleted && isImmunizationService(service) && !payload.vaccine) {
     throw ApiError.unprocessable('Select the vaccine and record its status before completing this immunization service.');
   }
-  if (followUpId && status !== 'attended') throw ApiError.unprocessable('A follow-up can only be linked after the service is delivered.');
+  if (followUpId && !serviceCompleted) throw ApiError.unprocessable('A follow-up can only be linked after the service is delivered.');
 
   const row = {
     service_id: serviceId,
@@ -551,28 +599,27 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
     notes,
     recorded_by: user.id,
     recorded_by_name: text(user.name),
-    service_provided: serviceProvided,
-    assessment,
-    recommendations,
-    follow_up_required: followUpRequired,
-    follow_up_date: followUpDate,
-    ...(status === 'attended' ? { attended_at: new Date().toISOString(), provided_by: user.id, provided_by_name: text(user.name) } : {}),
+    ...(status === 'attended' ? { attended_at: new Date().toISOString() } : {}),
+    ...(serviceCompleted ? {
+      service_provided: serviceProvided,
+      assessment,
+      recommendations,
+      follow_up_required: followUpRequired,
+      follow_up_date: followUpDate,
+      service_provided_date: serviceProvidedDate,
+      service_completed_at: new Date().toISOString(),
+      provided_by: user.id,
+      provided_by_name: text(user.name),
+      correction_reason: correctionReason,
+    } : {}),
+    ...(correctionReason ? { correction_reason: correctionReason } : {}),
+    is_current_record: true,
   };
-  const { data: prior, error: priorError } = await supabase.from(ATTENDANCE_TABLE)
-    .select('id').eq('service_id', serviceId).eq('resident_id', residentId)
-    .eq('scheduled_date', scheduledDate).order('created_at', { ascending: false }).limit(1).maybeSingle();
-  throwOnError(priorError, 'Could not check existing health service attendance');
-  let data;
-  if (prior?.id) {
-    const updated = await supabase.from(ATTENDANCE_TABLE).update(row).eq('id', prior.id).select('*').single();
-    throwOnError(updated.error, 'Could not update health service attendance');
-    data = updated.data;
-  } else {
-    const inserted = await supabase.from(ATTENDANCE_TABLE).insert(row).select('*').single();
-    throwOnError(inserted.error, 'Could not create health service attendance');
-    data = inserted.data;
-  }
-  if (status === 'attended' && isImmunizationService(service)) {
+  const { data: result, error: saveError } = await supabase.rpc('upsert_health_service_attendance', { p_payload: row });
+  throwOnError(saveError, 'Could not save health service attendance');
+  const data = Array.isArray(result) ? result[0] : result;
+  if (!data?.id) throw new ApiError(503, 'The attendance save could not be confirmed.');
+  if (serviceCompleted && isImmunizationService(service)) {
     await syncImmunizationForAttendance({ user, attendanceId: data.id, residentId, payload, supabase });
   }
   if (followUpId) await linkFollowUpAttendance({ user, attendanceId: data.id, followUpId, residentId, supabase });
@@ -604,7 +651,8 @@ export const listAttendanceByService = async ({ user, query = {}, supabase = get
   let request = scopeResidentQuery(user, supabase
     .from(ATTENDANCE_TABLE)
     .select('*, resident:residents!inner(id, municipality_id, barangay_id)')
-    .eq('service_id', serviceId));
+    .eq('service_id', serviceId)
+    .eq('is_current_record', true));
   request = applyAttendanceDateRange(request, query);
   const data = await readAllRows(request.order('scheduled_date', { ascending: false }).order('id'), 'Could not load health service attendance');
   return data.filter((row) => row.resident?.id === row.resident_id && residentVisibleTo(user, row.resident))
@@ -630,7 +678,8 @@ export const listAttendanceByResident = async ({ user, query = {}, supabase = ge
   let request = supabase
     .from(ATTENDANCE_TABLE)
     .select('*, service:health_services!inner(id, municipality_id, barangay_id)')
-    .eq('resident_id', residentId);
+    .eq('resident_id', residentId)
+    .eq('is_current_record', true);
   if (user.role !== ROLES.ADMIN) request = request.eq('service.municipality_id', user.municipalityId);
   request = applyAttendanceDateRange(request, query);
   const data = await readAllRows(request.order('scheduled_date', { ascending: false }).order('id'), 'Could not load health service attendance');
@@ -671,7 +720,8 @@ export const listScopeAttendance = async ({ user, query = {}, supabase = getServ
   }
   if (!hasResidentScope(user)) return [];
 
-  let request = scopeResidentQuery(user, supabase.from(ATTENDANCE_TABLE).select(ATTENDANCE_SELECT));
+  let request = scopeResidentQuery(user, supabase.from(ATTENDANCE_TABLE).select(ATTENDANCE_SELECT)
+    .eq('is_current_record', true));
   if (user.role !== ROLES.ADMIN) request = request.eq('service.municipality_id', user.municipalityId);
   if (from) request = request.gte('scheduled_date', from);
   if (to) request = request.lte('scheduled_date', to);
@@ -716,6 +766,7 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
     .maybeSingle();
   throwOnError(currentError, 'Could not load health service attendance');
   if (!current) throw ApiError.notFound('Health service attendance not found.');
+  if (current.is_current_record === false) throw ApiError.conflict('This is a historical attendance record. Update the current service record instead.');
   const service = await manageableService(user, current.service_id, supabase);
   const { data: resident, error: residentError } = await supabase.from('residents')
     .select('id, municipality_id, barangay_id').eq('id', current.resident_id).maybeSingle();
@@ -723,14 +774,35 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
   if (!residentVisibleTo(user, resident)) throw ApiError.notFound('Health service attendance not found.');
 
   const patch = {};
+  const correctionReason = payload.correction_reason === undefined ? '' : text(payload.correction_reason);
+  if (correctionReason.length > 1000) throw ApiError.unprocessable('Correction reason must be 1000 characters or fewer.');
+  if (correctionReason) patch.correction_reason = correctionReason;
   if (payload.status !== undefined) {
     const status = text(payload.status);
     if (!ATTENDANCE_STATUSES.includes(status)) throw ApiError.unprocessable('Select a valid attendance status.');
     patch.attendance_status = status;
+    if (status === 'attended' && current.scheduled_date > localDate()) {
+      throw ApiError.unprocessable('Attendance cannot be recorded before the scheduled service date.');
+    }
+    if (status === 'attended' && current.attendance_status !== 'attended'
+      && (current.scheduled_date < localDate() || missedWindowHasPassed(service, current.scheduled_date))
+      && !correctionReason) {
+      throw ApiError.unprocessable('Add a reason when recording attendance after the scheduled service window.');
+    }
+    if (status === 'attended' && ['missed', 'absent', 'cancelled'].includes(current.attendance_status)) {
+      if (!correctionReason) throw ApiError.unprocessable('Add a reason when correcting this attendance status.');
+    }
     if (status === 'attended' && payload.attended_at == null && current.attendance_status !== 'attended') {
       patch.attended_at = new Date().toISOString();
-      patch.provided_by = user.id;
-      patch.provided_by_name = text(user.name);
+    }
+    if (status === 'missed' && !missedWindowHasPassed(service, current.scheduled_date)) {
+      throw ApiError.unprocessable('You can mark a resident missed only after the scheduled service time has passed.');
+    }
+    if (status === 'missed' && current.service_completed_at) {
+      throw ApiError.conflict('A completed service cannot be changed to missed. Correct the service record with an explanation instead.');
+    }
+    if (status === 'missed' && (current.attendance_status === 'attended' || current.attendance_status === 'walk_in')) {
+      if (!correctionReason) throw ApiError.unprocessable('Add a reason to correct a recorded attendance or delivered service.');
     }
   }
   if (payload.notes !== undefined) {
@@ -766,30 +838,70 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
     if (date && !attendanceDate(date)) throw ApiError.unprocessable('Enter a valid follow-up date.');
     patch.follow_up_date = date;
   }
+  const serviceCompleted = payload.service_completed === true;
+  const deliveryFields = ['service_provided', 'assessment', 'recommendations', 'follow_up_required', 'follow_up_date'];
+  if (!serviceCompleted && deliveryFields.some((field) => payload[field] !== undefined)) {
+    throw ApiError.unprocessable('Save service details as a completed service delivery.');
+  }
+  const serviceProvidedDate = payload.service_provided_date === undefined
+    ? (current.service_provided_date || current.scheduled_date)
+    : text(payload.service_provided_date);
+  if (payload.service_provided_date !== undefined && !attendanceDate(serviceProvidedDate)) {
+    throw ApiError.unprocessable('Enter a valid actual service date.');
+  }
+  if (payload.service_provided_date !== undefined && serviceProvidedDate > localDate()) {
+    throw ApiError.unprocessable('The actual service date cannot be in the future.');
+  }
+  if (serviceCompleted) {
+    const resultingAttendanceStatus = patch.attendance_status || current.attendance_status;
+    if (!['attended', 'walk_in'].includes(resultingAttendanceStatus)) {
+      throw ApiError.unprocessable('A completed service must also record the resident as attended.');
+    }
+    const resultingServiceProvided = patch.service_provided ?? current.service_provided ?? '';
+    if (!text(resultingServiceProvided)) throw ApiError.unprocessable('Describe the service delivered.');
+    if (isImmunizationService(service) && !payload.vaccine) {
+      throw ApiError.unprocessable('Select the vaccine and record its status before completing this immunization service.');
+    }
+    const deliveryChanged = ['service_provided', 'assessment', 'recommendations'].some((field) =>
+      patch[field] !== undefined && patch[field] !== current[field]);
+    if (!serviceDateInRange(service, serviceProvidedDate)) {
+      throw ApiError.unprocessable('The actual service date must fall within the health service schedule.');
+    }
+    if (current.scheduled_date > localDate()) {
+      throw ApiError.unprocessable('Attendance cannot be recorded before the scheduled service date.');
+    }
+    const correctionRequired = Boolean(current.service_completed_at || deliveryChanged
+      || current.attendance_status === 'missed' || current.attendance_status === 'absent'
+      || current.scheduled_date < localDate() || serviceProvidedDate !== current.scheduled_date
+      || serviceProvidedDate < localDate() || missedWindowHasPassed(service, current.scheduled_date)
+      || serviceWindowHasPassed(service));
+    if (correctionRequired && !correctionReason) {
+      throw ApiError.unprocessable('Add a reason for the late service entry or correction.');
+    }
+    patch.service_provided_date = serviceProvidedDate;
+    patch.service_completed_at = new Date().toISOString();
+    patch.provided_by = user.id;
+    patch.provided_by_name = text(user.name);
+    patch.correction_reason = correctionReason;
+  }
   const followUpId = text(payload.follow_up_id || payload.followUpId);
-  if (followUpId && (patch.attendance_status || current.attendance_status) !== 'attended') {
+  if (followUpId && !serviceCompleted && !current.service_completed_at) {
     throw ApiError.unprocessable('A follow-up can only be linked after the service is delivered.');
   }
-  const willBeAttended = patch.attendance_status || current.attendance_status;
-  const resultingServiceProvided = patch.service_provided ?? current.service_provided ?? '';
   const resultingFollowUp = patch.follow_up_required ?? current.follow_up_required ?? false;
   const resultingFollowUpDate = patch.follow_up_date !== undefined ? patch.follow_up_date : current.follow_up_date;
-  if (willBeAttended === 'attended' && !text(resultingServiceProvided)) throw ApiError.unprocessable('Describe the service provided before marking the resident attended.');
-  if (willBeAttended === 'attended' && isImmunizationService(service) && !payload.vaccine) {
-    throw ApiError.unprocessable('Select the vaccine and record its status before completing this immunization service.');
-  }
   if (resultingFollowUp && !resultingFollowUpDate) throw ApiError.unprocessable('Enter a follow-up date.');
-  if (patch.attendance_status === 'absent' && current.attendance_status === 'attended') throw ApiError.conflict('A delivered service record cannot be changed to missed.');
+  if (patch.attendance_status === 'missed' && (current.attendance_status === 'attended' || current.attendance_status === 'walk_in') && !correctionReason) {
+    throw ApiError.unprocessable('Add a reason to correct a recorded attendance.');
+  }
   if (Object.keys(patch).length === 0) throw ApiError.badRequest('Provide at least one attendance field to update.');
 
-  const { data, error } = await supabase
-    .from(ATTENDANCE_TABLE)
-    .update(patch)
-    .eq('id', id)
-    .select('*')
-    .single();
+  const row = { ...current, ...patch, recorded_by: user.id, recorded_by_name: text(user.name), is_current_record: true };
+  const { data: result, error } = await supabase.rpc('upsert_health_service_attendance', { p_payload: row });
   throwOnError(error, 'Could not update health service attendance');
-  if (isImmunizationService(service) && payload.vaccine) {
+  const data = Array.isArray(result) ? result[0] : result;
+  if (!data?.id) throw new ApiError(503, 'The attendance update could not be confirmed.');
+  if (serviceCompleted && isImmunizationService(service)) {
     await syncImmunizationForAttendance({ user, attendanceId: data.id, residentId: current.resident_id, payload, supabase });
   }
   if (followUpId) await linkFollowUpAttendance({ user, attendanceId: data.id, followUpId, residentId: current.resident_id, supabase });
@@ -838,8 +950,9 @@ export const listServiceRegistrations = async ({ user, serviceId, supabase = get
   const attendanceByResident = new Map();
   if (residentIds.length > 0) {
     const attendance = await readAllRows(supabase.from(ATTENDANCE_TABLE)
-      .select('id, resident_id, attendance_status, attended_at, scheduled_date, service_provided, assessment, recommendations, follow_up_required, follow_up_date, notes, provided_by_name')
+      .select('id, resident_id, attendance_status, attended_at, scheduled_date, service_provided, service_provided_date, service_completed_at, correction_reason, assessment, recommendations, follow_up_required, follow_up_date, notes, provided_by_name')
       .eq('service_id', serviceId).in('resident_id', residentIds)
+      .eq('is_current_record', true)
       .order('scheduled_date', { ascending: false }).order('id'), 'Could not load attendance');
     const attendanceIds = (attendance || []).map((row) => row.id);
     const immunizationByAttendance = new Map();
@@ -877,6 +990,10 @@ export const listServiceRegistrations = async ({ user, serviceId, supabase = get
             attendedAt: att.attended_at || null,
             scheduledDate: att.scheduled_date,
             serviceProvided: att.service_provided || '',
+            serviceProvidedDate: att.service_provided_date || '',
+            serviceCompletedAt: att.service_completed_at || null,
+            serviceCompleted: Boolean(att.service_completed_at || (att.attendance_status === 'attended' && att.service_provided)),
+            correctionReason: att.correction_reason || '',
             assessment: att.assessment || '',
             recommendations: att.recommendations || '',
             followUpRequired: Boolean(att.follow_up_required),
@@ -905,6 +1022,7 @@ const emptyRegistrationCounts = () => ({
   registered: 0,
   cancelled: 0,
   attended: 0,
+  serviceCompleted: 0,
   absent: 0,
   pendingAttendance: 0,
 });
@@ -920,8 +1038,9 @@ const countRegistrations = (registrations) => {
     counts.registered += 1; // Planned
     const attStatus = r.attendance?.status || null;
     if (attStatus === 'attended' || attStatus === 'walk_in') counts.attended += 1;
-    else if (attStatus === 'absent') counts.absent += 1;
+    else if (attStatus === 'absent' || attStatus === 'missed') counts.absent += 1;
     else counts.pendingAttendance += 1;
+    if (r.attendance?.serviceCompleted) counts.serviceCompleted += 1;
   }
   return counts;
 };

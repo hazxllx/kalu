@@ -23,6 +23,7 @@ export const listHouseholds = async (req, res) => {
     user: req.user,
     q: req.query.q,
     barangay: req.query.barangay,
+    verificationStatus: req.query.verificationStatus,
     limit: req.query.limit,
     offset: req.query.offset,
   });

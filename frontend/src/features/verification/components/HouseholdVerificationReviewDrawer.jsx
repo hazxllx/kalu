@@ -5,7 +5,6 @@ import {
   X, CheckCircle2, XCircle, ShieldCheck, Home, Users, MapPin, Phone, Hash, User, Wallet,
 } from "lucide-react";
 import { Card } from "@/components/common/Card";
-import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { HOUSEHOLD_RETURN_REASONS } from "@/services/local/householdVerifications";
 
 const formatReviewDate = (date) =>
@@ -14,19 +13,19 @@ const formatReviewDate = (date) =>
 /** Compact label-over-value cell used across the review sections. */
 function InfoCell({ icon: Icon, label, value }) {
   return (
-    <div className="min-w-0 rounded-btn bg-brand-bg p-3">
+    <div className="min-w-0">
       <div className="flex items-center gap-1.5">
-        {Icon && <Icon className="w-3.5 h-3.5 text-brand-gray" strokeWidth={1.8} />}
-        <p className="text-[11px] text-brand-gray uppercase tracking-wide">{label}</p>
+        {Icon && <Icon className="h-4 w-4 shrink-0 text-brand-gray" strokeWidth={1.8} />}
+        <p className="text-xs text-brand-gray uppercase tracking-wide">{label}</p>
       </div>
-      <p className="mt-1 break-words text-sm font-medium text-brand-ink [overflow-wrap:anywhere]">{value || "—"}</p>
+      <p className="mt-1.5 break-words text-base font-medium text-brand-ink [overflow-wrap:anywhere]">{value || "—"}</p>
     </div>
   );
 }
 
 function SectionTitle({ children }) {
   return (
-    <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-brand-gray">{children}</p>
+    <p className="mb-5 text-sm font-semibold uppercase tracking-wide text-brand-gray">{children}</p>
   );
 }
 
@@ -53,6 +52,11 @@ export default function HouseholdVerificationReviewDrawer({
   const [remarks, setRemarks] = useState("");
   const [error, setError] = useState("");
   const [reviewDate] = useState(() => new Date());
+  const statusLabel = household.verificationStatus === "Verified"
+    ? "Verified"
+    : household.verificationStatus === "Returned for Correction"
+      ? "Returned for Correction"
+      : "Pending Verification";
 
   useEffect(() => {
     const onKey = (e) => {
@@ -62,10 +66,14 @@ export default function HouseholdVerificationReviewDrawer({
       else onClose();
     };
     document.addEventListener("keydown", onKey);
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousDocumentOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousDocumentOverflow;
     };
   }, [showVerifyConfirm, returning, onClose]);
 
@@ -97,45 +105,39 @@ export default function HouseholdVerificationReviewDrawer({
         className="absolute inset-0 bg-brand-deep/60"
       />
       <motion.aside
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.98 }}
+        initial={{ x: "100%" }}
+        animate={{ x: 0 }}
+        exit={{ x: "100%" }}
         transition={{ type: "tween", duration: 0.16, ease: "easeOut" }}
-        className="absolute left-1/2 top-1/2 flex max-h-[85vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card bg-brand-bg shadow-2xl sm:max-w-2xl"
+        className="fixed inset-y-0 right-0 flex w-full flex-col overflow-hidden bg-brand-bg shadow-2xl dark:bg-card md:w-[min(44rem,calc(100vw-2rem))]"
         role="dialog"
         aria-modal="true"
         aria-label={`Household verification review for ${household.head}`}
       >
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border bg-white px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border bg-white px-5 py-4 dark:bg-card sm:px-6 sm:py-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-blue text-white">
-              <Home className="h-5 w-5" strokeWidth={1.8} />
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand-blue text-white">
+              <Home className="h-6 w-6" strokeWidth={1.8} />
             </div>
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="truncate font-heading font-semibold text-brand-ink">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h3 className="truncate font-heading text-lg font-semibold text-brand-ink sm:text-xl">
                   Household {household.householdId}
                 </h3>
-                <VerificationBadge
-                  status={
-                    household.verificationStatus === "Verified"
-                      ? "approved"
-                      : household.verificationStatus === "Returned for Correction"
-                        ? "resubmission_required"
-                        : "pending"
-                  }
-                  size="sm"
-                />
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                  <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  {statusLabel}
+                </span>
               </div>
-              <p className="text-xs text-brand-gray">
+              <p className="mt-0.5 text-sm text-brand-gray">
                 HH Head: {household.head} · Barangay {household.barangay}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink dark:hover:bg-card-nested"
             aria-label="Close review panel"
           >
             <X className="w-4 h-4" />
@@ -143,11 +145,11 @@ export default function HouseholdVerificationReviewDrawer({
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        <div className="min-h-0 flex-1 space-y-10 overflow-y-auto overscroll-contain bg-brand-bg px-5 pt-6 pb-6 dark:bg-card sm:px-6 sm:pt-7 sm:pb-6">
           {/* Household information */}
           <section>
             <SectionTitle>Household Information</SectionTitle>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-8 gap-y-12 sm:grid-cols-2">
               <InfoCell icon={Home} label="Household ID" value={household.householdId} />
               <InfoCell icon={User} label="Household Head" value={household.head} />
               <InfoCell icon={MapPin} label="Barangay" value={household.barangay} />
@@ -162,7 +164,7 @@ export default function HouseholdVerificationReviewDrawer({
           {/* Household composition */}
           <section>
             <SectionTitle>Household Composition</SectionTitle>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-7 sm:grid-cols-4">
               <InfoCell icon={Users} label="Families" value={household.families} />
               <InfoCell icon={Users} label="Members" value={household.members} />
               <InfoCell icon={ShieldCheck} label="Water Source" value={household.water} />
@@ -173,10 +175,10 @@ export default function HouseholdVerificationReviewDrawer({
           {/* Household members */}
           <section>
             <SectionTitle>Household Members</SectionTitle>
-            <div className="overflow-x-auto rounded-btn border border-brand-border bg-white">
-              <table className="w-full min-w-[36rem] text-sm">
+            <div className="overflow-x-auto rounded-btn border border-brand-border bg-white dark:bg-card">
+              <table className="w-full min-w-[34rem] text-sm">
                 <thead>
-                  <tr className="bg-brand-bg text-left">
+                  <tr className="bg-brand-bg text-left dark:bg-card-nested">
                     <th className="px-3 py-2 font-medium text-brand-gray">Name</th>
                     <th className="px-3 py-2 font-medium text-brand-gray">Relationship</th>
                     <th className="px-3 py-2 font-medium text-brand-gray">Sex</th>
@@ -184,7 +186,7 @@ export default function HouseholdVerificationReviewDrawer({
                     <th className="px-3 py-2 font-medium text-brand-gray">Classification</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-brand-border">
+                <tbody className="divide-y divide-brand-border dark:bg-card">
                   {(household.membersList || []).map((m, i) => (
                     <tr key={i}>
                       <td className="px-3 py-2 text-brand-ink">{m.name}</td>
@@ -209,7 +211,7 @@ export default function HouseholdVerificationReviewDrawer({
           {/* Data collection info */}
           <section>
             <SectionTitle>Profiling / Collection</SectionTitle>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-8 gap-y-12 sm:grid-cols-2">
               <InfoCell icon={User} label="Assigned BHW / Collector" value={household.collector} />
               <InfoCell icon={Home} label="Collected On" value={household.collectedOn} />
               <InfoCell icon={ShieldCheck} label="Risk Level" value={household.riskLevel} />
@@ -218,7 +220,7 @@ export default function HouseholdVerificationReviewDrawer({
           </section>
 
           {/* Audit information */}
-          <section className="rounded-btn border border-brand-border bg-white p-4">
+          <section className="border-t border-brand-border pt-5">
             <SectionTitle>Audit Information</SectionTitle>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between gap-3">
@@ -234,73 +236,73 @@ export default function HouseholdVerificationReviewDrawer({
               </div>
             </div>
           </section>
-        </div>
 
-        {/* Dedicated action footer */}
-        {household.verificationStatus === "Pending Verification" && (
-          <div className="shrink-0 border-t border-brand-border bg-white">
-            {returning ? (
-              <div className="max-h-[45dvh] space-y-3 overflow-y-auto px-4 py-3 sm:px-5">
-                <p className="text-xs text-brand-gray">Reason for returning household {household.householdId}</p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {HOUSEHOLD_RETURN_REASONS.map((r) => (
-                    <label
-                      key={r}
-                      className={`flex cursor-pointer items-center gap-2 rounded-btn border px-3 py-2 text-xs transition-colors ${
-                        reason === r ? "border-brand-danger/40 bg-brand-danger/5 text-brand-ink" : "border-brand-border text-brand-ink"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="household-return-reason"
-                        checked={reason === r}
-                        onChange={() => { setReason(r); setError(""); }}
-                        className="h-4 w-4 accent-brand-danger"
-                      />
-                      {r}
-                    </label>
-                  ))}
+          {/* Review actions follow the household details, matching the scrollable reference layout. */}
+          {household.verificationStatus === "Pending Verification" && (
+            <section className="border-t border-brand-border pt-5">
+              {returning ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-brand-gray">Reason for returning household {household.householdId}</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {HOUSEHOLD_RETURN_REASONS.map((r) => (
+                      <label
+                        key={r}
+                        className={`flex cursor-pointer items-center gap-2 rounded-btn border px-3 py-2.5 text-sm transition-colors ${
+                          reason === r ? "border-brand-danger/40 bg-brand-danger/5 text-brand-ink" : "border-brand-border text-brand-ink"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="household-return-reason"
+                          checked={reason === r}
+                          onChange={() => { setReason(r); setError(""); }}
+                          className="h-4 w-4 accent-brand-danger"
+                        />
+                        {r}
+                      </label>
+                    ))}
+                  </div>
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium text-brand-ink">Remarks {reason === "Other" && <span className="text-red-500">*</span>}</span>
+                    <textarea
+                      rows={3}
+                      value={remarks}
+                      onChange={(e) => { setRemarks(e.target.value); setError(""); }}
+                      placeholder="Explain the correction needed"
+                      className="w-full resize-none rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card-nested"
+                    />
+                  </label>
+                  {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+                  <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
+                    <button type="button" onClick={() => setReturning(false)} className="h-11 rounded-btn px-4 text-sm font-medium text-brand-gray">Cancel</button>
+                    <button type="button" onClick={confirmReturn} disabled={saving} className="h-11 rounded-btn bg-brand-danger px-5 text-sm font-medium text-white disabled:opacity-60">
+                      {saving ? "Saving…" : "Confirm Return"}
+                    </button>
+                  </div>
                 </div>
-                <label className="block">
-                  <span className="mb-1.5 block text-xs font-medium text-brand-ink">Remarks {reason === "Other" && <span className="text-red-500">*</span>}</span>
-                  <textarea
-                    rows={2}
-                    value={remarks}
-                    onChange={(e) => { setRemarks(e.target.value); setError(""); }}
-                    placeholder="Explain the correction needed"
-                    className="w-full resize-none rounded-btn border border-brand-border px-3 py-2 text-sm outline-none focus:border-brand-blue"
-                  />
-                </label>
-                {error && <p className="text-xs text-red-600">{error}</p>}
-                <div className="flex justify-end gap-2">
-                  <button type="button" onClick={() => setReturning(false)} className="h-10 rounded-btn px-4 text-sm font-medium text-brand-gray">Cancel</button>
-                  <button type="button" onClick={confirmReturn} disabled={saving} className="h-10 rounded-btn bg-brand-danger px-4 text-sm font-medium text-white disabled:opacity-60">
-                    {saving ? "Saving…" : "Confirm Return"}
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowVerifyConfirm(true)}
+                    disabled={saving}
+                    className="flex h-11 items-center justify-center gap-2 rounded-btn bg-brand-blue text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="h-4 w-4" /> Verify Household
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setReturning(true); setReason(""); setRemarks(""); setError(""); }}
+                    disabled={saving}
+                    className="flex h-11 items-center justify-center gap-2 rounded-btn border border-brand-danger/30 bg-brand-danger/5 text-sm font-medium text-brand-danger disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+                  >
+                    <XCircle className="h-4 w-4" /> Return for Correction
                   </button>
                 </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-2 px-4 py-3 sm:grid-cols-2 sm:px-5">
-                <button
-                  type="button"
-                  onClick={() => setShowVerifyConfirm(true)}
-                  disabled={saving}
-                  className="flex h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue text-sm font-medium text-white disabled:opacity-60"
-                >
-                  <CheckCircle2 className="h-4 w-4" /> Verify Household
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setReturning(true); setReason(""); setRemarks(""); setError(""); }}
-                  disabled={saving}
-                  className="flex h-10 items-center justify-center gap-2 rounded-btn border border-brand-danger/30 bg-brand-danger/5 text-sm font-medium text-brand-danger disabled:opacity-60"
-                >
-                  <XCircle className="h-4 w-4" /> Return for Correction
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </section>
+          )}
+        </div>
 
         {/* Verify confirmation dialog */}
         {showVerifyConfirm && (

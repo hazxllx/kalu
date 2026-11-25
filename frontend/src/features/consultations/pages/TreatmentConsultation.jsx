@@ -256,6 +256,11 @@ const consultationRisk = (record) => {
   return level === "Moderate" ? "Medium" : level || "Unassessed";
 };
 
+const consultationDateIsPast = (record) => {
+  const date = String(record?.consultationDate || "").slice(0, 10);
+  return Boolean(date && date < getManilaDateTime().date);
+};
+
 /** Two-letter initials for the resident avatar (local — no external store). */
 const initialsOf = (name) =>
   String(name || "")
@@ -301,7 +306,6 @@ export default function TreatmentConsultation() {
   const [mode, setMode] = useState("list"); // "list" | "form"
   const [editingId, setEditingId] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
-  const [editingRisk, setEditingRisk] = useState(null);
   const [editingMedications, setEditingMedications] = useState([]);
   const [openActionMenu, setOpenActionMenu] = useState(null);
   const recordRequest = useRef(0);
@@ -586,6 +590,10 @@ export default function TreatmentConsultation() {
   const openRecord = async (row, edit = false) => {
     closeActionMenu();
     if (!ownerId || (edit && !canEditConsultation)) return;
+    if (edit && consultationDateIsPast(row)) {
+      showToast("Past consultations are view-only. Consultations dated today can still be edited.", "error");
+      return;
+    }
     const request = ++recordRequest.current;
     const guard = captureOwnerGuard(ownerId);
     setDetailRecord(null);
@@ -602,12 +610,15 @@ export default function TreatmentConsultation() {
       if (guard() && request === recordRequest.current) showToast(error?.message || "Could not load the consultation.", "error");
       return;
     }
+    if (edit && consultationDateIsPast(record)) {
+      showToast("Past consultations are view-only. Consultations dated today can still be edited.", "error");
+      return;
+    }
     if (!edit) {
       setDetailRecord(record);
       return;
     }
     setEditingId(record.id);
-    setEditingRisk(consultationRisk(record));
     setEditingMedications(record.medications || []);
     setReviewLocalId(null);
     setSelectedResident(record.resident || null);
@@ -617,7 +628,9 @@ export default function TreatmentConsultation() {
     // heightCm/weightKg/o2sat); map them back to the flat form fields so an
     // edited consultation shows its saved vitals instead of blanks.
     const v = record.vitals || {};
-    const savedClinicalIndicators = record.clinicalIndicators || record.consultationDetails?.clinicalIndicators || { dangerSignsReviewed: false };
+    // Preserve the stored shape. Injecting a default false here makes a
+    // historical record look clinically changed on every edit.
+    const savedClinicalIndicators = record.clinicalIndicators || record.consultationDetails?.clinicalIndicators || {};
     const savedMaternal = record.maternal || record.consultationDetails?.maternal || null;
     setMaternalInfoCompleted(hasMaternalInformation(savedMaternal));
     setMaternalInfoTouched(false);
@@ -724,15 +737,18 @@ export default function TreatmentConsultation() {
 
   const validate = () => {
     /** @type {Record<string, string>} */
-    const next = { ...validateConsultationDateTime(formData), ...validateConsultationVitals(formData),
+    const next = { ...validateConsultationDateTime(formData), ...validateConsultationVitals(formData, { required: !editingId }),
       ...validateConsultationMedications(formData.medications, { previous: editingMedications }) };
     if (!selectedResident) next.resident = "Please select a resident.";
     if (!maternalService && ((maternalInfoTouched && hasMaternalDetails(formData.maternal))
       || (maternalInfoProtected && hasMaternalInformation(formData.maternal)))) {
       next.serviceId = "Select a Prenatal / Maternal health service to save the entered maternal information.";
     }
-    if (!formData.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
-    if (!formData.findings.trim()) next.findings = "Record the clinical findings from this consultation.";
+    if (!editingId && formData.clinicalIndicators?.dangerSignsReviewed !== true) {
+      next["clinicalIndicators.dangerSignsReviewed"] = "Confirm that danger signs were assessed and any positive findings were recorded.";
+    }
+    if (!editingId && !formData.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
+    if (!editingId && !formData.findings.trim()) next.findings = "Record the clinical findings from this consultation.";
     if (formData.treatmentGiven.length > 10000) next.treatmentGiven = "Use 10,000 characters or fewer for treatment provided.";
     if (formData.adviceGiven.length > 10000) next.adviceGiven = "Use 10,000 characters or fewer for recommendations.";
     if (formData.followUpRequired === "Yes" && !formData.nextVisitDate) next.nextVisitDate = "Select the follow-up date.";
@@ -757,7 +773,10 @@ export default function TreatmentConsultation() {
     const payload = {
       ...formData,
       riskReview: formData.riskReview || undefined,
-      clinicalContext: { existingConditions: formData.clinicalContext.existingConditions || [] },
+      // Existing encounter context is server-owned on edits; resubmitting the
+      // display/merged version can look like a clinical change and block an
+      // otherwise valid historical update. The API retains its saved context.
+      clinicalContext: editingId ? undefined : { existingConditions: formData.clinicalContext.existingConditions || [] },
       maternal: maternalService ? { ...formData.maternal, pregnancyId: formData.maternal.pregnancyId || confirmedPregnancy?.id || null } : undefined,
       residentId: selectedResident.id,
       followUpId: formData.followUpId || undefined,
@@ -812,7 +831,8 @@ export default function TreatmentConsultation() {
         treatmentVisitId: saved?.id || "",
       };
       cancelForm();
-      navigate("/app/health_supervisor/referrals", { state: { referralDraft } });
+      const referralPath = user?.role === "phn" ? "/app/phn/referrals" : "/app/health_supervisor/referrals";
+      navigate(referralPath, { state: { referralDraft } });
     };
 
     if (editingId) {
@@ -829,7 +849,8 @@ export default function TreatmentConsultation() {
         showToast(consultationAssessment(saved)?.referralEvaluationRequired
           ? "Consultation updated. High risk: referral evaluation is required."
           : "Consultation updated successfully.");
-        if (consultationAssessment(saved)?.referralEvaluationRequired === true && editingRisk !== "High" && !saved.referrals?.length) {
+        if ((formData.referralRequired === "Yes" || consultationAssessment(saved)?.referralEvaluationRequired === true)
+          && !saved.referrals?.length) {
           openReferral(saved);
           return;
         }
@@ -853,7 +874,7 @@ export default function TreatmentConsultation() {
         showToast(consultationAssessment(saved)?.referralEvaluationRequired
           ? "Consultation saved. High risk: referral evaluation is required."
           : "Consultation saved successfully.");
-        if (consultationAssessment(saved)?.referralEvaluationRequired === true) {
+        if (formData.referralRequired === "Yes" || consultationAssessment(saved)?.referralEvaluationRequired === true) {
           openReferral(saved);
           return;
         }
@@ -1146,6 +1167,26 @@ export default function TreatmentConsultation() {
         <div className="mb-4">
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-blue">Consultation Information</h4>
           {contextError && <p role="alert" className="mb-3 text-xs text-brand-danger">{contextError} <button type="button" onClick={() => setContextRetry((value) => value + 1)} className="font-medium text-brand-blue hover:underline">Retry</button></p>}
+          {clinicalContext?.previousAssessment && (
+            <section className="mb-3 rounded-btn border border-brand-border bg-brand-bg/50 p-3 dark:bg-card-nested" aria-label="Earlier clinical assessment">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h5 className="text-sm font-semibold text-brand-ink dark:text-foreground">Earlier risk assessment</h5>
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-brand-ink dark:bg-card dark:text-foreground">
+                  {clinicalContext.previousAssessment.level || clinicalContext.previousAssessment.status || "Assessment recorded"}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
+                {clinicalContext.previousAssessment.consultationDate
+                  ? `From consultation on ${formatDate(clinicalContext.previousAssessment.consultationDate)}`
+                  : "From an earlier consultation"}
+              </p>
+              {consultationRiskReasons({ consultationRiskAssessment: clinicalContext.previousAssessment }) && (
+                <p className="mt-1 break-words text-xs leading-5 text-brand-gray dark:text-muted-foreground">
+                  {consultationRiskReasons({ consultationRiskAssessment: clinicalContext.previousAssessment })}
+                </p>
+              )}
+            </section>
+          )}
           <div className="mb-3 grid gap-x-3 gap-y-2 sm:grid-cols-2">
             <div>
               <label htmlFor="consultation-date" className="block text-xs text-brand-gray mb-1">Consultation Date <span className="text-brand-danger">*</span></label>
@@ -1415,6 +1456,37 @@ export default function TreatmentConsultation() {
           errors={errors}
           disabled={Boolean(reviewLocalId)}
         />
+
+        <div className={`mb-4 rounded-lg border p-3 sm:p-4 ${errors["clinicalIndicators.dangerSignsReviewed"] ? "border-brand-danger/50 bg-red-50/50 dark:bg-red-950/20" : "border-brand-border bg-brand-bg/50 dark:bg-card-nested"}`}>
+          <label htmlFor="danger-signs-reviewed" className="flex cursor-pointer items-start gap-3">
+            <input
+              id="danger-signs-reviewed"
+              type="checkbox"
+              checked={formData.clinicalIndicators?.dangerSignsReviewed === true}
+              disabled={Boolean(reviewLocalId)}
+              onChange={(event) => setFormData((current) => ({
+                ...current,
+                clinicalIndicators: { ...(current.clinicalIndicators || {}), dangerSignsReviewed: event.target.checked },
+              }))}
+              aria-invalid={Boolean(errors["clinicalIndicators.dangerSignsReviewed"])}
+              aria-describedby={errors["clinicalIndicators.dangerSignsReviewed"] ? "danger-signs-reviewed-error" : "danger-signs-reviewed-help"}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-blue"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-brand-ink dark:text-foreground">
+                Danger-sign screening completed <span className="text-brand-danger" aria-hidden="true">*</span>
+              </span>
+              <span id="danger-signs-reviewed-help" className="mt-1 block text-xs leading-5 text-brand-gray dark:text-muted-foreground">
+                Confirm that you assessed the resident for danger signs and recorded any positive findings in the clinical findings above.
+              </span>
+            </span>
+          </label>
+          {errors["clinicalIndicators.dangerSignsReviewed"] && (
+            <p id="danger-signs-reviewed-error" className="mt-2 text-xs text-brand-danger" role="alert">
+              {errors["clinicalIndicators.dangerSignsReviewed"]}
+            </p>
+          )}
+        </div>
 
         <div className="mb-4">
           <section className="mt-3" aria-label="Follow-up and referral">
@@ -1768,7 +1840,7 @@ export default function TreatmentConsultation() {
               anchor={openActionMenu.anchor}
               onClose={closeActionMenu}
               onView={() => openRecord(actionRow)}
-              onEdit={canEditConsultation ? () => openRecord(actionRow, true) : null}
+              onEdit={canEditConsultation && !consultationDateIsPast(actionRow) ? () => openRecord(actionRow, true) : null}
             />}
             {!focusedId && filteredRecordRows.length > 0 && <TablePagination total={filteredRecordRows.length} page={recordPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }} className="mt-3" />}
             {focusedId ? null : loading ? (

@@ -21,6 +21,7 @@ test('direct report URLs use verified profile scope and permission for reads and
   let municipality = 'm1';
   let granted = true;
   let status = 'Submitted';
+  let recipientRole = 'phn';
   let historyReads = 0;
   t.mock.method(client.auth, 'getUser', async () => ({ data: { user: { id: actorId, app_metadata: { role: 'mho' } } } }));
   t.mock.method(client, 'from', (table) => {
@@ -28,7 +29,7 @@ test('direct report URLs use verified profile scope and permission for reads and
       profiles: { id: actorId, role, status: 'active', municipality_id: municipality },
       personnel_accounts: { approval_status: 'approved' },
       role_permissions: [{ permission_id: 'reports.view', granted }],
-      reports: { id: reportId, created_by: 'other', municipality_id: 'm1', recipient_role: 'rhu_personnel', status, content: { marker: 'snapshot' } },
+      reports: { id: reportId, created_by: 'other', municipality_id: 'm1', recipient_role: recipientRole, status, content: { marker: 'snapshot' } },
       report_status_history: [],
     }[table];
     if (table === 'report_status_history') historyReads += 1;
@@ -56,12 +57,16 @@ test('direct report URLs use verified profile scope and permission for reads and
   assert.equal(detail.status, 200);
   assert.equal(detail.headers.get('cache-control'), 'no-store');
   assert.equal((await detail.json()).data.record.content.marker, 'snapshot');
-  assert.equal((await request(true)).status, 403);
+
+  // An MHO cannot read or review a report routed to the PHN tier.
+  role = 'mho';
+  assert.equal((await request()).status, 404);
+  assert.equal((await request(true)).status, 404);
   status = 'Draft';
   assert.equal((await request()).status, 404);
   assert.equal((await request(true)).status, 404);
   status = 'Submitted';
-  role = 'mho';
+  recipientRole = 'mho';
   municipality = 'm2';
   assert.equal((await request()).status, 404);
   municipality = 'm1';
@@ -71,7 +76,7 @@ test('direct report URLs use verified profile scope and permission for reads and
   assert.equal(historyReads, 2);
 });
 
-test('PostgreSQL report and history RLS enforce assignment, permission, and draft ownership', {
+test('PostgreSQL report and history RLS enforce assignment, PHN routing, read-only MHO oversight, permission, and draft ownership', {
   skip: !process.env.REPORT_RLS_PGLITE && 'Set REPORT_RLS_PGLITE to the local PGlite module entry point',
 }, async (t) => {
   const { PGlite } = await import(pathToFileURL(process.env.REPORT_RLS_PGLITE));
@@ -106,6 +111,12 @@ test('PostgreSQL report and history RLS enforce assignment, permission, and draf
   const personnel = await migration('20261101010000_health_personnel_account_management');
   await db.exec(personnel.match(/create function public\.personnel_actor_has_permission[\s\S]*?\$\$;/)[0]);
   await db.exec(await migration('20261119000000_scope_submitted_report_reads'));
+  const routingMigration = await migration('20261201090000_route_barangay_reports_through_phn');
+  const routedSelectPolicy = routingMigration.match(
+    /drop policy if exists reports_select on public\.reports;[\s\S]*?\n  \);/,
+  )?.[0];
+  assert.ok(routedSelectPolicy, 'the report-routing migration must define the scoped reports_select policy');
+  await db.exec(routedSelectPolicy);
 
   const actor = (id) => `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`;
   await db.exec(`
@@ -116,13 +127,16 @@ test('PostgreSQL report and history RLS enforce assignment, permission, and draf
       ('${actor(4)}', 'rhu_personnel', 'active', 'm1', null, 'f1'),
       ('${actor(5)}', 'rhu_personnel', 'active', 'm1', null, 'f2'),
       ('${actor(6)}', 'phn', 'active', null, null, null),
-      ('${actor(7)}', 'admin', 'active', 'm1', null, null);
+      ('${actor(7)}', 'admin', 'active', 'm1', null, null),
+      ('${actor(8)}', 'health_supervisor', 'active', 'm2', 'b3', null),
+      ('${actor(9)}', 'phn', 'active', 'm2', null, null);
     insert into reports values
       (1, '${actor(1)}', 'health_supervisor', 'rhu_personnel', 'm1', 'b1', 'f1', 'Submitted'),
       (2, '${actor(1)}', 'health_supervisor', 'rhu_personnel', 'm1', 'b1', 'f1', 'Draft'),
       (3, '${actor(1)}', 'health_supervisor', 'rhu_personnel', 'm1', 'b2', 'f2', 'Submitted'),
       (4, '${actor(2)}', 'phn', 'mho', 'm2', null, null, 'Submitted'),
-      (5, '${actor(2)}', 'phn', 'mho', 'm2', null, null, 'Draft');
+      (5, '${actor(2)}', 'phn', 'mho', 'm2', null, null, 'Draft'),
+      (6, '${actor(8)}', 'health_supervisor', 'phn', 'm2', 'b3', null, 'Submitted');
     insert into report_status_history select id from reports;
   `);
 
@@ -131,10 +145,16 @@ test('PostgreSQL report and history RLS enforce assignment, permission, and draf
     assert.deepEqual((await db.query('select id from reports order by id')).rows.map(({ id }) => id), ids);
     assert.deepEqual((await db.query('select report_id from report_status_history order by report_id')).rows.map(({ report_id }) => report_id), ids);
   };
-  for (const [id, ids] of [[1, [1, 2]], [2, [1, 3]], [3, [4]], [4, [1]], [5, [3]], [6, []], [7, []]]) {
+  for (const [id, ids] of [[1, [1, 2]], [2, [1, 3]], [3, [4, 6]], [4, [1]], [5, [3]], [6, []], [7, []], [8, [6]], [9, [6]]]) {
     await assume(id);
     await visible(ids);
   }
+  await assume(3);
+  assert.equal((await db.query("update reports set status = 'Received' where id = 6")).affectedRows, 0,
+    'MHO may monitor a report addressed to PHN but cannot act on it');
+  await assume(9);
+  assert.equal((await db.query("update reports set status = 'Received' where id = 6")).affectedRows, 1,
+    'the addressed PHN retains the report workflow action');
   await assume(2);
   assert.equal((await db.query("update reports set status = 'Received'")).affectedRows, 0);
   await db.exec("reset role; insert into role_permissions values ('phn', 'reports.view', false), ('rhu_personnel', 'reports.view', false)");

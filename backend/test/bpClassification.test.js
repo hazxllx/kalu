@@ -14,10 +14,12 @@ test('normal reading is classified Normal', () => {
   assert.equal(r.diastolic, 76);
 });
 
-test('elevated requires systolic 120-129 AND diastolic below 80', () => {
+test('configured Normal includes 120/80; Elevated starts at 121 systolic with diastolic through 80', () => {
   assert.equal(classifyBloodPressure('125/78').code, 'elevated');
-  // diastolic 85 pushes it to stage 1 (diastolic 80-89)
-  assert.equal(classifyBloodPressure('125/85').code, 'stage1');
+  assert.equal(classifyBloodPressure('125/80').code, 'elevated');
+  assert.equal(classifyBloodPressure('120/80').code, 'normal');
+  // Diastolic 81 and above enters Stage 1 unless a higher category applies.
+  assert.equal(classifyBloodPressure('125/81').code, 'stage1');
 });
 
 test('stage 1 by systolic OR diastolic', () => {
@@ -38,8 +40,9 @@ test('severe range requires emergency symptoms to flag emergency', () => {
   assert.equal(classifyBloodPressure('160/125').code, 'crisis');
 });
 
-test('values below 120/80 follow the requested Normal category', () => {
+test('low readings stay separately flagged while 120/80 follows the configured Normal boundary', () => {
   assert.equal(classifyBloodPressure('85/55').code, 'normal');
+  assert.equal(classifyBloodPressure('120/80').code, 'normal');
   // A valid reading whose diastolic is in the crisis range is crisis, not low.
   assert.equal(classifyBloodPressure('130/125').code, 'crisis');
 });
@@ -52,8 +55,10 @@ test('more severe category wins when systolic and diastolic differ', () => {
 test('all requested consultation examples use the exact five classification labels', () => {
   const examples = [
     ['110/70', 'Normal Blood Pressure'],
-    ['120/75', 'Elevated Blood Pressure'],
-    ['120/80', 'Stage 1 Hypertension'],
+    ['120/75', 'Normal Blood Pressure'],
+    ['120/80', 'Normal Blood Pressure'],
+    ['121/80', 'Elevated Blood Pressure'],
+    ['120/81', 'Stage 1 Hypertension'],
     ['125/85', 'Stage 1 Hypertension'],
     ['130/80', 'Stage 1 Hypertension'],
     ['140/85', 'Stage 2 Hypertension'],
@@ -86,7 +91,7 @@ test('configured thresholds change categories without changing OR-based severity
   assert.equal(classifyBloodPressure('130/95', configured).code, 'stage2');
 });
 
-test('configured category labels remain the approved clinical labels', () => {
+test('configured category labels remain the supported screening labels', () => {
   const r = classifyBloodPressure('145/95');
   assert.equal(r.code, 'stage2');
   assert.equal(r.label, 'Stage 2 Hypertension');

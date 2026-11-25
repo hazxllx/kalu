@@ -103,6 +103,21 @@ export const markInReview = async (req, res) => {
   sendData(res, { submission });
 };
 
+/** Explicitly routes a PHN-reviewed submission to an RHU Consultation facility. */
+export const routeSubmissionToConsultation = async (req, res) => {
+  const submission = await phnQueueService.routeSubmissionToConsultation({
+    id: req.params.id,
+    facilityId: req.body?.facility_id || null,
+    user: req.user,
+  });
+  sendData(res, { submission });
+};
+
+export const listConsultationFacilities = async (req, res) => {
+  const facilities = await phnQueueService.listConsultationFacilities({ user: req.user });
+  sendData(res, { facilities });
+};
+
 /**
  * Handles `POST`/`PATCH /submissions/:id/complete` — finalizes PHN clinical
  * processing of submission `req.params.id` via `phnQueueService.completeSubmission()`.

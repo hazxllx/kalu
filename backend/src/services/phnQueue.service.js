@@ -77,10 +77,29 @@ const BARANGAY_ROLES = new Set(['health_supervisor', 'bhw']);
  * municipality-scoped role cannot read another municipality's PHI, even when
  * the record id is known.
  */
-const recordInScope = (user, resident, facilityId = null) => {
+const requiresAssignedConsultationRoute = (user) =>
+  user?.role === 'rhu_personnel'
+  || (user?.role === 'health_supervisor' && canConsult(user));
+
+const isDirectRhuTriageSubmission = (user, submission) =>
+  user?.role === 'rhu_personnel'
+  && Boolean(user.facilityId)
+  && submission?.facilityId === user.facilityId
+  && !submission?.consultationRoutedAt
+  && !submission?.consultationRoutedFacilityId;
+
+const recordInScope = (user, resident, facilityId = null, consultationRoutedFacilityId = null, consultationRoutedAt = null) => {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  if (!withinFacilityScope(user, facilityId)) return false;
+  if (user.role === 'rhu_personnel') {
+    if (!user.facilityId) return false;
+    const wasRouted = Boolean(consultationRoutedAt || consultationRoutedFacilityId);
+    if (wasRouted
+      ? consultationRoutedFacilityId !== user.facilityId
+      : facilityId !== user.facilityId) return false;
+  } else if (requiresAssignedConsultationRoute(user)) {
+    if (!user.facilityId || consultationRoutedFacilityId !== user.facilityId) return false;
+  } else if (!withinFacilityScope(user, facilityId)) return false;
   const municipalityId = resident?.municipalityId ?? null;
   const barangayId = resident?.barangayId ?? null;
   if (BARANGAY_ROLES.has(user.role)) {
@@ -93,8 +112,14 @@ const recordInScope = (user, resident, facilityId = null) => {
 };
 
 const assertSubmissionScope = (user, submission) => {
-  if (!recordInScope(user, submission?.resident, submission?.facilityId)) {
+  if (!recordInScope(user, submission?.resident, submission?.facilityId, submission?.consultationRoutedFacilityId, submission?.consultationRoutedAt)) {
     throw ApiError.notFound('Submission not found');
+  }
+};
+
+const assertRoutedConsultationOwnership = (user, submission) => {
+  if (isPHN(user) && submission?.consultationRoutedAt) {
+    throw ApiError.conflict('This encounter has been routed to RHU Consultation and can no longer be changed in the PHN check-up.');
   }
 };
 
@@ -113,13 +138,16 @@ export const listQueue = async ({ statuses = null, q = '', user } = {}) => {
     const result = await repository.listVisits({ statuses: effectiveStatuses, q, limit: 100, offset,
       municipalityId: user.municipalityId,
       barangayId: BARANGAY_ROLES.has(user.role) ? user.barangayId : null,
-      facilityId: user.role === 'rhu_personnel' ? user.facilityId : null });
+      // Include facility-originated triage and explicitly routed BHS cases;
+      // recordInScope below restricts RHU staff to their own facility or the
+      // consultation facility selected by the PHN.
+      facilityId: null });
     const page = Array.isArray(result) ? result : result?.rows;
     if (!Array.isArray(page)) throw new ApiError(503, 'The consultation queue returned an invalid record list.');
     for (const visit of page) {
       if (!visit?.id || seen.has(visit.id)) throw new ApiError(503, 'The consultation queue pagination did not advance.');
       seen.add(visit.id);
-      if (recordInScope(user, visit.resident, visit.facilityId)) rows.push(visit);
+      if (recordInScope(user, visit.resident, visit.facilityId, visit.consultationRoutedFacilityId, visit.consultationRoutedAt)) rows.push(visit);
     }
     if (page.length < 100 || (Number.isFinite(result?.total) && offset + page.length >= result.total)) break;
   }
@@ -138,9 +166,9 @@ export const viewSubmission = async ({ id, user }) => {
   // record's municipality/barangay scope. Out-of-scope reads return 404 so a
   // known id cannot be used to probe or read another barangay's PHI.
   const canView =
-    (isRecorder && recordInScope(user, submission.resident, submission.facilityId)) ||
+    (isRecorder && recordInScope(user, submission.resident, submission.facilityId, submission.consultationRoutedFacilityId, submission.consultationRoutedAt)) ||
     ((isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role)) &&
-      recordInScope(user, submission.resident, submission.facilityId));
+      recordInScope(user, submission.resident, submission.facilityId, submission.consultationRoutedFacilityId, submission.consultationRoutedAt));
   if (!canView) throw ApiError.notFound('Submission not found');
 
   if (!isPHN(user) && submission.status === SUBMISSION_STATUS.DRAFT) {
@@ -156,6 +184,41 @@ export const normalizePhnVisit = (visit = {}) => {
     if (Object.keys(errors).length) throw ApiError.badRequest('Invalid vital signs.', errors);
   }
   const pickText = (value) => String(value ?? '').trim();
+  let consultationVitals;
+  if (visit.consultationVitals !== undefined) {
+    const input = visit.consultationVitals;
+    const fields = ['bloodPressure', 'temperature', 'pulseRate', 'respiratoryRate', 'height', 'weight', 'oxygenSaturation'];
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw ApiError.unprocessable('Please correct the consultation measurements.', {
+        consultationVitals: 'Enter only supported missing vital signs.',
+      });
+    }
+    const unsupported = Object.keys(input).filter((field) => !fields.includes(field));
+    if (unsupported.length) {
+      throw ApiError.unprocessable('Please correct the consultation measurements.', {
+        consultationVitals: 'Only supported vital signs can be added here.',
+      });
+    }
+    const values = Object.fromEntries(fields
+      .filter((field) => input[field] !== undefined && input[field] !== null && String(input[field]).trim() !== '')
+      .map((field) => [field, typeof input[field] === 'string' ? input[field].trim() : input[field]]));
+    for (const [field, value] of Object.entries(values)) {
+      if (typeof value !== 'string' && typeof value !== 'number') {
+        throw ApiError.unprocessable('Please correct the consultation measurements.', {
+          [`consultationVitals.${field}`]: 'Enter a valid measurement.',
+        });
+      }
+    }
+    const vitalErrors = validateConsultationVitals(values, { required: false });
+    if (Object.keys(vitalErrors).length) {
+      throw ApiError.unprocessable('Please correct the consultation measurements.',
+        Object.fromEntries(Object.entries(vitalErrors).map(([field, message]) => [`consultationVitals.${field}`, message])));
+    }
+    consultationVitals = Object.fromEntries(Object.entries(values).map(([field, value]) => [
+      field,
+      field === 'bloodPressure' ? String(value).trim() : Number(value),
+    ]));
+  }
   const vitals = visit.vitals
     ? (() => {
         const heightCm = visit.vitals.heightCm === '' || visit.vitals.heightCm === null || visit.vitals.heightCm === undefined ? null : Number(visit.vitals.heightCm);
@@ -204,6 +267,7 @@ export const normalizePhnVisit = (visit = {}) => {
   // client includes the field, so unrelated PHN edits never clear it.
   if (visit.medications !== undefined) patch.medications = normalizeMedications(visit.medications);
   if (vitals) patch.vitals = vitals;
+  if (consultationVitals && Object.keys(consultationVitals).length) patch.consultationVitals = consultationVitals;
   if (visit.phn) {
     const phnPatch = {};
     if (visit.phn.assessment !== undefined) phnPatch.assessment = pickText(visit.phn.assessment);
@@ -215,6 +279,19 @@ export const normalizePhnVisit = (visit = {}) => {
   }
   return patch;
 };
+
+const CONSULTATION_VITAL_COLUMN = Object.freeze({
+  bloodPressure: 'bp',
+  temperature: 'temperature',
+  pulseRate: 'hr',
+  respiratoryRate: 'rr',
+  height: 'heightCm',
+  weight: 'weightKg',
+  oxygenSaturation: 'o2sat',
+});
+
+const hasRecordedVital = (value) => value !== null && value !== undefined
+  && !['', '—', '-', 'not recorded'].includes(String(value).trim().toLowerCase());
 
 const consultationServiceVisibleTo = (user, service) => {
   if (!service || service.active === false || service.municipality_id !== user.municipalityId) return false;
@@ -277,6 +354,7 @@ export const updateSubmissionForPhn = async ({
   const submission = await repo.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   assertSubmissionScope(user, submission);
+  assertRoutedConsultationOwnership(user, submission);
   if (submission.status === SUBMISSION_STATUS.COMPLETED && complete) {
     const requested = normalizePhnVisit(patch);
     const comparable = (value) => {
@@ -287,6 +365,10 @@ export const updateSubmissionForPhn = async ({
     const same = Object.entries(requested).every(([key, value]) => {
       if (key === 'phn') return Object.entries(value).every(([field, text]) => String(submission.phn?.[field] || '').trim() === text);
       if (key === 'diagnosis') return String(submission.consultationDetails?.diagnosis || '').trim() === value;
+      if (key === 'consultationDetails') return Object.entries(value.clinicalIndicators || {}).every(([field, present]) =>
+        submission.consultationDetails?.clinicalIndicators?.[field] === present);
+      if (key === 'consultationVitals') return Object.entries(value).every(([field, text]) =>
+        JSON.stringify(submission.consultationDetails?.consultationVitals?.[field] ?? '') === JSON.stringify(text));
       const saved = key === 'medications' ? normalizeMedications(submission.medications || []) : submission[key];
       return JSON.stringify(comparable(saved)) === JSON.stringify(comparable(value));
     });
@@ -307,6 +389,30 @@ export const updateSubmissionForPhn = async ({
   }
 
   const normalized = normalizePhnVisit(patch);
+  const requestedConsultationVitals = normalized.consultationVitals || {};
+  delete normalized.consultationVitals;
+  const savedConsultationVitals = submission.consultationDetails?.consultationVitals || {};
+  const triageVitals = submission.triageSnapshot?.vitals || submission.vitals || {};
+  const consultationVitals = { ...savedConsultationVitals };
+  for (const [field, value] of Object.entries(requestedConsultationVitals)) {
+    const column = CONSULTATION_VITAL_COLUMN[field];
+    if (hasRecordedVital(triageVitals[column])) {
+      throw ApiError.unprocessable('Only vital signs missing from triage can be added during consultation.', {
+        [`consultationVitals.${field}`]: 'This measurement was already recorded during triage and cannot be replaced.',
+      });
+    }
+    if (hasRecordedVital(submission.vitals?.[column]) && !hasRecordedVital(savedConsultationVitals[field])) {
+      throw ApiError.conflict('This measurement is already recorded on the encounter. Reload it before continuing.');
+    }
+    consultationVitals[field] = value;
+  }
+  for (const [field, value] of Object.entries(consultationVitals)) {
+    const column = CONSULTATION_VITAL_COLUMN[field];
+    if (!column || hasRecordedVital(triageVitals[column])) {
+      throw ApiError.conflict('A saved consultation measurement conflicts with the original triage snapshot.');
+    }
+    if (!hasRecordedVital(value)) delete consultationVitals[field];
+  }
   if (normalized.diagnosis !== undefined) {
     normalized.consultationDetails = {
       ...submission.consultationDetails,
@@ -344,6 +450,21 @@ export const updateSubmissionForPhn = async ({
     ...(submission.vitals || {}),
     ...(normalized.vitals || {}),
   };
+  for (const [field, value] of Object.entries(consultationVitals)) {
+    vitals[CONSULTATION_VITAL_COLUMN[field]] = field === 'bloodPressure' ? String(value).trim() : Number(value);
+  }
+  if (Object.hasOwn(consultationVitals, 'height') || Object.hasOwn(consultationVitals, 'weight')) {
+    const calculated = computeBMI(vitals.heightCm, vitals.weightKg);
+    vitals.bmi = calculated.bmi;
+    vitals.bmiCategory = calculated.category;
+  }
+  if (Object.keys(consultationVitals).length) {
+    normalized.consultationDetails = {
+      ...submission.consultationDetails,
+      ...normalized.consultationDetails,
+      consultationVitals,
+    };
+  }
   const errors = validateVitals(vitals);
   if (Object.keys(errors).length) throw ApiError.badRequest('Invalid vital signs.', errors);
 
@@ -362,6 +483,7 @@ export const updateSubmissionForPhn = async ({
     consultationDetails: { ...submission.consultationDetails, ...normalized.consultationDetails,
         ...(normalized.findings !== undefined ? { findings: normalized.findings } : {}) } };
   const clinicalChanged = complete
+    || Object.keys(requestedConsultationVitals).length > 0
     || ['findings','treatmentGiven'].some((field) => normalized[field] !== undefined && normalized[field] !== submission[field])
     || patch.diagnosis !== undefined
     || (normalized.phn?.assessment !== undefined && normalized.phn.assessment !== submission.phn?.assessment)
@@ -397,9 +519,13 @@ export const updateSubmissionForPhn = async ({
     findings: encounter.findings,
     clinicalIndicators: encounter.consultationDetails?.clinicalIndicators,
   }));
-  normalized.consultationDetails = await buildEncounterAssessment({ visit: encounter, resident: submission.resident, user,
+  const assessedDetails = await buildEncounterAssessment({ visit: encounter, resident: submission.resident, user,
     supabase: clinicalClient, previous: submission.consultationDetails, context,
     riskReview });
+  normalized.consultationDetails = {
+    ...assessedDetails,
+    ...(Object.keys(consultationVitals).length ? { consultationVitals } : {}),
+  };
   const updated = await repo.updateVisit(id, normalized, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: PHN_EDITABLE_STATUSES });
   if (!updated) throw ApiError.conflict('The consultation changed while saving. Reload its saved record before continuing.');
   return updated;
@@ -421,11 +547,91 @@ export const receiveSubmission = async ({ id, user }) => {
   return repository.updateVisit(id, { status: SUBMISSION_STATUS.RECEIVED, receivedAt: now });
 };
 
+/** Explicit PHN hand-off to one RHU Consultation facility after initial review. */
+export const routeSubmissionToConsultation = async ({ id, facilityId = null, user, repo = repository, supabase = getServiceClient() }) => {
+  if (!isPHN(user)) throw ApiError.forbidden('Only a PHN may route an encounter to RHU Consultation.');
+  if (!user.municipalityId) throw ApiError.forbidden('Your account has no municipality assignment.');
+  const submission = await repo.getVisit(id);
+  if (!submission) throw ApiError.notFound('Submission not found');
+  assertSubmissionScope(user, submission);
+  if (submission.status !== SUBMISSION_STATUS.IN_REVIEW) {
+    throw ApiError.conflict('Review the triage submission before routing it to RHU Consultation.');
+  }
+  if (submission.consultationStartedAt) throw ApiError.conflict('RHU Consultation has already started this encounter.');
+
+  let facilitiesQuery = supabase.from('facilities')
+    .select('id, municipality_id, name, type')
+    .eq('municipality_id', user.municipalityId)
+    .eq('type', 'rhu')
+    .order('name', { ascending: true });
+  if (facilityId) facilitiesQuery = facilitiesQuery.eq('id', facilityId);
+  const { data: facilities, error } = await facilitiesQuery;
+  if (error) throw new ApiError(503, 'RHU Consultation destinations are unavailable.');
+  if (!Array.isArray(facilities) || facilities.length === 0) {
+    throw ApiError.unprocessable('Select an RHU facility in your municipality.');
+  }
+  if (!facilityId && facilities.length !== 1) {
+    throw ApiError.unprocessable('Choose the RHU Consultation facility for this encounter.');
+  }
+  const destination = facilityId ? facilities[0] : facilities[0];
+  const now = new Date().toISOString();
+  const routed = await repo.updateVisit(id, {
+    consultationRoutedAt: now,
+    consultationRoutedBy: user.id,
+    consultationRoutedFacilityId: destination.id,
+    consultationStartedAt: null,
+    consultationStartedBy: null,
+  }, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: [SUBMISSION_STATUS.IN_REVIEW] });
+  return { ...routed, consultationRoutedFacilityName: destination.name };
+};
+
+export const listConsultationFacilities = async ({ user, supabase = getServiceClient() }) => {
+  if (!isPHN(user)) throw ApiError.forbidden('Only a PHN may choose an RHU Consultation destination.');
+  if (!user.municipalityId) throw ApiError.forbidden('Your account has no municipality assignment.');
+  const { data, error } = await supabase.from('facilities')
+    .select('id, name, municipality_id, type')
+    .eq('municipality_id', user.municipalityId)
+    .eq('type', 'rhu')
+    .order('name', { ascending: true });
+  if (error) throw new ApiError(503, 'RHU Consultation destinations are unavailable.');
+  return (data || []).filter((facility) => facility.municipality_id === user.municipalityId && facility.type === 'rhu')
+    .map(({ id, name }) => ({ id, name }));
+};
+
 export const markInReview = async ({ id, user }) => {
   assertCanProcessConsultation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   assertSubmissionScope(user, submission);
+  assertRoutedConsultationOwnership(user, submission);
+  if (requiresAssignedConsultationRoute(user)) {
+    if (isDirectRhuTriageSubmission(user, submission)) {
+      if (submission.consultationStartedAt) return submission;
+      if (![SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW].includes(submission.status)) {
+        throw ApiError.conflict(`Cannot start consultation for a ${submission.status} submission.`);
+      }
+      const now = new Date().toISOString();
+      const directUpdate = {
+        status: SUBMISSION_STATUS.IN_REVIEW,
+        receivedAt: submission.receivedAt || now,
+        reviewedAt: submission.reviewedAt || now,
+        consultationStartedAt: now,
+        consultationStartedBy: user.id,
+      };
+      const started = await repository.updateVisit(id, directUpdate, {
+        expectedUpdatedAt: submission.updatedAt,
+        allowedStatuses: [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW],
+      });
+      if (!started) throw ApiError.conflict('This triage submission changed while consultation was starting. Reload the queue and try again.');
+      return started;
+    }
+    if (submission.consultationRoutedFacilityId !== user.facilityId) throw ApiError.notFound('Submission not found');
+    if (submission.consultationStartedAt) return submission;
+    return repository.updateVisit(id, {
+      consultationStartedAt: new Date().toISOString(),
+      consultationStartedBy: user.id,
+    }, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: [SUBMISSION_STATUS.IN_REVIEW] });
+  }
   guardTransition(
     submission,
     [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED],
@@ -448,6 +654,7 @@ export const completeSubmission = async ({ id, user, patch, repo = repository, s
   const submission = await repo.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   assertSubmissionScope(user, submission);
+  assertRoutedConsultationOwnership(user, submission);
   if (submission.status === SUBMISSION_STATUS.COMPLETED) return submission;
   guardTransition(
     submission,

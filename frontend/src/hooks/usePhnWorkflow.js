@@ -57,7 +57,13 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
     await refresh().catch(() => {});
   }, [refresh]);
 
-  return { patients, loading, error, refresh, sendToPhnQueue, startCheckup, completeCheckup };
+  const routeToConsultation = useCallback(async (id, facilityId = null) => {
+    const result = await phnWorkflowApi.routeToConsultation(id, facilityId);
+    await refresh().catch(() => {});
+    return result;
+  }, [refresh]);
+
+  return { patients, loading, error, refresh, sendToPhnQueue, startCheckup, completeCheckup, routeToConsultation };
 }
 
 export default usePhnWorkflow;

@@ -22,7 +22,7 @@
  */
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
-import { notifyResident } from './notifications.service.js';
+import { notifyAccountOnce } from './notifications.service.js';
 
 const text = (v) => String(v ?? '').trim();
 
@@ -31,17 +31,17 @@ const text = (v) => String(v ?? '').trim();
  * household and the incoming (already validated) patch. Pure — no side effects,
  * so it can be unit-tested directly.
  *
- * @returns {{ action: string, audience: 'collector'|'supervisor' }|null}
+ * @returns {{ action: string, audience: 'none'|'collector'|'supervisor' }|null}
  *   null when the patch is an ordinary edit, not a lifecycle transition.
  */
 export const classifyHouseholdEvent = (previous = {}, patch = {}) => {
   const prevHh = text(previous.hhStatus);
   const prevVerification = text(previous.verificationStatus);
 
-  // Health Supervisor verification outcomes take priority: they always notify
-  // the household's collector (the BHW who submitted it).
+  // Verification is recorded for audit only. BHW operational notifications
+  // are reserved for profiles returned for correction.
   if (patch.verificationStatus === 'Verified') {
-    return { action: 'HOUSEHOLD_VERIFIED', audience: 'collector' };
+    return { action: 'HOUSEHOLD_VERIFIED', audience: 'none' };
   }
   if (patch.verificationStatus === 'Returned for Correction') {
     return { action: 'HOUSEHOLD_RETURNED', audience: 'collector' };
@@ -50,7 +50,8 @@ export const classifyHouseholdEvent = (previous = {}, patch = {}) => {
   // BHW submission / resubmission: hh_status transitions to 'Submitted'. When
   // the profile had previously been returned for correction, treat it as a
   // resubmission so the audit trail is unambiguous.
-  if (patch.hhStatus === 'Submitted' && prevHh !== 'Submitted') {
+  if (patch.hhStatus === 'Submitted'
+      && (prevHh !== 'Submitted' || prevVerification === 'Returned for Correction')) {
     const resubmit = prevVerification === 'Returned for Correction';
     return {
       action: resubmit ? 'HOUSEHOLD_RESUBMITTED' : 'HOUSEHOLD_SUBMITTED',
@@ -97,34 +98,35 @@ export const recordHouseholdAudit = async ({ user, action, household, reason = '
  * existing notifications table. Best-effort: never throws, no-op without
  * Supabase.
  *
- *   - collector audience  -> notify the household collector (BHW) directly
- *                            (household.collectorId is a profiles.id === auth id).
+ *   - collector audience  -> notify the household collector (BHW) only when a
+ *                            Health Supervisor returns it for correction.
  *   - supervisor audience -> notify every active Health Supervisor assigned to
  *                            the household's barangay.
  */
-export const notifyHouseholdEvent = async ({ event, household, reason = '' } = {}) => {
-  if (!env.isSupabaseConfigured || !event || !household?.id) return;
+export const notifyHouseholdEvent = async ({ event, household, reason = '', actor = null } = {}) => {
+  if (!env.isSupabaseConfigured || !event || !household?.id || event.audience === 'none') return;
   const label = household.headName ? `${household.headName}'s household` : `Household ${household.id}`;
+  const eventRevision = text(household.revision || household.updatedAt || household.verifiedAt || household.submittedAt || 'current');
+  const eventKey = `household:${household.id}:${event.action}:${eventRevision}`;
   try {
     if (event.audience === 'collector') {
       const recipient = household.collectorId || household.createdBy;
       if (!recipient) return;
-      const info = event.action === 'HOUSEHOLD_VERIFIED'
-        ? {
-            category: 'information',
-            title: 'Household profile verified',
-            message: `${label} (${household.id}) has been verified by the Health Supervisor.`,
-          }
-        : {
-            category: 'alert',
-            title: 'Household returned for correction',
-            message: `${label} (${household.id}) was returned for correction${text(reason) ? `: ${text(reason)}` : '.'}`,
-          };
-      await notifyResident({
+      if (event.action !== 'HOUSEHOLD_RETURNED') return;
+      const zone = household.zone ?? household.purok ?? household.zoneName ?? 'Not recorded';
+      const returnedBy = text(actor?.name || actor?.fullName || actor?.email) || 'Health Supervisor';
+      const returnReason = text(reason) || 'No reason was provided.';
+      const info = {
+        category: 'alert',
+        title: 'Household Profile Returned for Correction',
+        message: `Household ID: ${household.id}\nHousehold Head: ${household.headName || 'Not recorded'}\nZone/Purok: ${zone}\nReturned by: ${returnedBy}\nReason: ${returnReason}`,
+      };
+      await notifyAccountOnce({
         recipientAuthUserId: recipient,
         ...info,
         relatedType: 'households',
         relatedId: household.id,
+        eventKey,
       });
       return;
     }
@@ -148,13 +150,14 @@ export const notifyHouseholdEvent = async ({ event, household, reason = '' } = {
         : 'New household profile awaiting verification';
       const message = `${label} (${household.id}) is awaiting your verification.`;
       for (const row of data || []) {
-        await notifyResident({
+        await notifyAccountOnce({
           recipientAuthUserId: row.id,
           category: 'information',
           title,
           message,
           relatedType: 'households',
           relatedId: household.id,
+          eventKey,
         });
       }
     }
@@ -171,7 +174,7 @@ export const emitHouseholdWorkflow = async ({ user, previous, patch, household, 
   const event = classifyHouseholdEvent(previous, patch);
   if (!event) return null;
   await recordHouseholdAudit({ user, action: event.action, household, reason });
-  await notifyHouseholdEvent({ event, household, reason });
+  await notifyHouseholdEvent({ event, household, reason, actor: user });
   return event;
 };
 

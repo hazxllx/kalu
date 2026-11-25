@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getResidentForIntake, searchResidents } from '../src/services/intake.service.js';
+import { getResidentForIntake, listMySubmissions, searchResidents } from '../src/services/intake.service.js';
 
 const actor = (role = 'rhu_personnel') => ({ id: 'worker-a', role, rhuStations: role === 'rhu_personnel' ? ['triage'] : [], facilityId: role === 'rhu_personnel' ? 'facility-a' : null, municipalityId: 'municipality-a', ...(role !== 'rhu_personnel' ? { barangay: 'San Antonio', barangayId: 'barangay-a' } : {}) });
 const resident = (values = {}) => ({ id: 'resident-a', firstName: 'Recorded', lastName: 'Resident', municipalityId: 'municipality-a', barangay: 'San Antonio', barangayId: 'barangay-a', ...values });
@@ -85,4 +85,47 @@ test('search also requires actual scope and passes only the authenticated munici
   const invalid = fixture(resident());
   await assert.rejects(searchResidents({ q: 'Recorded', user: { ...actor(), municipalityId: null }, repo: invalid.repo }), (error) => error.statusCode === 403);
   assert.deepEqual(invalid.calls, []);
+});
+
+test('RHU triage history shows submitted encounters for its facility, not only the current user', async () => {
+  const user = actor();
+  const calls = [];
+  const repo = {
+    driver: 'supabase',
+    listVisits: async (filters) => {
+      calls.push(filters);
+      return { rows: [
+        { id: 'same-facility', status: 'submitted', facilityId: 'facility-a', resident: resident() },
+        { id: 'other-facility', status: 'submitted', facilityId: 'facility-b', resident: resident() },
+        { id: 'other-municipality', status: 'submitted', facilityId: 'facility-a', resident: resident({ municipalityId: 'municipality-b' }) },
+        { id: 'draft', status: 'draft', facilityId: 'facility-a', resident: resident() },
+      ] };
+    },
+  };
+
+  const rows = await listMySubmissions({ user, repo });
+  assert.deepEqual(calls, [{
+    statuses: ['submitted', 'received', 'in_review', 'referred', 'completed'],
+    municipalityId: 'municipality-a',
+    facilityId: 'facility-a',
+    limit: 100,
+  }]);
+  assert.deepEqual(rows.map((row) => row.id), ['same-facility']);
+});
+
+test('barangay intake history remains owned by the signed-in worker', async () => {
+  const user = actor('health_supervisor');
+  const calls = [];
+  const repo = {
+    driver: 'supabase',
+    listVisits: async (filters) => {
+      calls.push(filters);
+      return { rows: [
+        { id: 'own', status: 'submitted', recordedById: user.id, resident: resident() },
+      ] };
+    },
+  };
+  const rows = await listMySubmissions({ user, repo });
+  assert.deepEqual(calls, [{ submittedById: user.id, limit: 100 }]);
+  assert.deepEqual(rows.map((row) => row.id), ['own']);
 });

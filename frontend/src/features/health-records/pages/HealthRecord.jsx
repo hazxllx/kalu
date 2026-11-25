@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { residentsApi, visitPlansApi, referralsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
-import { downloadReferralPdf, openReferralPdf } from "@/features/referrals/lib/referralPdf";
+import { openReferralPdf } from "@/features/referrals/lib/referralPdf";
 import { downloadHealthRecordPdf, medicalHistoryForRecord } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
@@ -25,6 +25,19 @@ import { bloodPressureBadgeClassName } from "@/features/consultations/utils/bpCl
 const labs = [];
 
 const dash = (value) => (value === null || value === undefined || value === "" ? "—" : value);
+
+const referralDisplayValue = (value) => {
+  if (value === null || value === undefined || value === "") return "Not recorded";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) {
+    const items = value.map(referralDisplayValue).filter((item) => item !== "Not recorded");
+    return items.length ? items.join(", ") : "Not recorded";
+  }
+  if (typeof value === "object") {
+    return referralDisplayValue(value.label ?? value.name ?? value.value ?? value.key);
+  }
+  return String(value);
+};
 
 function ServiceRecordDetail({ label, value }) {
   if (value === null || value === undefined || value === "") return null;
@@ -144,6 +157,8 @@ export default function HealthRecord() {
   // Consultation History is consolidated into this page as a tab/subsection
   // rather than a separate sidebar entry.
   const [activeTab, setActiveTab] = useState("overview");
+  const [referralPage, setReferralPage] = useState(1);
+  const [referralPageSize, setReferralPageSize] = useState(8);
   const [consultationPage, setConsultationPage] = useState(1);
   const [consultationPageSize, setConsultationPageSize] = useState(8);
 
@@ -338,21 +353,6 @@ export default function HealthRecord() {
     }
   }, [user?.id]);
 
-  const downloadReferral = useCallback(async (record) => {
-    if (!record?.id || !user?.id || referralDownloadId) return;
-    setReferralDownloadId(record.id);
-    setReferralActionError("");
-    try {
-      const data = await referralsApi.get(record.id, { ownerId: user.id, cache: "no-store" });
-      if (!data?.record?.id) throw new Error("Could not load the saved referral.");
-      await downloadReferralPdf(data.record);
-    } catch (err) {
-      setReferralActionError(err?.message || "Could not generate the referral PDF.");
-    } finally {
-      setReferralDownloadId("");
-    }
-  }, [user?.id, referralDownloadId]);
-
   const viewReferralSlip = useCallback(async (record) => {
     if (!record?.id || !user?.id) return;
     setReferralDownloadId(record.id);
@@ -417,6 +417,11 @@ export default function HealthRecord() {
   }, [resident, consultations, filters]);
 
   const hasFilters = filtersActive(appliedFilters);
+  const referralPageCount = Math.max(1, Math.ceil(referrals.length / referralPageSize));
+  const visibleReferrals = referrals.slice(
+    (referralPage - 1) * referralPageSize,
+    referralPage * referralPageSize,
+  );
   const consultationPageCount = Math.max(1, Math.ceil(consultations.length / consultationPageSize));
   const visibleConsultations = consultations.slice(
     (consultationPage - 1) * consultationPageSize,
@@ -476,6 +481,10 @@ export default function HealthRecord() {
   const visibleTimeline = useMemo(() => historyTypeFilter === "all" ? recordTimeline : recordTimeline.filter((item) => item.category === historyTypeFilter), [recordTimeline, historyTypeFilter]);
 
   useEffect(() => {
+    setReferralPage((page) => Math.min(page, referralPageCount));
+  }, [referralPageCount]);
+
+  useEffect(() => {
     setConsultationPage((page) => Math.min(page, consultationPageCount));
   }, [consultationPageCount]);
 
@@ -496,34 +505,42 @@ export default function HealthRecord() {
       {referrals.length === 0 ? (
         <Card className="p-8 text-center text-sm text-brand-gray">No referral records are available.</Card>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-brand-border bg-white shadow-card">
-          <div className="hidden grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] gap-3 border-b border-brand-border bg-brand-bg/50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-brand-gray md:grid">
-            <span>Date</span><span>Destination</span><span>Reason</span><span>Status</span><span>Action</span>
+        <>
+          <div className="overflow-hidden rounded-xl border border-brand-border bg-white shadow-card">
+            <div className="hidden grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] gap-3 border-b border-brand-border bg-brand-bg/50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-brand-gray md:grid">
+              <span>Date</span><span>Destination</span><span>Reason</span><span>Status</span><span>Action</span>
+            </div>
+            <ul className="divide-y divide-brand-border md:divide-y-0">
+              {visibleReferrals.map((record) => {
+                const status = record.serviceProgressStatus || record.status || "Pending";
+                const statusClass = /Completed/i.test(status) ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                  : /Rejected|Cancelled/i.test(status) ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+                    : /Pending/.test(status) ? "bg-amber-50 text-amber-800"
+                      : "bg-blue-50 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+                return (
+                  <li key={record.id} className="grid gap-3 border-b border-brand-border px-4 py-4 last:border-b-0 md:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] md:items-center md:border-b-0 md:px-4">
+                    <div><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Referral Date</p><p className="mt-0.5 text-sm text-brand-ink">{formatDate(record.date)}</p></div>
+                    <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Destination</p><p className="mt-0.5 break-words text-sm font-medium text-brand-ink">{record.facility || "Not recorded"}</p></div>
+                    <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Reason</p><p className="mt-0.5 break-words text-sm text-brand-gray">{record.reason || "Not recorded"}</p></div>
+                    <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClass}`}>{status}</span></div>
+                    <div className="flex flex-wrap gap-3">
+                      <button type="button" onClick={() => openReferral(record)} disabled={referralDetailLoading} className="text-xs font-semibold text-brand-blue hover:underline">View details</button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
-          <ul className="divide-y divide-brand-border md:divide-y-0">
-            {referrals.map((record) => {
-              const status = record.serviceProgressStatus || record.status || "Pending";
-              const statusClass = /Completed/i.test(status) ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                : /Rejected|Cancelled/i.test(status) ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
-                  : /Pending/.test(status) ? "bg-amber-50 text-amber-800"
-                    : "bg-blue-50 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-              return (
-                <li key={record.id} className="grid gap-3 border-b border-brand-border px-4 py-4 last:border-b-0 md:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,1.2fr)_8.5rem_8rem] md:items-center md:border-b-0 md:px-4">
-                  <div><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Referral Date</p><p className="mt-0.5 text-sm text-brand-ink">{formatDate(record.date)}</p></div>
-                  <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Destination</p><p className="mt-0.5 break-words text-sm font-medium text-brand-ink">{record.facility || "Not recorded"}</p></div>
-                  <div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-brand-gray md:hidden">Reason</p><p className="mt-0.5 break-words text-sm text-brand-gray">{record.reason || "Not recorded"}</p></div>
-                  <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClass}`}>{status}</span></div>
-                  <div className="flex flex-wrap gap-3">
-                    <button type="button" onClick={() => openReferral(record)} disabled={referralDetailLoading} className="text-xs font-semibold text-brand-blue hover:underline">View details</button>
-                    <button type="button" onClick={() => downloadReferral(record)} disabled={referralDownloadId === record.id} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-blue hover:underline disabled:opacity-60">
-                      {referralDownloadId === record.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+          <TablePagination
+            total={referrals.length}
+            page={referralPage}
+            pageSize={referralPageSize}
+            onPageChange={setReferralPage}
+            onPageSizeChange={(size) => { setReferralPageSize(size); setReferralPage(1); }}
+            itemLabel="referrals"
+            className="mt-4"
+          />
+        </>
       )}
       {selectedReferral && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Referral details">
@@ -544,7 +561,7 @@ export default function HealthRecord() {
                     ["Assigned recipient", selectedReferral.recipient?.full_name || selectedReferral.external_recipient_name || "Not assigned"],
                     ["Priority", selectedReferral.priority || "Not recorded"],
                     ["Status", selectedReferral.status || "Pending"],
-                  ].map(([label, value]) => <div key={label} className="min-w-0 [overflow-wrap:anywhere]"><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink dark:text-foreground">{value || "Not recorded"}</dd></div>)}
+                  ].map(([label, value]) => <div key={label} className="min-w-0 [overflow-wrap:anywhere]"><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink dark:text-foreground">{referralDisplayValue(value)}</dd></div>)}
                 </dl>
               </section>
               <section className="border-t border-brand-border pt-4">
@@ -556,7 +573,7 @@ export default function HealthRecord() {
                     ["Working diagnosis", selectedReferral.impression || selectedReferral.encounter?.phn_assessment],
                     ["Laboratory requirements", selectedReferral.laboratory_test_required ? selectedReferral.laboratory_test : "Not required"],
                     ["Clinical notes", selectedReferral.additional_instructions || selectedReferral.notes],
-                  ].map(([label, value]) => <div key={label} className={`min-w-0 [overflow-wrap:anywhere] ${["Referral reason", "Clinical history", "Clinical notes"].includes(label) ? "sm:col-span-2" : ""}`}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-brand-ink dark:text-foreground">{value || "Not recorded"}</dd></div>)}
+                  ].map(([label, value]) => <div key={label} className={`min-w-0 [overflow-wrap:anywhere] ${["Referral reason", "Clinical history", "Clinical notes"].includes(label) ? "sm:col-span-2" : ""}`}><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-brand-ink dark:text-foreground">{referralDisplayValue(value)}</dd></div>)}
                 </dl>
               </section>
               <section className="border-t border-brand-border pt-4">
@@ -567,14 +584,10 @@ export default function HealthRecord() {
                     ["Scheduled appointment", selectedReferral.scheduled_at ? new Date(selectedReferral.scheduled_at).toLocaleString() : "Not scheduled"],
                     ["Status updates", selectedReferral.stage || selectedReferral.status || "Pending"],
                     ["Date completed", formatDate(selectedReferral.completed_at)],
-                  ].map(([label, value]) => <div key={label} className="min-w-0 [overflow-wrap:anywhere]"><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink dark:text-foreground">{value || "Not recorded"}</dd></div>)}
+                  ].map(([label, value]) => <div key={label} className="min-w-0 [overflow-wrap:anywhere]"><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-1 break-words font-medium text-brand-ink dark:text-foreground">{referralDisplayValue(value)}</dd></div>)}
                 </dl>
               </section>
             </div>
-            <div className="flex shrink-0 justify-end border-t border-brand-border bg-white px-4 py-3 dark:border-border dark:bg-card sm:px-6">
-              <button type="button" onClick={() => downloadReferral(selectedReferral)} disabled={referralDownloadId === selectedReferral.id} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue px-3 text-sm font-semibold text-white disabled:opacity-60">
-                {referralDownloadId === selectedReferral.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Referral
-              </button>
             </div>
           </div>
         </div>

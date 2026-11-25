@@ -1,19 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import TablePagination from "@/components/tables/TablePagination";
-import { intakeApi, referralsApi } from "@/services/api";
+import { intakeApi } from "@/services/api";
 import { formatBloodPressureInput } from "@/features/consultations/utils/bpClassification";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
-import {
-  filterOpenReferrals,
-  submitTriage,
-  TRIAGE_MESSAGES,
-} from "@/features/triage/lib/triageWorkflow";
+import { submitTriage, TRIAGE_MESSAGES } from "@/features/triage/lib/triageWorkflow";
 import { useBarangays } from "@/context/BarangaysContext";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -85,9 +81,15 @@ export default function RhuTriage() {
   const navigate = useNavigate();
   const { records: barangayRecords, loading: barangaysLoading, error: barangaysError } = useBarangays();
   const liveBarangays = (barangayRecords || []).filter((record) => record.id && String(record.status || "Active").toLowerCase() === "active").map((record) => record.name);
-  // BUG-008: the "recently sent" list and the triage hand-off are backed by the
-  // persistent database (the caller's own /intake submissions), not localStorage.
-  const { patients: sentPatients, sendToPhnQueue } = usePhnWorkflow({ source: "intake" });
+  // The hand-off history is persisted. RHU triage users see submitted records
+  // for their assigned facility; barangay users see their own submissions.
+  const {
+    patients: sentPatients,
+    loading: historyLoading,
+    error: historyError,
+    refresh: refreshHistory,
+    sendToPhnQueue,
+  } = usePhnWorkflow({ source: "intake" });
 
   /* --------------------------- Workflow state --------------------------- */
   const [currentStep, setCurrentStep] = useState("patient"); // see STEP_ORDER
@@ -121,34 +123,12 @@ export default function RhuTriage() {
   const [matches, setMatches] = useState([]);
   const [searching, setSearching] = useState(false);
 
-  // Incoming barangay referrals destined to the RHU (replaces the removed
-  // Incoming Reports). Opening one seeds the triage with the referred resident
-  // and links the screening visit to the referral server-side.
-  const [incomingReferrals, setIncomingReferrals] = useState([]);
+  // A referral opened from the separate incoming-referrals workspace seeds
+  // this triage encounter and stays linked to the visit on the server.
   const [activeReferral, setActiveReferral] = useState(null);
-  // Monotonic request token: a slower, older /referrals response must never
-  // overwrite the state produced by a newer load (e.g. a refresh fired right
-  // after a successful hand-off).
-  const referralLoadSeq = useRef(0);
   const residentLoadSeq = useRef(0);
   const submissionRef = useRef(null);
   const sendingRef = useRef(false);
-
-  const loadIncomingReferrals = useCallback(async () => {
-    const seq = (referralLoadSeq.current += 1);
-    try {
-      const result = await referralsApi.inbox({}, { ownerId: user?.id });
-      if (seq !== referralLoadSeq.current) return;
-      setIncomingReferrals(filterOpenReferrals(result?.rows || []).filter((row) => row.status === 'Accepted' || row.status === 'In Progress'));
-    } catch {
-      if (seq !== referralLoadSeq.current) return;
-      setIncomingReferrals([]);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    loadIncomingReferrals();
-  }, [loadIncomingReferrals]);
 
   useEffect(() => {
     const seq = (residentLoadSeq.current += 1);
@@ -453,14 +433,13 @@ export default function RhuTriage() {
       //  - only a real API failure preserves the active referral + wizard and
       //    shows the error toast;
       //  - a confirmed success resets the wizard, clears the active referral,
-      //    notifies, and refreshes the incoming referral list;
+      //    and notifies;
       //  - post-success cleanup/refresh errors can never produce a false
       //    failure toast.
       const result = await submitTriage({
         send: () => sendToPhnQueue(payload),
         reset: resetAll,
         notify: ({ message, ok }) => showToast(message, ok),
-        refresh: loadIncomingReferrals,
         messages: TRIAGE_MESSAGES,
       });
       if (!result.ok && result.error) {
@@ -585,20 +564,6 @@ export default function RhuTriage() {
                 {!hasPatient ? (
                   <>
                     {stepIndicator(1, "Identify Patient", "Who are you helping today?")}
-
-                    {entryMode === "choose" && (
-                      <Link
-                        to="/app/rhu_personnel/incoming-referrals"
-                        className="mb-5 inline-flex items-center gap-2 rounded-btn border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-sm font-medium text-brand-blue hover:bg-brand-blue/10"
-                      >
-                        Review Incoming Referrals
-                        {incomingReferrals.length > 0 && (
-                          <span className="rounded-full bg-brand-blue px-2 py-0.5 text-xs text-white">
-                            {incomingReferrals.length}
-                          </span>
-                        )}
-                      </Link>
-                    )}
 
                     {entryMode === "choose" ? (
                       /* Two clear ways to identify the patient. */
@@ -1094,7 +1059,16 @@ export default function RhuTriage() {
             </div>
           </div>
 
-          {visibleHistory.length === 0 ? (
+          {historyError ? (
+            <div role="alert" className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+              <p className="text-sm text-brand-danger">{historyError}</p>
+              <button type="button" onClick={() => void refreshHistory()} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
+                Try again
+              </button>
+            </div>
+          ) : historyLoading ? (
+            <p role="status" className="py-8 text-center text-sm text-brand-gray">Loading triage hand-offs…</p>
+          ) : visibleHistory.length === 0 ? (
             <p className="py-8 text-center text-sm text-brand-gray">
               {sentPatients.length > 0 ? "No hand-offs match your search." : "No patients have been sent yet."}
             </p>

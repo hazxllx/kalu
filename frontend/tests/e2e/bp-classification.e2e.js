@@ -549,8 +549,8 @@ test('classifies reference readings in the consultation form', async ({ page }) 
   const bp = bloodPressureField(page);
   const readings = [
     ['110/70', normal], ['119/79', normal],
-    ['120/75', elevated], ['125/79', elevated], ['129/79', elevated],
-    ['120/80', stage1], ['120/89', stage1], ['130/75', stage1], ['135/85', stage1], ['139/89', stage1],
+    ['120/75', normal], ['121/79', elevated], ['125/79', elevated], ['129/79', elevated],
+    ['120/80', normal], ['120/89', stage1], ['130/75', stage1], ['135/85', stage1], ['139/89', stage1],
     ['140/80', stage2], ['130/90', stage2], ['150/95', stage2],
     ['180/100', severe], ['130/120', severe], ['180/120', severe],
     ['181/80', severe], ['150/121', severe], ['185/125', severe],
@@ -567,7 +567,7 @@ test('classifies reference readings in the consultation form', async ({ page }) 
 
 test('keeps BP guidance below the badge and within the responsive field', async ({ page }) => {
   const readings = [
-    ['120/80', 'Stage 1 Hypertension', false],
+    ['120/80', 'Normal Blood Pressure', false],
     ['140/90', 'Stage 2 Hypertension', false],
     ['180/100', 'Hypertensive Urgency or Emergency', true],
     ['181/90', 'Hypertensive Urgency or Emergency', true],

@@ -238,10 +238,16 @@ export const phnWorkflowApi = {
       // field is genuinely absent we leave it untouched rather than clearing an
       // association the submission already carried.
       ...(recorded.healthServiceId === undefined ? {} : { healthServiceId: recorded.healthServiceId || null }),
+      ...(recorded.dangerSignsReviewed === undefined ? {} : {
+        consultationDetails: { clinicalIndicators: { dangerSignsReviewed: recorded.dangerSignsReviewed === true } },
+      }),
       // Structured prescriptions recorded in the workbench's MedicineSelector.
       // Forwarded verbatim (never renamed/dropped) so the backend persists them
       // to visits.medications; an empty array clears nothing it did not set.
       medications: Array.isArray(recorded.medications) ? recorded.medications : [],
+      ...(recorded.consultationVitals && typeof recorded.consultationVitals === "object"
+        ? { consultationVitals: recorded.consultationVitals }
+        : {}),
       ...(recorded.expectedUpdatedAt ? { expectedUpdatedAt: recorded.expectedUpdatedAt } : {}),
       phn: {
         assessment: recorded.healthConcern || recorded.assessment || "",
@@ -255,6 +261,20 @@ export const phnWorkflowApi = {
       throw new Error('The consultation save could not be confirmed. Your entries are preserved; retry using the same form.');
     }
     return payload.submission;
+  },
+
+  routeToConsultation: async (id, facilityId = null) => {
+    const payload = await api.post(`/phn/submissions/${id}/route-consultation`, facilityId ? { facility_id: facilityId } : {});
+    if (payload?.submission?.id !== id || !payload.submission.consultationRoutedAt) {
+      throw new Error('The RHU Consultation hand-off could not be confirmed. Refresh the PHN queue and retry.');
+    }
+    return payload.submission;
+  },
+
+  listConsultationFacilities: async () => {
+    const payload = await api.get('/phn/consultation-facilities');
+    if (!Array.isArray(payload?.facilities)) throw new Error('The RHU facility list could not be verified.');
+    return payload.facilities;
   },
 };
 

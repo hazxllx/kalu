@@ -49,6 +49,12 @@ router.get(
   asyncHandler(residentsController.getDirectoryFilters),
 );
 
+router.get(
+  '/risk-summary',
+  authorize(['health_supervisor', 'phn', 'mho'], { permission: 'reports.analytics.view' }),
+  asyncHandler(residentsController.getResidentRiskSummary),
+);
+
 // Enforces `accounts.create` in addition to `residents.create` when a staff
 // registration payload sets `createLoginAccount` to provision a login simultaneously.
 const requireAccountCreationPermission = (req, res, next) => {

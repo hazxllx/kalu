@@ -33,6 +33,24 @@ test("overdue confirmation and attendance remain distinct in one primary status"
   assert.equal(awaiting.statusLabel, "Awaiting Response");
   assert.equal(awaiting.actionable, true);
 
+  const rescheduledAwaiting = getResidentFollowUpPresentation({
+    status: "Scheduled",
+    scheduledDate: "2026-11-19",
+    scheduleResponseStatus: "Awaiting Response",
+    requiresResidentResponse: true,
+  }, now);
+  assert.equal(rescheduledAwaiting.statusLabel, "Awaiting Response");
+  assert.equal(rescheduledAwaiting.actionable, true);
+
+  const reconfirmed = getResidentFollowUpPresentation({
+    status: "Scheduled",
+    scheduledDate: "2026-11-19",
+    scheduleResponseStatus: "Attendance Confirmed",
+    requiresResidentResponse: true,
+  }, now);
+  assert.equal(reconfirmed.statusLabel, "Confirmed");
+  assert.equal(reconfirmed.actionable, true);
+
   const completed = getResidentFollowUpPresentation({
     status: "Completed",
     scheduledDate: "2026-11-15",

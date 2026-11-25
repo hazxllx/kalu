@@ -16,8 +16,8 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
   const today = manilaDateKey(now);
   const active = ACTIVE_STATUSES.has(status);
   const overdue = active && Boolean(scheduledDate) && scheduledDate < today;
-  const defaultConfirmed = ["default confirmed", "awaiting response"].includes(confirmation);
-  const residentResponseRequired = active && !overdue && confirmation === "awaiting confirmation";
+  const defaultConfirmed = ["default confirmed", "confirmed by default"].includes(confirmation);
+  const residentResponseRequired = active && !overdue && ["awaiting response", "awaiting confirmation"].includes(confirmation);
   const pendingScheduleReview = Boolean(active && (
     confirmation === "reschedule requested" || confirmation === "cancellation requested"
   ));

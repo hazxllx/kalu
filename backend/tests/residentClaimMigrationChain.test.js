@@ -16,13 +16,20 @@ test('resident claims and ownership guards execute on the real migration chain, 
   try {
     // Only Supabase platform objects are shimmed. All application tables,
     // constraints, triggers and claim RPCs come from actual sorted migrations.
-    await pg.exec(`create schema auth; create schema storage;
+    await pg.exec(`create schema auth; create schema storage; create schema realtime; create schema cron;
       create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
       grant usage on schema public,auth,storage to anon,authenticated,service_role;
       alter default privileges in schema public grant all on tables to anon,authenticated,service_role;
       create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
       create function auth.role() returns text language sql stable as $$select nullif(current_setting('request.jwt.claim.role',true),'')$$;
       create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claims',true),'')::jsonb,'{}'::jsonb)$$;
+      create table realtime.messages(topic text not null);
+      create function realtime.send(jsonb,text,text,boolean) returns void language plpgsql as $$begin return; end$$;
+      create table cron.job(jobid bigserial primary key,jobname text unique);
+      create function cron.schedule(text,text,text) returns bigint language plpgsql as $$declare result bigint; begin
+        insert into cron.job(jobname) values($1) on conflict(jobname) do update set jobname=excluded.jobname returning jobid into result;
+        return result; end$$;
+      create function cron.unschedule(bigint) returns boolean language plpgsql as $$begin delete from cron.job where jobid=$1; return found; end$$;
       create table auth.users(id uuid primary key,email text unique,raw_user_meta_data jsonb not null default '{}',
         raw_app_meta_data jsonb not null default '{}',email_confirmed_at timestamptz,created_at timestamptz default now(),updated_at timestamptz default now());
       create table storage.buckets(id text primary key,name text not null,public boolean not null default false);
@@ -45,7 +52,11 @@ test('resident claims and ownership guards execute on the real migration chain, 
       if (filename === '20261107151000_resident_claim_integrity.sql') {
         legacyBefore = (await pg.query("select id,health_record_no,first_name,last_name,birth_date,auth_user_id from residents where id in ('RES-000810','RES-000811') order by id")).rows;
       }
-      await pg.exec(await readFile(new URL(filename, directory), 'utf8'));
+      let sql = await readFile(new URL(filename, directory), 'utf8');
+      if (filename === '20261124091000_immunization_next_dose_notifications.sql') {
+        sql = sql.replace(/create extension if not exists pg_cron with schema pg_catalog;/i, '-- pg_cron is not available in PGlite.');
+      }
+      await pg.exec(sql);
     }
 
     await t.test('legacy rows are unchanged and the mandatory new guard does not depend on the skipped old index', async () => {

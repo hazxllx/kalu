@@ -52,7 +52,8 @@ export const createSubmission = async (req, res) => {
 };
 
 /**
- * Lists intake submissions authored by or visible to `req.user` via
+ * Lists intake submissions visible to `req.user` within the permitted
+ * barangay or RHU facility scope via
  * `intakeService.listMySubmissions`, returning `{ submissions }` (`200 OK`).
  */
 export const listMySubmissions = async (req, res) => {

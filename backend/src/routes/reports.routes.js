@@ -46,7 +46,7 @@ router.use((_req, res, next) => {
 
 // Only roles that can originate a report. RHU Personnel are recipients, not
 // senders, so they are not permitted to POST a new report.
-const SENDER_ROLES = [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO];
+const SENDER_ROLES = [ROLES.HEALTH_SUPERVISOR, ROLES.PHN];
 
 const readers = [authenticate, authorize(FEATURE_ROLES.reports, { permission: 'reports.view' })];
 const reviewers = [authenticate, authorize(FEATURE_ROLES.reports, { permission: 'reports.view' })];

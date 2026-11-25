@@ -10,13 +10,20 @@ const query = async (sql, params = []) => (await db.query(sql, params)).rows;
 const riskValue = (distribution, name) => distribution.find((item) => item.name === name)?.value;
 
 before(async () => {
-  await db.exec(`create schema auth; create schema storage;
+  await db.exec(`create schema auth; create schema storage; create schema realtime; create schema cron;
     create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
     grant usage on schema public,auth,storage to anon,authenticated,service_role;
     alter default privileges in schema public grant all on tables to anon,authenticated,service_role;
     create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     create function auth.role() returns text language sql stable as $$select nullif(current_setting('request.jwt.claim.role',true),'')$$;
     create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claims',true),'')::jsonb,'{}'::jsonb)$$;
+    create table realtime.messages(topic text not null);
+    create function realtime.send(jsonb,text,text,boolean) returns void language plpgsql as $$begin return; end$$;
+    create table cron.job(jobid bigserial primary key,jobname text unique);
+    create function cron.schedule(text,text,text) returns bigint language plpgsql as $$declare result bigint; begin
+      insert into cron.job(jobname) values($1) on conflict(jobname) do update set jobname=excluded.jobname returning jobid into result;
+      return result; end$$;
+    create function cron.unschedule(bigint) returns boolean language plpgsql as $$begin delete from cron.job where jobid=$1; return found; end$$;
     create table auth.users(id uuid primary key,email text unique,raw_user_meta_data jsonb not null default '{}',
       raw_app_meta_data jsonb not null default '{}',email_confirmed_at timestamptz,created_at timestamptz default now(),updated_at timestamptz default now());
     create table storage.buckets(id text primary key,name text not null,public boolean not null default false);
@@ -28,7 +35,11 @@ before(async () => {
 
   const directory = new URL('../../supabase/migrations/', import.meta.url);
   for (const filename of (await readdir(directory)).filter((file) => file.endsWith('.sql')).sort()) {
-    try { await db.exec(await readFile(new URL(filename, directory), 'utf8')); }
+    let sql = await readFile(new URL(filename, directory), 'utf8');
+    if (filename === '20261124091000_immunization_next_dose_notifications.sql') {
+      sql = sql.replace(/create extension if not exists pg_cron with schema pg_catalog;/i, '-- pg_cron is not available in PGlite.');
+    }
+    try { await db.exec(sql); }
     catch (error) { throw new Error(`Migration ${filename}: ${error.message}`); }
   }
 });
@@ -66,7 +77,7 @@ test('KFT-015 early-warning risk distribution follows selected dates and keeps l
   ];
   for (const [id, residentMunicipality, residentBarangay] of residents) {
     await query(`insert into residents(id,health_record_no,first_name,last_name,municipality_id,barangay_id,barangay)
-      values($1,$1,'Synthetic','KFT-015',$2,$3,$4)`, [id, residentMunicipality, residentBarangay,
+      values($1,$1,'Synthetic','Period',$2,$3,$4)`, [id, residentMunicipality, residentBarangay,
       residentBarangay === barangay ? 'San Isidro' : 'San Antonio']);
   }
 
@@ -106,9 +117,10 @@ test('KFT-015 early-warning risk distribution follows selected dates and keeps l
   assert.equal(year2025.summary.residents, 5);
   assert.equal(year2026.summary.residents, 5);
 
-  // Date filtering changes only the additive fields; the legacy summary is all-time/current-month.
-  assert.deepEqual(year2025.riskDistribution, year2026.riskDistribution);
-  assert.equal(year2025.summary.consultationsThisMonth, year2026.summary.consultationsThisMonth);
+  // Period KPIs follow the selected reporting year; the same stored data can
+  // produce different values when the date filter changes.
+  assert.equal(year2025.summary.consultationsThisMonth, 2);
+  assert.equal(year2026.summary.consultationsThisMonth, 4);
   const allTime = await aggregate();
   assert.deepEqual(allTime.reportingRiskDistribution, allTime.riskDistribution);
   assert.deepEqual(allTime.reportingPeriod, { from: null, to: null, year: null });
@@ -119,12 +131,12 @@ test('KFT-015 early-warning risk distribution follows selected dates and keeps l
 
   const map2025 = await communityMap('2025-01-01', '2025-12-31');
   const map2025Barangay = map2025.barangays.find((row) => row.name === 'San Isidro');
-  assert.equal(map2025Barangay.highRiskResidents, 0);
+  assert.equal(map2025Barangay.highRiskResidents, 3);
   assert.equal(map2025Barangay.reportingHighRiskResidents, 2);
   assert.equal(map2025.barangays.some((row) => row.name === 'San Antonio'), false);
   const map2026 = await communityMap('2026-01-01', '2026-12-31');
   const map2026Barangay = map2026.barangays.find((row) => row.name === 'San Isidro');
-  assert.equal(map2026Barangay.highRiskResidents, 0);
+  assert.equal(map2026Barangay.highRiskResidents, 3);
   assert.equal(map2026Barangay.reportingHighRiskResidents, 1);
   const filteredMap = await communityMap('2026-01-01', '2026-12-31', null, 'Dengue', 'submitted');
   assert.equal(filteredMap.barangays[0].caseCount, 0);

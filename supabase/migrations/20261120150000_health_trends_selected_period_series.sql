@@ -7,9 +7,9 @@ declare
   definition text;
   updated text;
 begin
-  definition := pg_get_functiondef(
+  definition := replace(pg_get_functiondef(
     'public.scoped_aggregate_analytics(uuid,text,text,text,text,text,date,date,integer,boolean)'::regprocedure
-  );
+  ), E'\r\n', E'\n');
 
   updated := replace(definition,
     $old$from visits v where v.occurred_at >= (v_month - interval '11 months') at time zone 'Asia/Manila'

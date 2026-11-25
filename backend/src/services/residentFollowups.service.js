@@ -27,14 +27,17 @@ const CONSULTATION_EMBED = 'consultation:visits!follow_ups_consultation_id_fkey(
 
 /** Confirmation label derived from the stored decision (frontend vocabulary). */
 const confirmationOf = (row) => {
+  if (row.requires_resident_response && row.schedule_response_status === 'Awaiting Response'
+      && row.resident_decision !== 'approved') return 'Awaiting Confirmation';
   if (row.schedule_response_status === 'Attendance Confirmed') return 'Confirmed';
-  if (row.schedule_response_status === 'Default Confirmed' || row.schedule_response_status === 'Awaiting Response') return 'Confirmed by default';
+  if (row.schedule_response_status === 'Default Confirmed') return 'Confirmed by default';
   if (row.schedule_response_status === 'Reschedule Requested' || row.schedule_response_status === 'Cancellation Requested') return row.schedule_response_status;
   if (row.schedule_response_status === 'Reschedule Rejected' || row.schedule_response_status === 'Cancellation Rejected') return row.schedule_response_status;
   if (row.schedule_response_status === 'Reschedule Approved') return row.schedule_response_status;
   if (row.schedule_response_status === 'Cancellation Approved') return row.schedule_response_status;
   if (row.resident_decision === 'approved') return 'Confirmed';
   if (row.resident_decision === 'rejected') return 'Rejected';
+  if (row.resident_decision === 'pending') return 'Awaiting Confirmation';
   // Any still-open follow-up scheduled for the resident awaits their response
   // (confirm/reject) — regardless of whether it was flagged
   // requires_resident_response at creation time.
@@ -168,7 +171,11 @@ const decide = async ({ user, id, decision, reason, supabase = getServiceClient(
     resident_decision: decision,
     resident_decision_at: new Date().toISOString(),
     resident_decision_reason: decision === 'rejected' ? cleanReason : '',
-    status: decision === 'approved' ? 'Scheduled' : 'Cancelled',
+    ...(decision === 'rejected'
+      ? { status: 'Cancelled' }
+      : row.status === 'Pending'
+        ? { status: 'Scheduled' }
+        : {}),
   };
   const { data, error } = await supabase
     .from('follow_ups')

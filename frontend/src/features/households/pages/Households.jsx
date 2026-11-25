@@ -83,6 +83,11 @@ const formatVisitDate = (value) => {
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
 };
+const formatWorkflowDate = (value) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Manila" });
+};
 
 /** Verification badge tones shown for gathered-data review status. */
 const VERIFICATION_TONES = {
@@ -215,6 +220,7 @@ export default function Households() {
 
   const [households, setHouseholds] = useState([]);
   const [householdTotal, setHouseholdTotal] = useState(0);
+  const [bhwListView, setBhwListView] = useState("all");
   const [zoneSummary, setZoneSummary] = useState(null);
   const [zoneSummaryError, setZoneSummaryError] = useState("");
   const [collapsedZones, setCollapsedZones] = useState(() => new Set());
@@ -233,6 +239,15 @@ export default function Households() {
     return () => media.removeEventListener("change", onChange);
   }, []);
   const [search, setSearch] = useState("");
+  useEffect(() => {
+    if (!isBhw) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("view") !== "returned") return;
+    setPage(0);
+    setBhwListView("returned");
+    const householdId = params.get("household")?.trim();
+    if (householdId) setSearch(householdId);
+  }, [isBhw, location.search]);
   const [sort, setSort] = useState({ key: "id", dir: "asc" });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
 
@@ -269,7 +284,8 @@ export default function Households() {
     if (
       activeLoadRef.current?.ownerId === user.id &&
       activeLoadRef.current?.searchTerm === normalizedTerm &&
-      activeLoadRef.current?.pageIndex === pageIndex
+      activeLoadRef.current?.pageIndex === pageIndex &&
+      activeLoadRef.current?.bhwListView === bhwListView
     ) {
       return activeLoadRef.current.promise;
     }
@@ -285,6 +301,7 @@ export default function Households() {
             q: normalizedTerm,
             limit: HOUSEHOLD_PAGE_SIZE,
             offset: pageIndex * HOUSEHOLD_PAGE_SIZE,
+            ...(isBhw && bhwListView === "returned" ? { verificationStatus: "Returned for Correction" } : {}),
           },
         });
         if (requestId !== loadSequenceRef.current) return;
@@ -307,14 +324,16 @@ export default function Households() {
       ownerId: user.id,
       searchTerm: normalizedTerm,
       pageIndex,
+      bhwListView,
       promise,
     };
     return promise;
-  }, [user?.id]);
+  }, [bhwListView, isBhw, user?.id]);
 
   useEffect(() => {
+    setPage(0);
     load("", 0);
-  }, [load]);
+  }, [bhwListView, load]);
 
   useEffect(() => {
     if (user?.role !== "bhw") {
@@ -417,6 +436,7 @@ export default function Households() {
     ) + (search ? 1 : 0);
 
   const hasSearchOrFilters = activeFilterCount > 0;
+  const isReturnedList = isBhw && bhwListView === "returned";
 
   const visibleZoneGroups = useMemo(() => {
     if (user?.role !== "bhw") return [];
@@ -651,6 +671,15 @@ export default function Households() {
 
       {/* Search / view toolbar */}
       <Card className="mb-5 p-4">
+        {isBhw && <div role="tablist" aria-label="Household verification lists" className="mb-4 flex w-full gap-1 overflow-x-auto border-b border-brand-border">
+          {[{ id: "all", label: "All Households" }, { id: "returned", label: "Returned Households" }].map((tab) => (
+            <button key={tab.id} type="button" role="tab" aria-selected={bhwListView === tab.id}
+              onClick={() => { if (bhwListView === tab.id) return; setPage(0); setSearch(""); setBhwListView(tab.id); }}
+              className={`min-h-11 shrink-0 border-b-2 px-4 text-sm font-medium ${bhwListView === tab.id ? "border-brand-blue text-brand-blue" : "border-transparent text-brand-gray hover:text-brand-ink"}`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex w-full items-center gap-2 rounded-input border border-brand-border bg-brand-bg px-3 py-2.5 md:max-w-sm">
             <Search className="h-4 w-4 text-brand-gray" />
@@ -717,9 +746,9 @@ export default function Households() {
         <Card>
           <EmptyState
             icon={Home}
-            title="No households yet"
-            description="Household records will appear here once they are registered."
-            action={canCreateHousehold ? (
+            title={isBhw && bhwListView === "returned" ? "No returned households" : "No households yet"}
+            description={isBhw && bhwListView === "returned" ? "Households returned by the Health Supervisor for correction will appear here." : "Household records will appear here once they are registered."}
+            action={canCreateHousehold && !(isBhw && bhwListView === "returned") ? (
               <button
                 onClick={openAddPage}
                 className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
@@ -757,7 +786,55 @@ export default function Households() {
         </Card>
       )}
 
-      {!loading && visible.length > 0 && showTable && (
+      {!loadError && !loading && isReturnedList && visible.length > 0 && (
+        <>
+          <Card className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[1050px] text-sm">
+              <thead>
+                <tr className="border-b border-brand-border bg-brand-bg text-left text-xs uppercase tracking-wide text-brand-gray">
+                  {["Household ID", "Household Head", "Zone / Purok", "Date Submitted", "Date Returned", "Returned By", "Reason for Return", "Verification Status", "Action"].map((label) => <th key={label} className="whitespace-nowrap px-4 py-3 font-medium">{label}</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-border">
+                {visible.map((household) => (
+                  <tr key={household.id} className="align-top hover:bg-brand-bg/50">
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-brand-ink">{household.id}</td>
+                    <td className="px-4 py-3 font-medium text-brand-ink">{household.headName || "—"}</td>
+                    <td className="px-4 py-3 text-brand-gray">{household.purok || "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{formatWorkflowDate(household.submittedAt || household.createdAt)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{formatWorkflowDate(household.verifiedAt)}</td>
+                    <td className="px-4 py-3 text-brand-gray">{household.returnedByName || household.verifiedBy || "—"}</td>
+                    <td className="max-w-64 px-4 py-3 text-brand-gray [overflow-wrap:anywhere]">{household.correctionReason || "No return reason recorded."}</td>
+                    <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${VERIFICATION_TONES[household.verificationStatus] || VERIFICATION_TONES["Pending Verification"]}`}>{household.verificationStatus || "Pending Verification"}</span></td>
+                    <td className="px-4 py-3"><button type="button" onClick={() => navigate(`${location.pathname.replace(/\/+$/, "")}/${household.id}/edit`)} className="min-h-11 whitespace-nowrap font-medium text-brand-blue hover:underline">Edit / Correct</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+          <div className="space-y-3 md:hidden">
+            {visible.map((household) => (
+              <Card key={household.id} className="space-y-4 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-brand-gray">{household.id}</p>
+                    <h2 className="mt-0.5 break-words text-base font-semibold text-brand-ink">{household.headName || "Household head not recorded"}</h2>
+                    <p className="mt-1 text-sm text-brand-gray">{household.purok || "Zone not recorded"}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${VERIFICATION_TONES[household.verificationStatus] || VERIFICATION_TONES["Pending Verification"]}`}>{household.verificationStatus || "Pending Verification"}</span>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-3 border-t border-brand-border pt-3 text-sm">
+                  {[["Date submitted", formatWorkflowDate(household.submittedAt || household.createdAt)], ["Date returned", formatWorkflowDate(household.verifiedAt)], ["Returned by", household.returnedByName || household.verifiedBy || "—"]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-brand-gray">{label}</dt><dd className="mt-0.5 break-words font-medium text-brand-ink">{value}</dd></div>)}
+                  <div className="col-span-2 min-w-0"><dt className="text-xs text-brand-gray">Reason for return</dt><dd className="mt-0.5 break-words text-brand-ink">{household.correctionReason || "No return reason recorded."}</dd></div>
+                </dl>
+                <button type="button" onClick={() => navigate(`${location.pathname.replace(/\/+$/, "")}/${household.id}/edit`)} className="min-h-11 w-full rounded-btn bg-brand-blue px-4 text-sm font-medium text-white hover:bg-brand-dark">Edit / Correct household</button>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+
+      {!loading && !isReturnedList && visible.length > 0 && showTable && (
         <Card className="min-w-0">
           {user?.role === "bhw" && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-border bg-brand-bg/60 px-4 py-3">
@@ -859,7 +936,7 @@ export default function Households() {
         </Card>
       )}
 
-      {!loading && visible.length > 0 && !showTable && (
+      {!loading && !isReturnedList && visible.length > 0 && !showTable && (
         <div className="space-y-6">
           {user?.role === "bhw" && (
             <Card className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">

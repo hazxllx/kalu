@@ -47,6 +47,9 @@ import { consultationAssessmentReasons, getManilaDateTime, isConsultationDate, n
 const SELF_ROLES = ['resident', 'resident-limited'];
 
 const clean = (value) => String(value ?? '').trim();
+const isMissingDatabaseColumn = (error) =>
+  ['42703', 'PGRST204'].includes(String(error?.code || '').toUpperCase())
+  || /column .* does not exist|could not find the .*column.*schema cache/i.test(String(error?.message || ''));
 
 const RESIDENT_ACCOUNT_PASSWORD_CHARS =
   'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
@@ -658,12 +661,44 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
     notes: row.notes || '',
   }));
 
-  const [followUpResult, referralResult] = await Promise.all([
+  const [followUpResult, initialReferralResult] = await Promise.all([
     supabase ? supabase.from('follow_ups').select('id,consultation_id,purpose,scheduled_date,scheduled_time,location,assigned_provider,status,schedule_response_status,linked_service_type,linked_service_id,notes,completed_at')
       .eq('resident_id', resident.id).order('scheduled_date', { ascending: false }).limit(500) : { data: [] },
-    supabase ? supabase.from('health_referrals').select('id,reference_no,referring_facility,reason,destination_facility,destination_service,priority,recipient_personnel_id,recipient_role,recipient_station,external_receiving_facility,external_recipient_name,external_receiving_role,laboratory_test_required,laboratory_test,additional_instructions,completed_at,treatment_visit_id,scheduled_at,referral_date,created_at,status,schedule_response_status,recipient:profiles!recipient_personnel_id(full_name),facility:facilities!recipient_facility_id(name,type)')
+    supabase ? supabase.from('health_referrals').select('id,reference_no,referring_facility,reason,destination_facility,destination_service,priority,recipient_personnel_id,recipient_facility_id,recipient_role,recipient_station,external_receiving_facility,external_recipient_name,external_receiving_role,laboratory_test_required,laboratory_test,additional_instructions,completed_at,treatment_visit_id,scheduled_at,referral_date,created_at,status,schedule_response_status')
       .eq('resident_id', resident.id).order('referral_date', { ascending: false }).limit(500) : { data: [] },
   ]);
+  let referralResult = initialReferralResult;
+  if (referralResult.error && isMissingDatabaseColumn(referralResult.error)) {
+    // Keep older database environments usable while optional canonical routing
+    // and schedule fields are being migrated. The base referral columns still
+    // let residents see their existing referral history.
+    console.warn('[resident-health-records] Referral details are using the legacy column set because the database schema is behind.');
+    referralResult = await supabase.from('health_referrals')
+      .select('id,referring_facility,reason,destination_facility,destination_service,priority,completed_at,referral_date,created_at,status')
+      .eq('resident_id', resident.id)
+      .order('referral_date', { ascending: false })
+      .limit(500);
+  }
+  if (referralResult.error) {
+    console.error('[resident-health-records] Referral history query failed.', {
+      code: referralResult.error.code || 'UNKNOWN',
+      message: referralResult.error.message || 'No database error message was returned.',
+    });
+    throw new ApiError(503, 'Could not load referral history for this health record.');
+  }
+  const referralRows = referralResult.data || [];
+  const recipientIds = [...new Set(referralRows.map((row) => row.recipient_personnel_id).filter(Boolean))];
+  const facilityIds = [...new Set(referralRows.map((row) => row.recipient_facility_id).filter(Boolean))];
+  const [recipientResult, facilityResult] = await Promise.all([
+    supabase && recipientIds.length
+      ? supabase.from('profiles').select('id,full_name').in('id', recipientIds)
+      : { data: [] },
+    supabase && facilityIds.length
+      ? supabase.from('facilities').select('id,name,type').in('id', facilityIds)
+      : { data: [] },
+  ]);
+  const recipientsById = new Map((recipientResult.data || []).map((row) => [row.id, row]));
+  const facilitiesById = new Map((facilityResult.data || []).map((row) => [row.id, row]));
   const followUps = followUpResult.error ? [] : (followUpResult.data || []).map((row) => ({
     id: row.id, purpose: row.purpose || '', date: row.scheduled_date || '', time: String(row.scheduled_time || '').slice(0, 5),
     facility: row.location || '', assignedPersonnel: row.assigned_provider || '',
@@ -671,16 +706,31 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
     linkedServiceType: row.linked_service_type || '', linkedServiceId: row.linked_service_id || '',
     consultationId: row.consultation_id || null, notes: row.notes || '', completedAt: row.completed_at || '',
   }));
-  const referrals = referralResult.error ? [] : (referralResult.data || []).map((row) => ({
-    id: row.id, referenceNo: row.reference_no || '', reason: row.reason || '', date: row.scheduled_at || row.referral_date || row.created_at || '', facility: row.external_receiving_facility || row.facility?.name || row.destination_facility || '',
-    referringFacility: row.referring_facility || '', destinationService: row.destination_service || '', priority: row.priority || 'Medium',
-    assignedPersonnel: row.recipient?.full_name || row.external_recipient_name || '', facilityType: row.facility?.type || '',
-    laboratoryTestRequired: Boolean(row.laboratory_test_required), laboratoryTest: row.laboratory_test || '',
-    additionalInstructions: row.additional_instructions || '', completedAt: row.completed_at || '',
-    scheduledAt: row.scheduled_at || '', referralDate: row.referral_date || '',
-    scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed', serviceProgressStatus: row.status || 'Pending',
-    consultationId: row.treatment_visit_id || null,
-  }));
+  const referrals = referralRows.map((row) => {
+    const recipient = recipientsById.get(row.recipient_personnel_id);
+    const facilityRecord = facilitiesById.get(row.recipient_facility_id);
+    return {
+      id: row.id,
+      referenceNo: row.reference_no || '',
+      reason: row.reason || '',
+      date: row.scheduled_at || row.referral_date || row.created_at || '',
+      facility: row.external_receiving_facility || facilityRecord?.name || row.destination_facility || '',
+      referringFacility: row.referring_facility || '',
+      destinationService: row.destination_service || '',
+      priority: row.priority || 'Medium',
+      assignedPersonnel: recipient?.full_name || row.external_recipient_name || '',
+      facilityType: facilityRecord?.type || '',
+      laboratoryTestRequired: Boolean(row.laboratory_test_required),
+      laboratoryTest: row.laboratory_test || '',
+      additionalInstructions: row.additional_instructions || '',
+      completedAt: row.completed_at || '',
+      scheduledAt: row.scheduled_at || '',
+      referralDate: row.referral_date || '',
+      scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed',
+      serviceProgressStatus: row.status || 'Pending',
+      consultationId: row.treatment_visit_id || null,
+    };
+  });
 
   const history = new Map();
   for (let offset = 0; ; offset += 500) {

@@ -375,6 +375,11 @@ const VISIT_TO_DB = {
   submittedAt: 'submitted_at',
   receivedAt: 'received_at',
   reviewedAt: 'reviewed_at',
+  consultationRoutedAt: 'consultation_routed_at',
+  consultationRoutedBy: 'consultation_routed_by',
+  consultationRoutedFacilityId: 'consultation_routed_facility_id',
+  consultationStartedAt: 'consultation_started_at',
+  consultationStartedBy: 'consultation_started_by',
   referredAt: 'referred_at',
   completedAt: 'completed_at',
   triageSnapshot: 'triage_snapshot',
@@ -1289,6 +1294,7 @@ export const supabaseRepository = {
     rhuStation = null,
     roles = null,
     municipalityId = null,
+    verificationStatus = null,
     limit = 50,
     offset = 0,
   } = {}) {
@@ -1308,6 +1314,7 @@ export const supabaseRepository = {
     if (barangay) query = query.eq('barangay', barangay);
     if (barangayId) query = query.eq('barangay_id', barangayId);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
+    if (verificationStatus) query = query.eq('verification_status', verificationStatus);
     const { data, error, count } = await query;
     if (error && /risk_cluster_level|household_risk_workflow|relationship.*household_risk_workflow/i.test(String(error.message || ''))) {
       throw Object.assign(
@@ -1318,6 +1325,40 @@ export const supabaseRepository = {
     throwOnError(error, 'Could not list households');
     if (!Array.isArray(data) || !Number.isInteger(count) || count < data.length) {
       throw Object.assign(new Error('Could not list households because the exact total count is unavailable.'), { statusCode: 500 });
+    }
+
+    const householdWorkflow = new Map();
+    if (verificationStatus === 'Returned for Correction' && data.length) {
+      const householdIds = data.map((row) => row.id).filter(Boolean);
+      const { data: events, error: workflowError } = await supabase
+        .from('health_audit_logs')
+        .select('entity_id, action, actor_id, created_at')
+        .eq('entity_type', 'households')
+        .in('entity_id', householdIds)
+        .in('action', ['HOUSEHOLD_SUBMITTED', 'HOUSEHOLD_RESUBMITTED', 'HOUSEHOLD_RETURNED'])
+        .order('created_at', { ascending: true });
+      throwOnError(workflowError, 'Could not load household verification history');
+      for (const event of events || []) {
+        const history = householdWorkflow.get(event.entity_id) || { submittedAt: null, returnedBy: null };
+        if (['HOUSEHOLD_SUBMITTED', 'HOUSEHOLD_RESUBMITTED'].includes(event.action)) {
+          history.submittedAt = event.created_at || history.submittedAt;
+        } else if (event.action === 'HOUSEHOLD_RETURNED') {
+          history.returnedBy = event.actor_id || history.returnedBy;
+        }
+        householdWorkflow.set(event.entity_id, history);
+      }
+      const reviewerIds = [...new Set([...householdWorkflow.values()].map((history) => history.returnedBy).filter(Boolean))];
+      if (reviewerIds.length) {
+        const { data: reviewers, error: reviewerError } = await supabase
+          .from(TABLES.profiles)
+          .select('id, full_name')
+          .in('id', reviewerIds);
+        throwOnError(reviewerError, 'Could not load household reviewer names');
+        const reviewerNames = new Map((reviewers || []).map((reviewer) => [reviewer.id, reviewer.full_name]));
+        for (const history of householdWorkflow.values()) {
+          history.returnedByName = reviewerNames.get(history.returnedBy) || history.returnedBy || '';
+        }
+      }
     }
 
     const residentIds = new Set();
@@ -1371,8 +1412,11 @@ export const supabaseRepository = {
           followUpsByResident.get(member.resident_id) || [],
         );
         const household = householdFromRow(row);
+        const workflow = householdWorkflow.get(row.id);
         return {
           ...household,
+          submittedAt: workflow?.submittedAt || household.createdAt || null,
+          returnedByName: workflow?.returnedByName || household.verifiedBy || '',
           memberCount: memberRows.length,
           riskClusterLevel: (Array.isArray(row.cluster_assignment) ? row.cluster_assignment[0] : row.cluster_assignment)?.risk_cluster_level ?? null,
           lastVisitDate: [...visitRows].sort((a, b) => b.localeCompare(a))[0] || null,

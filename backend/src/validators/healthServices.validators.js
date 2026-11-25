@@ -19,7 +19,7 @@ import { invalid, isUuid, text, valid } from './common.js';
 
 const LIMITS = { name: 160, description: 2000, facilityName: 160 };
 /** Allowed attendance lifecycle statuses for scheduled clinic visits and walk-in encounters. */
-const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
+const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'missed', 'cancelled', 'rescheduled', 'walk_in']);
 
 /** Strict calendar `YYYY-MM-DD` check that rejects out-of-range rollover dates. */
 const isDateOnly = (value) => {
@@ -218,7 +218,8 @@ export const serviceIdParamValidator = (params = {}) => {
  * Validates creation of a resident service attendance record (and optional linked immunization entry).
  *
  * Domain rules enforced:
- * - `service_provided` is mandatory whenever `status === 'attended'`.
+ * - attendance (`attended`) is separate from delivered-service documentation;
+ *   `service_completed` requires delivery details and an actual service date.
  * - `follow_up_date` is mandatory whenever `follow_up_required === true`.
  * - When `vaccine` is populated, validates dose/date fields and requires `administered_date`
  *   if `immunization_status` is `'Completed'` (defaulting omitted status to `'Completed'`).
@@ -234,6 +235,10 @@ export const createAttendanceValidator = (input = {}) => {
   const status = text(input?.status);
   const notes = text(input?.notes);
   const serviceProvided = text(input?.service_provided);
+  const serviceProvidedDate = input?.service_provided_date == null || input.service_provided_date === ''
+    ? scheduledDate : text(input.service_provided_date);
+  const correctionReason = text(input?.correction_reason);
+  const serviceCompleted = input?.service_completed === true;
   const assessment = text(input?.assessment);
   const recommendations = text(input?.recommendations);
   const followUpRequired = input?.follow_up_required === true;
@@ -254,16 +259,28 @@ export const createAttendanceValidator = (input = {}) => {
   if (recommendations.length > 5000) errors.recommendations = 'Recommendations must be 5000 characters or fewer.';
   if (input?.follow_up_required !== undefined && typeof input.follow_up_required !== 'boolean') errors.follow_up_required = 'Follow-up must be yes or no.';
   if (followUpDate && !isDateOnly(followUpDate)) errors.follow_up_date = 'Enter a valid follow-up date.';
-  if (status === 'attended' && !serviceProvided) errors.service_provided = 'Describe the service provided.';
+  if (input?.service_completed !== undefined && typeof input.service_completed !== 'boolean') errors.service_completed = 'Service completion must be yes or no.';
+  if (serviceCompleted && !serviceProvided) errors.service_provided = 'Describe the service delivered.';
+  if (serviceCompleted && !['attended', 'walk_in'].includes(status)) errors.status = 'A completed service must also record the resident as attended.';
+  if (serviceCompleted && !isDateOnly(serviceProvidedDate)) errors.service_provided_date = 'Enter the actual service date.';
+  if (correctionReason.length > 1000) errors.correction_reason = 'Correction reason must be 1000 characters or fewer.';
   if (followUpRequired && !followUpDate) errors.follow_up_date = 'Enter the follow-up date.';
   if (vaccine.length > 200) errors.vaccine = 'Vaccine name must be 200 characters or fewer.';
   if (dose.length > 100) errors.dose = 'Dose must be 100 characters or fewer.';
   if (administeredDate && !isDateOnly(administeredDate)) errors.administered_date = 'Enter a valid administration date.';
   if (nextDose && !isDateOnly(nextDose)) errors.next_dose = 'Enter a valid next-dose date.';
   if (immunizationStatus && !['Due', 'Completed', 'Missed'].includes(immunizationStatus)) errors.immunization_status = 'Select a valid immunization status.';
+  if (vaccine && !serviceCompleted) errors.vaccine = 'Vaccine details can only be saved with a completed service.';
+  if (serviceCompleted && vaccine && immunizationStatus && immunizationStatus !== 'Completed') errors.immunization_status = 'A service delivery can only be recorded with a completed immunization.';
   if (vaccine && immunizationStatus === 'Completed' && !administeredDate) errors.administered_date = 'Date administered is required for a completed immunization.';
+  if (correctionReason.length > 1000) errors.correction_reason = 'Correction reason must be 1000 characters or fewer.';
   if (Object.keys(errors).length) return invalid(errors);
-  return valid({ service_id: serviceId, resident_id: residentId, scheduled_date: scheduledDate, status, notes, service_provided: serviceProvided, assessment, recommendations, follow_up_required: followUpRequired, follow_up_date: followUpDate || null, ...(vaccine ? { vaccine, dose, administered_date: administeredDate, next_dose: nextDose, immunization_status: immunizationStatus || 'Completed' } : {}) });
+  return valid({ service_id: serviceId, resident_id: residentId, scheduled_date: scheduledDate, status, notes,
+    ...(correctionReason ? { correction_reason: correctionReason } : {}),
+    ...(serviceCompleted ? { service_completed: true, service_provided: serviceProvided, service_provided_date: serviceProvidedDate,
+      correction_reason: correctionReason, assessment, recommendations, follow_up_required: followUpRequired,
+      follow_up_date: followUpDate || null } : {}),
+    ...(vaccine ? { vaccine, dose, administered_date: administeredDate, next_dose: nextDose, immunization_status: immunizationStatus || 'Completed' } : {}) });
 };
 
 /**
@@ -295,7 +312,7 @@ export const attendanceListQueryValidator = (query = {}) => {
 /**
  * Validates partial updates to an existing service attendance record (and optional immunization details).
  * Enforces non-empty patch payloads (`errors._root`) plus the same clinical completeness rules
- * as creation (`attended` requires `service_provided`, `follow_up_required` requires `follow_up_date`,
+ * as creation (`service_completed` requires `service_provided`, `follow_up_required` requires `follow_up_date`,
  * and `'Completed'` immunizations require `administered_date`).
  *
  * @param {Object} [input] - Raw request body.
@@ -317,6 +334,19 @@ export const updateAttendanceValidator = (input = {}) => {
     if (!isDateTime(input.attended_at)) errors.attended_at = 'Enter a valid attendance timestamp.';
     else value.attended_at = input.attended_at;
   }
+  if (input?.service_completed !== undefined) {
+    if (typeof input.service_completed !== 'boolean') errors.service_completed = 'Service completion must be yes or no.';
+    else value.service_completed = input.service_completed;
+  }
+  if (input?.service_provided_date !== undefined) {
+    if (input.service_provided_date === null || input.service_provided_date === '') value.service_provided_date = null;
+    else if (!isDateOnly(input.service_provided_date)) errors.service_provided_date = 'Enter the actual service date.';
+    else value.service_provided_date = text(input.service_provided_date);
+  }
+  if (input?.correction_reason !== undefined) {
+    if (typeof input.correction_reason !== 'string' || input.correction_reason.length > 1000) errors.correction_reason = 'Correction reason must be 1000 characters or fewer.';
+    else value.correction_reason = input.correction_reason.trim();
+  }
   for (const [field, max, label] of [
     ['service_provided', 5000, 'Service details'],
     ['assessment', 5000, 'Assessment'],
@@ -337,7 +367,10 @@ export const updateAttendanceValidator = (input = {}) => {
     else value.follow_up_date = date;
   }
   if (value.follow_up_required === true && !(value.follow_up_date || input.follow_up_date)) errors.follow_up_date = 'Enter the follow-up date.';
-  if (value.status === 'attended' && !(value.service_provided || text(input.service_provided))) errors.service_provided = 'Describe the service provided.';
+  if (value.service_completed === true && !(value.service_provided || text(input.service_provided))) errors.service_provided = 'Describe the service delivered.';
+  if (value.service_completed === true && input.status !== undefined && !['attended', 'walk_in'].includes(value.status)) {
+    errors.status = 'A completed service must also record the resident as attended.';
+  }
   if (input?.vaccine !== undefined) {
     const vaccine = text(input.vaccine);
     const dose = text(input.dose);

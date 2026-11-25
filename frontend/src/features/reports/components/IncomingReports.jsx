@@ -12,7 +12,7 @@ import ReportSnapshotView from "@/features/reports/components/ReportSnapshotView
  * Loads the reports routed to the authenticated recipient's role + scope from
  * the backend (GET /api/reports?box=incoming). Nothing is read from local or
  * session storage; every row is a persisted, server-scoped report. The
- * recipient can mark a report Received / Reviewed / Rejected.
+ * recipient can explicitly receive, review, accept, return, or reject reports.
  */
 
 const ROLE_LABELS = {
@@ -24,19 +24,17 @@ const ROLE_LABELS = {
 };
 
 const STATUS_TONE = {
-  "Pending Review": "bg-brand-yellow/15 text-[#B07E00]",
+  Submitted: "bg-brand-yellow/15 text-[#B07E00]",
+  Received: "bg-brand-blue/10 text-brand-blue",
   "Needs Revision": "bg-brand-danger/10 text-brand-danger",
-  Approved: "bg-brand-green/10 text-brand-green",
+  Reviewed: "bg-brand-green/10 text-brand-green",
+  Accepted: "bg-brand-green/10 text-brand-green",
   Rejected: "bg-brand-danger/10 text-brand-danger",
   Draft: "bg-brand-gray/10 text-brand-gray",
 };
-const STATUS_ORDER = ["Pending Review", "Needs Revision", "Approved", "Rejected", "Draft"];
+const STATUS_ORDER = ["Submitted", "Received", "Needs Revision", "Reviewed", "Accepted", "Rejected"];
 
-const displayStatus = (status) => {
-  if (status === "Submitted" || status === "Received") return "Pending Review";
-  if (status === "Reviewed") return "Approved";
-  return status || "Unknown";
-};
+const displayStatus = (status) => status || "Unknown";
 
 const formatDateTime = (iso) => {
   if (!iso) return "—";
@@ -49,7 +47,6 @@ export default function IncomingReports() {
   const { can } = usePermissions();
   const { user } = useAuth();
   if (!can("reports.view") || !user?.municipalityId ||
-      (user.role === "rhu_personnel" && !user.facilityId) ||
       (user.role === "health_supervisor" && !user.barangayId)) {
     return <Card className="p-4"><p role="status" className="text-sm text-brand-gray">Incoming reports are unavailable without verified report access and an assigned service area.</p></Card>;
   }
@@ -133,12 +130,8 @@ function AuthorizedInbox({ user }) {
 
   const openedReport = detailContent && detailContent.id === detail?.id ? detailContent : null;
   const isRecipient = openedReport?.createdBy !== user.id &&
-    (
-      (openedReport?.recipientRole === user.role &&
-        (user.role !== "rhu_personnel" || openedReport.recipientFacilityId === user.facilityId))
-      ||
-      (user.role === "phn" && openedReport?.recipientRole === "rhu_personnel" && openedReport.status === "Submitted")
-    );
+    openedReport?.recipientRole === user.role &&
+    ["phn", "mho"].includes(user.role);
   const reviewStatus = isRecipient ? openedReport.status : null;
 
   const sortedRows = useMemo(
@@ -171,8 +164,11 @@ function AuthorizedInbox({ user }) {
   }, [barangayFilter, periodFilter, search, sortedRows, statusFilter, typeFilter]);
 
   const act = async (report, status) => {
-    if (busy || openedReport?.id !== report.id || !(reviewStatus === "Submitted" && status === "Received" ||
-      reviewStatus === "Received" && ["Needs Revision", "Rejected", "Reviewed"].includes(status))) return;
+    const allowed = (reviewStatus === "Submitted" && status === "Received") ||
+      (["Received", "Reviewed"].includes(reviewStatus) && ["Needs Revision", "Rejected"].includes(status)) ||
+      (reviewStatus === "Received" && status === "Reviewed") ||
+      (reviewStatus === "Reviewed" && status === "Accepted");
+    if (busy || openedReport?.id !== report.id || !allowed) return;
     
     if (["Needs Revision", "Rejected"].includes(status) && !rejectReason.trim()) {
       showToast("An explanation is required.");
@@ -181,7 +177,7 @@ function AuthorizedInbox({ user }) {
     setBusy(true);
     try {
       await reportsApi.review(report.id, { status, remarks: rejectReason.trim() }, { ownerId: user.id });
-      showToast(status === "Reviewed" ? "Report approved." : status === "Needs Revision" ? "Report returned for revision." : `Report marked ${status}.`);
+      showToast(status === "Needs Revision" ? "Report returned for revision." : status === "Accepted" ? "Report accepted." : `Report marked ${status}.`);
       setDetail(null);
       setRejectReason("");
       await load();
@@ -226,7 +222,7 @@ function AuthorizedInbox({ user }) {
         <p className="px-5 py-12 text-center text-sm text-brand-gray">Loading incoming reports…</p>
       ) : (
         <>
-        <div className={`grid gap-3 border-b border-slate-200 p-4 sm:grid-cols-2 dark:border-border ${user?.role === "mho" ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+        <div className="grid gap-3 border-b border-slate-200 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 dark:border-border">
           {user?.role === "mho" && (
             <div className="rounded-xl border border-brand-border bg-brand-bg/60 px-3 py-2">
               <span className="block text-xs text-brand-gray">Total Reports Expected</span>
@@ -242,7 +238,7 @@ function AuthorizedInbox({ user }) {
             </div>
           )}
           {STATUS_ORDER.map((status) => (
-            status === "Draft" || status === "Rejected" ? null : (
+            status === "Draft" ? null : (
             <button
               key={status}
               onClick={() => setStatusFilter(statusFilter === status ? "All" : status)}
@@ -337,6 +333,8 @@ function AuthorizedInbox({ user }) {
                   ["Barangay", openedReport.barangay || "—"],
                   ["Submitted", formatDateTime(openedReport.submittedAt || openedReport.createdAt)],
                   ["Status", displayStatus(openedReport.status)],
+                  ["Received by", openedReport.receivedByName ? `${openedReport.receivedByName}${openedReport.receivedAt ? ` · ${formatDateTime(openedReport.receivedAt)}` : ""}` : "—"],
+                  ["Reviewed by", openedReport.reviewedByName ? `${openedReport.reviewedByName}${openedReport.reviewedAt ? ` · ${formatDateTime(openedReport.reviewedAt)}` : ""}` : "—"],
                   ["Last updated", formatDateTime(openedReport.updatedAt || openedReport.createdAt)],
                   [["Rejected", "Needs Revision"].includes(openedReport.status) ? "Revision / rejection explanation" : "Remarks", openedReport.remarks || "—"],
                 ].map(([label, value]) => (
@@ -379,7 +377,7 @@ function AuthorizedInbox({ user }) {
                 )}
               </div>
 
-               {reviewStatus === "Received" && (
+               {["Received", "Reviewed"].includes(reviewStatus) && (
                 <div className="mt-4">
                   <label className="text-sm font-medium text-brand-ink">Explanation (required for revision or rejection)</label>
                   <textarea
@@ -401,8 +399,11 @@ function AuthorizedInbox({ user }) {
                   <>
                     <button disabled={busy || !rejectReason.trim()} onClick={() => act(detail, "Needs Revision")} className="rounded-btn border border-brand-danger/30 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60">Return for Revision</button>
                     <button disabled={busy || !rejectReason.trim()} onClick={() => act(detail, "Rejected")} className="rounded-btn border border-brand-danger/30 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60">Reject Report</button>
-                    <button disabled={busy} onClick={() => act(detail, "Reviewed")} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">Approve Report</button>
+                    <button disabled={busy} onClick={() => act(detail, "Reviewed")} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">Mark Reviewed</button>
                   </>
+                )}
+                {reviewStatus === "Reviewed" && (
+                  <button disabled={busy} onClick={() => act(detail, "Accepted")} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">Accept Report</button>
                 )}
               </div>
             </div>

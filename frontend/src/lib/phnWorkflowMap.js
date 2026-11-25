@@ -111,6 +111,10 @@ export const mapVisitToPatient = (visit) => {
     riskAssessmentStatus: visit.riskAssessmentStatus || '',
     riskAssessedAt: visit.riskAssessedAt || null,
     facilityId: visit.facilityId ?? visit.facility_id ?? null,
+    consultationRoutedAt: visit.consultationRoutedAt ?? visit.consultation_routed_at ?? null,
+    consultationRoutedFacilityId: visit.consultationRoutedFacilityId ?? visit.consultation_routed_facility_id ?? null,
+    consultationRoutedFacilityName: visit.consultationRoutedFacilityName ?? visit.consultation_routed_facility_name ?? null,
+    consultationStartedAt: visit.consultationStartedAt ?? visit.consultation_started_at ?? null,
     municipalityId: resident.municipalityId ?? resident.municipality_id ?? null,
     visitDate: visit.visitDate || "",
     triage: {
@@ -134,6 +138,7 @@ export const mapVisitToPatient = (visit) => {
     },
     checkup: completed ? clinicalDetails : undefined,
     checkupDraft: completed ? undefined : clinicalDetails,
+    consultationVitals: visit.consultationDetails?.consultationVitals || {},
     raw: visit,
   };
 };

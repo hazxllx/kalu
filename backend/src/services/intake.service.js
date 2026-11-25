@@ -542,11 +542,26 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
   return repository.insertVisit(submission);
 };
 
-/** List up to 100 intake submissions recorded by the caller that remain within their current scope. */
-export const listMySubmissions = async ({ user }) => {
-  assertIntakeActorScope(user);
-  const { rows } = await repository.listVisits({ submittedById: user.id, limit: 100 });
-  return rows.filter((submission) => withinIntakeScope(user, submission));
+/**
+ * RHU triage staff share the submitted hand-off history for their assigned
+ * facility. Barangay workers and Health Supervisors continue to see only their
+ * own submissions, within their barangay scope. Drafts are never shared.
+ */
+export const listMySubmissions = async ({ user, repo = repository }) => {
+  assertIntakeActorScope(user, repo);
+  const query = user.role === 'rhu_personnel'
+    ? {
+        statuses: [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW,
+          SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.COMPLETED],
+        municipalityId: user.municipalityId,
+        facilityId: user.facilityId,
+        limit: 100,
+      }
+    : { submittedById: user.id, limit: 100 };
+  const { rows } = await repo.listVisits(query);
+  return rows.filter((submission) =>
+    submission?.status !== SUBMISSION_STATUS.DRAFT && withinIntakeScope(user, submission),
+  );
 };
 
 /**

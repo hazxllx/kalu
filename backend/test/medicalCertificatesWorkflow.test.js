@@ -169,10 +169,10 @@ const makeSupabase = ({ certificate = null } = {}) => {
 };
 
 for (const role of ['mho', 'phn']) {
-  test(`${role} can prepare, submit, and approve-and-issue within their municipality`, async () => {
+  test(`${role} follows the certificate creation and issue workflow within their municipality`, async () => {
     const { client, getCurrent, getLogs, calls } = makeSupabase();
     const user = userFor(role);
-    const draft = await create({
+    const created = await create({
       user,
       supabase: client,
       payload: {
@@ -181,24 +181,37 @@ for (const role of ['mho', 'phn']) {
         findings: 'Medical impression',
       },
     });
-    assert.equal(draft.status, CERT_STATUS.DRAFT);
-    assert.equal(draft.preparedBy, 'Certificate Creator');
 
-    await changeStatus({ user, id: CERTIFICATE_ID, status: CERT_STATUS.FOR_REVIEW, supabase: client });
-    const issued = await changeStatus({
-      user,
-      id: CERTIFICATE_ID,
-      status: CERT_STATUS.ISSUED,
-      supabase: client,
-    });
+    assert.equal(created.preparedBy, 'Certificate Creator');
 
-    assert.equal(issued.status, CERT_STATUS.ISSUED);
-    assert.equal(getCurrent().reviewed_by, user.id);
-    assert.equal(getCurrent().issued_by, user.id);
-    assert.ok(getCurrent().reviewed_at);
-    assert.ok(getCurrent().issued_at);
-    assert.equal(getLogs().filter((entry) => entry.new_status === CERT_STATUS.ISSUED).length, 1);
-    assert.equal(getLogs().at(-1).action, 'Approved and Issued');
+    if (role === 'phn') {
+      assert.equal(created.status, CERT_STATUS.ISSUED);
+      assert.equal(getCurrent().reviewed_by, user.id);
+      assert.equal(getCurrent().issued_by, user.id);
+      assert.ok(getCurrent().reviewed_at);
+      assert.ok(getCurrent().issued_at);
+      assert.equal(getLogs().filter((entry) => entry.new_status === CERT_STATUS.ISSUED).length, 1);
+      assert.equal(getLogs().at(-1).action, CERT_STATUS.ISSUED);
+      assert.match(getLogs().at(-1).notes, /Approved and Issued by PHN/);
+    } else {
+      assert.equal(created.status, CERT_STATUS.DRAFT);
+      await changeStatus({ user, id: CERTIFICATE_ID, status: CERT_STATUS.FOR_REVIEW, supabase: client });
+      const issued = await changeStatus({
+        user,
+        id: CERTIFICATE_ID,
+        status: CERT_STATUS.ISSUED,
+        supabase: client,
+      });
+
+      assert.equal(issued.status, CERT_STATUS.ISSUED);
+      assert.equal(getCurrent().reviewed_by, user.id);
+      assert.equal(getCurrent().issued_by, user.id);
+      assert.ok(getCurrent().reviewed_at);
+      assert.ok(getCurrent().issued_at);
+      assert.equal(getLogs().filter((entry) => entry.new_status === CERT_STATUS.ISSUED).length, 1);
+      assert.equal(getLogs().at(-1).action, 'Approved and Issued');
+    }
+
     assert.ok(calls.selects
       .filter((selection) => selection.table === 'medical_certificates')
       .every((selection) => !selection.columns.includes('profiles')));

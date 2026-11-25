@@ -4,10 +4,13 @@ import { classifyBloodPressure as frontend, parseBloodPressure } from '../../src
 import { classifyBloodPressure as backend } from '../../../backend/src/config/bpThresholds.js';
 import { classifyWithConfig, getBpConfig, updateThresholds } from '../../../backend/src/services/bpConfig.service.js';
 import { DEFAULT_BP_THRESHOLDS, setBloodPressureConfig } from '../../../shared/bloodPressure.js';
+import { consultationBloodPressureClassification } from '../../src/features/consultations/lib/consultationRisk.js';
 
 const examples = [
-  ['110/70', 'Normal Blood Pressure'], ['119/79', 'Normal Blood Pressure'], ['120/75', 'Elevated Blood Pressure'],
-  ['125/79', 'Elevated Blood Pressure'], ['129/79', 'Elevated Blood Pressure'], ['120/80', 'Stage 1 Hypertension'],
+  ['110/70', 'Normal Blood Pressure'], ['119/79', 'Normal Blood Pressure'], ['120/75', 'Normal Blood Pressure'],
+  ['120/79', 'Normal Blood Pressure'], ['120/80', 'Normal Blood Pressure'],
+  ['121/79', 'Elevated Blood Pressure'], ['129/80', 'Elevated Blood Pressure'],
+  ['120/81', 'Stage 1 Hypertension'],
   ['120/89', 'Stage 1 Hypertension'], ['130/75', 'Stage 1 Hypertension'],
   ['125/85', 'Stage 1 Hypertension'], ['130/80', 'Stage 1 Hypertension'], ['135/85', 'Stage 1 Hypertension'], ['139/89', 'Stage 1 Hypertension'],
   ['140/80', 'Stage 2 Hypertension'], ['130/90', 'Stage 2 Hypertension'],
@@ -84,8 +87,8 @@ test('all systolic/diastolic threshold crossings select the higher category', ()
       if (systolic <= diastolic) continue;
       const expected = systolic >= 180 || diastolic >= 120 ? 'crisis'
         : systolic >= 140 || diastolic >= 90 ? 'stage2'
-          : systolic >= 130 || diastolic >= 80 ? 'stage1'
-            : systolic >= 120 ? 'elevated' : 'normal';
+          : systolic >= 130 || diastolic >= 81 ? 'stage1'
+            : systolic >= 121 && diastolic <= 80 ? 'elevated' : 'normal';
       assert.equal(frontend(`${systolic}/${diastolic}`).code, expected);
       assert.equal(backend({ systolic, diastolic }).code, expected);
     }
@@ -132,4 +135,13 @@ test('structured symptom flags require true and a valid complete reading', () =>
   }
   assert.deepEqual(parseBloodPressure('40/20'), { systolic: 40, diastolic: 20 });
   assert.deepEqual(parseBloodPressure('300/200'), { systolic: 300, diastolic: 200 });
+});
+
+test('consultation details display the current classification for legacy BP snapshots', () => {
+  const record = {
+    vitals: { bp: '120/80' },
+    bpClassification: { code: 'stage1', category: 'Stage 1 Hypertension', classificationVersion: 'bp-v3' },
+  };
+  assert.equal(consultationBloodPressureClassification(record).category, 'Normal Blood Pressure');
+  assert.equal(record.bpClassification.category, 'Stage 1 Hypertension');
 });

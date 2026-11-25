@@ -136,7 +136,8 @@ export function mapFollowUpEvent(row) {
     : row.residentName;
   const decision = row.resident_decision ?? row.residentDecision ?? "";
   const requiresResponse = row.requires_resident_response ?? row.requiresResidentResponse ?? false;
-  const confirmation = decision === "approved" ? "Confirmed"
+  const responseStatus = row.schedule_response_status ?? row.scheduleResponseStatus ?? "";
+  const confirmation = decision === "approved" || responseStatus === "Attendance Confirmed" ? "Confirmed"
     : decision === "rejected" ? "Rejected"
     : requiresResponse || decision === "pending" ? "Awaiting Confirmation"
     : row.confirmationStatus || null;
@@ -165,6 +166,7 @@ export function mapFollowUpEvent(row) {
     instructions,
     detail: instructions || row.purpose || "",
     requiresResidentResponse: Boolean(requiresResponse),
+    scheduleResponseStatus: responseStatus,
     residentDecision: decision,
     confirmationStatus: confirmation,
     respondedAt: row.resident_decision_at ?? row.respondedAt ?? "",

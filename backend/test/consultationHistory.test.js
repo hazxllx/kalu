@@ -176,6 +176,46 @@ test('resident identity comes from the session for list, detail and completed se
   assert.equal(old.consultingPersonnel, 'Former Nurse');
 });
 
+test('resident health records retain referral history while optional referral columns await migration', async () => {
+  const selectedColumns = [];
+  const supabase = { from(table) {
+    let columns = '';
+    const query = {
+      select(value) { columns = value; selectedColumns.push({ table, columns }); return query; },
+      eq: () => query,
+      order: () => query,
+      limit: () => query,
+      not: () => query,
+      then(resolve) {
+        if (table === 'health_referrals' && columns.includes('recipient_facility_id')) {
+          return Promise.resolve({ data: null, error: { code: '42703', message: 'column recipient_facility_id does not exist' } }).then(resolve);
+        }
+        const data = table === 'health_referrals' ? [{
+          id: 'legacy-referral',
+          resident_id: 'r1',
+          referring_facility: 'San Isidro BHS',
+          reason: 'Fever assessment',
+          destination_facility: 'RHU Pili',
+          destination_service: 'Consultation',
+          priority: 'Medium',
+          referral_date: '2026-11-20',
+          status: 'Pending',
+        }] : [];
+        return Promise.resolve({ data, error: null }).then(resolve);
+      },
+    };
+    return query;
+  } };
+
+  const result = await getOwnHealthRecords({ user: residentUser, repo: repository, supabase });
+
+  assert.equal(selectedColumns.filter(({ table }) => table === 'health_referrals').length, 2);
+  assert.deepEqual(result.referrals.map(({ id }) => id), ['legacy-referral']);
+  assert.equal(result.referrals[0].referringFacility, 'San Isidro BHS');
+  assert.equal(result.referrals[0].facility, 'RHU Pili');
+  assert.equal(result.referrals[0].date, '2026-11-20');
+});
+
 test('a newly completed canonical visit appears with full prescription, vitals, follow-up, referral and personnel context', async () => {
   const created = await create({ user: staff, repo: repository, supabase: null,
     persistRisk: async () => {},
@@ -205,7 +245,7 @@ test('a newly completed canonical visit appears with full prescription, vitals, 
   assert.equal(saved.medicationList[0].dose, '1 tablet');
   assert.equal(saved.followUps.length, 1);
   assert.equal(saved.referrals.length, 1);
-  assert.equal(saved.bloodPressureClassification.code, 'stage1');
+  assert.equal(saved.bloodPressureClassification.code, 'normal');
 });
 
 test('server saves symptom-aware BP, recomputes edits and preserves assessment history and snapshot display', async () => {
