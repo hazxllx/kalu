@@ -5,7 +5,9 @@ import { readFile } from 'node:fs/promises';
 import { setOfflineOwnerResolver, invalidateOfflineOwner } from '../../src/services/offline/db.js';
 
 const clientUrl = new URL('../../src/services/api/apiClient.js', import.meta.url);
+const usersApiUrl = new URL('../../src/services/api/usersApi.js', import.meta.url);
 const originalFetch = globalThis.fetch;
+const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 let owner;
 let identity;
 let calls;
@@ -24,6 +26,13 @@ const loadClient = async (getSession = async () => ({ data: { session: identity 
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#owner-${serial++}`);
 };
 
+const loadUsersApi = async (api) => {
+  globalThis.__usersApiBindingTest = { api };
+  const source = (await readFile(usersApiUrl, 'utf8'))
+    .replace("import { api } from './apiClient';", 'const { api } = globalThis.__usersApiBindingTest;');
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#users-${serial++}`);
+};
+
 beforeEach(() => {
   owner = 'owner-a';
   setOfflineOwnerResolver(() => owner);
@@ -34,7 +43,14 @@ beforeEach(() => {
     return new Response(JSON.stringify({ data: { id: 'authorized-test-record' } }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
 });
-afterEach(() => { globalThis.fetch = originalFetch; setOfflineOwnerResolver(null); delete globalThis.__ownerBindingTest; });
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+  else delete globalThis.navigator;
+  setOfflineOwnerResolver(null);
+  delete globalThis.__ownerBindingTest;
+  delete globalThis.__usersApiBindingTest;
+});
 
 test('authorized requests bind the token owner and never pass owner metadata as Fetch options', async () => {
   const { api } = await loadClient();
@@ -116,6 +132,37 @@ test('multipart uploads use the same identity fence without forcing JSON content
   await postFormData('/documents', body, { ownerId: owner });
   assert.equal(calls[0].options.body, body);
   assert.equal(calls[0].options.headers['Content-Type'], undefined);
+});
+
+test('an online-only action may reach the server when navigator reports stale offline state', async () => {
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } });
+  const { api } = await loadClient();
+  assert.deepEqual(await api.post('/users/personnel-1/lifecycle', { action: 'invite' }, { attemptWhenOffline: true }), {
+    id: 'authorized-test-record',
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.method, 'POST');
+});
+
+test('failed invitation requests report an unreachable backend even when navigator says offline', async () => {
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } });
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  const { api } = await loadClient();
+  await assert.rejects(api.post('/users/personnel-1/lifecycle', { action: 'invite' }, { attemptWhenOffline: true }), (error) => {
+    assert.equal(error.status, 0);
+    assert.match(error.message, /Could not reach the KALUSAGAP server/);
+    assert.doesNotMatch(error.message, /requires an internet connection/i);
+    return true;
+  });
+});
+
+test('only personnel setup-invitation actions opt into the server connectivity check', async () => {
+  const calls = [];
+  const { usersApi } = await loadUsersApi({ post: (...args) => { calls.push(args); return args; } });
+  usersApi.lifecycle('personnel-1', { action: 'invite' });
+  usersApi.lifecycle('personnel-1', { action: 'approve' });
+  assert.equal(calls[0][2].attemptWhenOffline, true);
+  assert.equal(calls[1][2].attemptWhenOffline, undefined);
 });
 
 test('authenticated file reads preserve binary data and honor no-store', async () => {

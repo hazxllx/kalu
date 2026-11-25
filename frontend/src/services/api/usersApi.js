@@ -24,7 +24,11 @@ export const usersApi = {
   get: (id) => api.get(`/users/${id}`),
   update: (id, user) => api.put(`/users/${id}`, { user }),
   resetAccess: (id) => api.post(`/users/${id}/access-reset`, {}),
-  lifecycle: (id, payload) => api.post(`/users/${id}/lifecycle`, payload),
+  lifecycle: (id, payload) => api.post(`/users/${id}/lifecycle`, payload, {
+    // Resending a setup link is server-authoritative and must never be queued,
+    // but still try the request when navigator.onLine is a stale offline hint.
+    ...(payload?.action === 'invite' ? { attemptWhenOffline: true } : {}),
+  }),
   history: (id) => api.get(`/users/${id}/history`),
   remove: (id, confirmEmail) => api.delete(`/users/${id}`, { body: { confirmEmail } }),
 };

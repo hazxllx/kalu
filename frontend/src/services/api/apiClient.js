@@ -3,6 +3,7 @@ import { resolveApiBaseUrl } from './apiBaseUrl.js';
 import {
   MUTATION_TIER,
   OfflineActionRequiredError,
+  isBrowserOffline,
   requireOnlineForMutation,
 } from '../offline/mutationPolicy.js';
 import { invalidateVerifiedPermissions } from '../accessControl/permissionCache.js';
@@ -39,6 +40,7 @@ const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.en
  * @property {RequestCache} [cache]
  * @property {'blob'} [responseType]
  * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType]
+ * @property {boolean} [attemptWhenOffline] Attempt an online-only request even when `navigator.onLine` is false.
  * @property {string} [ownerId] Authenticated account whose queued operation this request belongs to.
  * @property {string} [dedupeKey] Optional caller-supplied scope key for GET deduplication.
  * @property {number} [timeout] Request timeout in milliseconds (default: 30000)
@@ -116,11 +118,13 @@ function createTimeoutController(timeoutMs, existingSignal) {
  */
 async function request(
   path,
-  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, timeout = 30000, signal, dedupeKey, responseType, ...rest } = {},
+  { method = 'GET', body, headers = {}, params, offlineMutationType, attemptWhenOffline = false, ownerId = null, timeout = 30000, signal, dedupeKey, responseType, ...rest } = {},
 ) {
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
   const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
-  if (isMutation) requireOnlineForMutation(mutationType);
+  // This never queues an ONLINE_ONLY mutation. It only lets the authoritative
+  // server decide when the browser's navigator.onLine hint is stale.
+  if (isMutation && !attemptWhenOffline) requireOnlineForMutation(mutationType);
 
   // Request deduplication for GET requests
   const requestKey = getRequestKey(path, method, params, body, dedupeKey);
@@ -172,7 +176,8 @@ async function request(
       if (error?.status === 401 || error?.code === 'auth') throw error;
       if (isMutation && mutationType === MUTATION_TIER.ONLINE_ONLY) {
         if (error?.name === 'AbortError') throw error;
-        throw new OfflineActionRequiredError();
+        if (isBrowserOffline() && !attemptWhenOffline) throw new OfflineActionRequiredError();
+        throw new ApiError('Could not reach the KALUSAGAP server. Check that the backend is available and try again.', 0, null);
       }
       throw error;
     }
