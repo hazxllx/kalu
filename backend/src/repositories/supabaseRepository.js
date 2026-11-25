@@ -795,6 +795,10 @@ const PROFILE_ADMIN_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS},personnel_account:pe
 const PROFILE_ADMIN_LEGACY_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS_LEGACY},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
 const PROFILE_ADMIN_SELECT = `${PROFILE_ADMIN_BASE_SELECT},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
 const PROFILE_ADMIN_LEGACY_SELECT = `${PROFILE_ADMIN_LEGACY_BASE_SELECT},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
+// Resident accounts own their personal identity and geographic assignment in
+// `residents`.  Keep this query separate from the profiles query so an admin
+// lookup can never accidentally combine fields from another account.
+const RESIDENT_ACCOUNT_SELECT = 'id,auth_user_id,first_name,middle_name,last_name,suffix,birth_date,sex,cellphone_no,current_address,permanent_address,verification_status,barangay_id,municipality_id,barangay:barangays(name),municipality:municipalities(name)';
 
 /**
  * Maps PostgreSQL SQLSTATE error codes from personnel/account RPCs (`42501`,
@@ -913,17 +917,22 @@ const isProfileFirstNameUnavailable = (error) =>
 export const profileToAdminUser = (row) => {
   const lifecycle = Array.isArray(row.personnel_account) ? row.personnel_account[0] : row.personnel_account;
   const latestNotification = Array.isArray(row.notifications) ? row.notifications[0] : null;
+  const resident = row.resident_account || null;
+  const residentName = resident
+    ? [resident.first_name, resident.middle_name, resident.last_name, resident.suffix]
+      .map((part) => String(part || '').trim()).filter(Boolean).join(' ')
+    : '';
   return {
   id: row.id,
   email: row.email,
-  name: row.full_name || row.email,
-  firstName: row.first_name ?? row.firstName ?? '',
+  name: residentName || row.full_name || row.email,
+  firstName: resident?.first_name ?? row.first_name ?? row.firstName ?? '',
   role: row.role,
   status: row.status,
-  municipalityId: row.municipality_id ?? null,
-  municipality: row.municipality?.name ?? null,
-  barangayId: row.barangay_id ?? null,
-  barangay: row.barangay?.name ?? null,
+  municipalityId: resident?.municipality_id ?? row.municipality_id ?? null,
+  municipality: resident?.municipality?.name ?? row.municipality?.name ?? null,
+  barangayId: resident?.barangay_id ?? row.barangay_id ?? null,
+  barangay: resident?.barangay?.name ?? row.barangay?.name ?? null,
   facilityId: row.facility_id ?? null,
   facility: row.facility?.name ?? null,
   // Preserve historical station values in the editor. Authorization normalizes
@@ -948,6 +957,15 @@ export const profileToAdminUser = (row) => {
   contact: row.contact || '',
   createdAt: row.created_at ?? null,
   updatedAt: row.updated_at ?? null,
+  residentId: resident?.id ?? null,
+  middleName: resident?.middle_name ?? '',
+  lastName: resident?.last_name ?? '',
+  suffix: resident?.suffix ?? '',
+  birthDate: resident?.birth_date ?? null,
+  sex: resident?.sex ?? '',
+  address: resident?.current_address || resident?.permanent_address || '',
+  verificationStatus: resident?.verification_status ?? null,
+  residentContact: resident?.cellphone_no ?? '',
   };
 };
 
@@ -2174,7 +2192,20 @@ export const supabaseRepository = {
       }
     }
     throwAccountError(error, 'The account service is unavailable. Please try again shortly.');
-    return data ? profileToAdminUser(data) : null;
+    if (!data) return null;
+    // Resident identity data lives in residents and is linked by the auth UUID;
+    // do this separately so a missing/older residents relationship cannot make
+    // the authoritative profile lookup return the wrong account.
+    if (['resident', 'resident-limited'].includes(data.role)) {
+      const { data: resident, error: residentError } = await supabase
+        .from(TABLES.residents)
+        .select(RESIDENT_ACCOUNT_SELECT)
+        .eq('auth_user_id', id)
+        .maybeSingle();
+      throwAccountError(residentError, 'The resident account details are unavailable. Please try again shortly.');
+      if (resident) data.resident_account = resident;
+    }
+    return profileToAdminUser(data);
   },
 
   async updateProfileFields(id, fields) {

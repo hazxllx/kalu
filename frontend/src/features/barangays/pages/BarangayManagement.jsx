@@ -615,25 +615,6 @@ export default function BarangayManagement() {
                       >
                         <Pencil className="h-3.5 w-3.5" /> Edit
                       </button>
-                      {canManage && (
-                        b.status === "Active" ? (
-                          <button
-                            type="button"
-                            onClick={() => setStatusTarget({ record: b, status: "Inactive" })}
-                            className="inline-flex items-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:border-amber-400 hover:bg-amber-50"
-                          >
-                            <Ban className="h-3.5 w-3.5" /> Deactivate
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setStatusTarget({ record: b, status: "Active" })}
-                            className="inline-flex items-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:border-emerald-400 hover:bg-emerald-50"
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Activate
-                          </button>
-                        )
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -674,17 +655,6 @@ export default function BarangayManagement() {
                 <button type="button" onClick={() => setModal({ mode: "edit", record: b })} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-2 text-xs font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
                   <Pencil className="h-3.5 w-3.5" /> Edit
                 </button>
-                {canManage && (
-                  b.status === "Active" ? (
-                    <button type="button" onClick={() => setStatusTarget({ record: b, status: "Inactive" })} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-2 text-xs font-medium text-amber-700 hover:border-amber-400 hover:bg-amber-50">
-                      <Ban className="h-3.5 w-3.5" /> Deactivate
-                    </button>
-                  ) : (
-                    <button type="button" onClick={() => setStatusTarget({ record: b, status: "Active" })} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-2 text-xs font-medium text-emerald-700 hover:border-emerald-400 hover:bg-emerald-50">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Activate
-                    </button>
-                  )
-                )}
               </div>
             </Card>
           ))

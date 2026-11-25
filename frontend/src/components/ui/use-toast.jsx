@@ -1,7 +1,7 @@
 // Inspired by react-hot-toast library
 import { useState, useEffect } from "react";
 
-const TOAST_LIMIT = 20;
+const TOAST_LIMIT = 4;
 const TOAST_REMOVE_DELAY = 250;
 
 const actionTypes = {
@@ -123,8 +123,18 @@ function dismissToast(toastId) {
   dispatch({ type: actionTypes.DISMISS_TOAST, toastId });
 }
 
+/**
+ * Publish a notification. Callers may use `variant` values of `success`,
+ * `error`, `warning`, or `info`; the toaster maps these to the system palette.
+ * `dedupeKey` prevents repeated requests from spamming the user.
+ */
 function toast({ ...props }) {
   const id = genId();
+
+  if (props.dedupeKey) {
+    const duplicate = memoryState.toasts.find((item) => item.dedupeKey === props.dedupeKey && item.open !== false);
+    if (duplicate) return { id: duplicate.id, dismiss: () => dismissToast(duplicate.id), update: () => {} };
+  }
 
   const update = (props) =>
     dispatch({
@@ -172,8 +182,12 @@ function useToast() {
   return {
     ...state,
     toast,
+    success: (description, options = {}) => toast({ title: "Success", description, variant: "success", duration: 4000, ...options }),
+    error: (description, options = {}) => toast({ title: "Something went wrong", description, variant: "error", duration: 8000, ...options }),
+    warning: (description, options = {}) => toast({ title: "Please review", description, variant: "warning", duration: 6000, ...options }),
+    info: (description, options = {}) => toast({ title: "Information", description, variant: "info", duration: 5000, ...options }),
     dismiss: dismissToast,
   };
 }
 
-export { useToast, toast }; 
+export { useToast, toast };

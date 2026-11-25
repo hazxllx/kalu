@@ -141,7 +141,22 @@ export default function DashboardLayout({ roleKey }) {
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Expanded submenu groups (e.g., "User & Personnel Management" expanded state)
-  const [expandedGroups, setExpandedGroups] = useState({});
+  const groupPreferenceKey = `kalusagap.sidebar.groups.v1:${user?.id || roleKey}`;
+  const [expandedGroups, setExpandedGroups] = useState(() => {
+    if (roleKey !== "mho") return {};
+    try {
+      const stored = window.localStorage.getItem(groupPreferenceKey);
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // Use the compact desktop default when storage is unavailable.
+    }
+    return {
+      Overview: true,
+      "Community Monitoring": true,
+      Operations: true,
+      "Insights & Account": true,
+    };
+  });
   const menuRef = useRef(null);
   const [online, setOnline] = useState(isNavigatorOnline);
   // Feedback for the "Recheck Access" manual permission refresh
@@ -227,6 +242,15 @@ export default function DashboardLayout({ roleKey }) {
       // The sidebar remains usable when browser storage is unavailable.
     }
   }, [sidebarCollapsed, sidebarPreferenceKey]);
+
+  useEffect(() => {
+    if (roleKey !== "mho") return;
+    try {
+      window.localStorage.setItem(groupPreferenceKey, JSON.stringify(expandedGroups));
+    } catch {
+      // Navigation remains usable when browser storage is unavailable.
+    }
+  }, [expandedGroups, groupPreferenceKey, roleKey]);
 
   // Refresh permissions when window regains focus (user may have been away,
   // and admin might have changed their access in the meantime)
@@ -443,12 +467,12 @@ export default function DashboardLayout({ roleKey }) {
 
   const NavList = ({ collapsed = false } = {}) => {
     const adminNav = roleKey === "admin";
-    const compact = roleKey === "health_supervisor" || roleKey === "resident-limited";
+    const compact = roleKey === "health_supervisor" || roleKey === "resident-limited" || roleKey === "mho";
     const rowSize = collapsed
       ? "min-h-10"
       : adminNav
         ? "min-h-10 py-1.5"
-        : "min-h-9 py-1.5";
+        : roleKey === "mho" ? "min-h-9 py-1" : "min-h-9 py-1.5";
     const itemPadding = collapsed ? "justify-center px-0" : "gap-2.5 px-3";
 
     const isItemActive = (item) =>
@@ -733,7 +757,7 @@ export default function DashboardLayout({ roleKey }) {
         style={{ width: sidebarWidth }}
       >
         {/* Brand header — fixed */}
-        <div className={`relative shrink-0 flex h-16 items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `${sidebarCollapsed ? "justify-center px-2" : "px-4 pr-11"}` : `${sidebarCollapsed ? "justify-center gap-0 px-2" : isSupervisor ? "justify-between gap-3 px-4" : "justify-between gap-3 px-5"}`}`}>
+        <div className={`relative shrink-0 flex ${roleKey === "mho" ? "h-14" : "h-16"} items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `${sidebarCollapsed ? "justify-center px-2" : "px-4 pr-11"}` : `${sidebarCollapsed ? "justify-center gap-0 px-2" : isSupervisor || roleKey === "mho" ? "justify-between gap-3 px-4" : "justify-between gap-3 px-5"}`}`}>
           <div className={sidebarCollapsed ? "flex min-w-0 justify-center" : "min-w-0 flex-1"}>
             <SidebarBrand collapsed={sidebarCollapsed} />
           </div>
@@ -751,7 +775,7 @@ export default function DashboardLayout({ roleKey }) {
         {/* Scrollable navigation */}
         <nav
           aria-label="Main navigation"
-          className={`nav-scroll min-h-0 flex-1 ${roleKey === "admin" ? "overflow-y-auto py-1" : roleKey === "resident-limited" ? "overflow-y-auto py-2" : "overflow-y-auto py-3"} ${sidebarCollapsed ? "overflow-x-visible px-2" : "px-3"}`}
+          className={`nav-scroll min-h-0 flex-1 ${roleKey === "admin" ? "overflow-y-auto py-1" : roleKey === "resident-limited" ? "overflow-y-auto py-2" : roleKey === "mho" ? "overflow-y-auto py-2" : "overflow-y-auto py-3"} ${sidebarCollapsed ? "overflow-x-visible px-2" : "px-3"}`}
         >
           <NavList collapsed={sidebarCollapsed} />
 

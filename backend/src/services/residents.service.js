@@ -812,6 +812,8 @@ export const getOwnHealthRecords = async ({ user, filters = {}, repo = repositor
     },
 
     riskLevel,
+    riskScore: currentRisk.riskScore ?? null,
+    riskAssessmentDate: currentRisk.riskAssessedAt || null,
     riskAssessmentStatus: currentRisk.riskAssessmentStatus,
     riskReasons: (currentRisk.riskFactors || []).map((factor) => ({ ruleId: factor.ruleId || factor.code || '', message: factor.message || factor.name || '' })),
     lastConsultationDate,
