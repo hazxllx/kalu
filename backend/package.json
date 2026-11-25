@@ -14,7 +14,8 @@
     "test": "node --import ./test/helpers/testMode.js --test test/*.test.js tests/*.test.js",
     "check:auth": "node scripts/check-auth-connectivity.mjs",
     "verify:live": "node scripts/verify-live-workflows.mjs",
-    "provision:accounts": "node scripts/provision-official-accounts.mjs"
+    "provision:accounts": "node scripts/provision-official-accounts.mjs",
+    "seed:san-isidro": "node scripts/seed-san-isidro.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

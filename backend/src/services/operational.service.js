@@ -284,7 +284,10 @@ const audit = async (supabase, user, action, entityType, entityId, resident) => 
 // (which read `row.resident.first_name`) fell back to the literal string
 // "Resident" and overwrote the correct name after any edit.
 const RESIDENT_EMBED = 'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no)';
-const MATERNAL_CASE_EMBED = 'maternal_case:maternal_records(id, resident_id, lmp, edd, status, provider, created_at)';
+// `maternal_visits` can reach `maternal_records` through more than one
+// relationship after the clinical reporting links are installed. Qualify the
+// legacy visit FK so PostgREST does not reject the embed as ambiguous.
+const MATERNAL_CASE_EMBED = 'maternal_case:maternal_records!maternal_visits_maternal_case_id_fkey(id, resident_id, lmp, edd, status, provider, created_at)';
 const CONSULTATION_EMBED = 'consultation:visits!follow_ups_consultation_id_fkey(id, visit_date, chief_complaint, status)';
 const selectFor = (kind) => {
   const normalizedKind = normalizeKind(kind);

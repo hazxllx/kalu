@@ -97,6 +97,7 @@ const defaultForm = () => ({
   certificateNumber: "",
   civilStatus: "Single",
   dateExamined: todayIso(),
+  chiefComplaint: "",
   diagnosis: "",
   recommendation: "",
   remarks: "",
@@ -256,6 +257,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
     certificateNumber: form.certificateNumber.trim(),
     civilStatus: form.civilStatus,
     dateOfExamination: form.dateExamined,
+    chiefComplaint: form.chiefComplaint.trim(),
     findings: form.diagnosis.trim(),
     recommendation: form.recommendation.trim(),
     remarks: form.remarks.trim(),
@@ -275,6 +277,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
     purpose: purposes?.[0] || "General Medical Certificate",
     civilStatus: form.civilStatus,
     dateOfExamination: form.dateExamined,
+    chiefComplaint: form.chiefComplaint.trim(),
     findings: form.diagnosis.trim(),
     recommendation: form.recommendation.trim(),
     remarks: form.remarks.trim(),
@@ -285,6 +288,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
     const next = {};
     if (!resident) next.resident = "Please select a resident.";
     if (!form.dateExamined) next.dateExamined = "Date examined is required.";
+    if (!form.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
     if (!form.diagnosis.trim()) next.diagnosis = "Diagnosis / medical impression is required.";
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -543,6 +547,9 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                 />
               </Field>
               <div className="sm:col-span-2">
+                <Field label="Chief Complaint" required error={errors.chiefComplaint}>
+                  <textarea rows={2} value={form.chiefComplaint} onChange={(e) => set("chiefComplaint")(e.target.value)} placeholder="Reason for the visit or certificate..." className={`${inputCls(errors.chiefComplaint)} resize-none`} />
+                </Field>
                 <Field label="Diagnosis / Medical Impression" required error={errors.diagnosis}>
                   <textarea
                     rows={2}

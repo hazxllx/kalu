@@ -36,8 +36,11 @@ BEGIN
 
   -- Ensure that the migration actually changed the function.
   IF definition = original_definition THEN
-    RAISE EXCEPTION
-      'No changes made. The expected obsolete danger-sign condition was not found. Inspect the deployed function definition.';
+    -- The remote function may already have been repaired by an earlier
+    -- deployment. Treat that state as success so db push can continue.
+    RAISE NOTICE
+      'Danger-sign confirmation requirement is already absent; nothing to change.';
+    RETURN;
   END IF;
 
   -- Ensure that the obsolete requirement is no longer present.

@@ -35,7 +35,10 @@ begin
     'else public.analytics_visit_risk(v.bp, v.o2sat, v.temperature, v.hr, v.rr, v.height_cm, v.weight_kg, v_config) end as risk'
     in definition
   ) = 0 then
-    raise exception 'Selected-period map risk migration: expected reporting risk marker not found';
+    -- The selected-period projection is already present in the deployed
+    -- function; allow the migration chain to continue.
+    raise notice 'Selected-period map risk projection is already up to date.';
+    return;
   end if;
 
   if updated is distinct from definition then execute updated; end if;

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Search, Filter, Download } from "lucide-react";
+import EmptyState from "@/components/common/EmptyState";
 
 /**
  * Canonical data table for directory/record screens.
@@ -33,6 +34,10 @@ export default function DataTable({
   rowActions = null,
   onRowClick,
   emptyMessage = "No records found.",
+  emptyState = null,
+  emptyTitle,
+  emptyDescription,
+  emptyAction = null,
   loading = false,
   stickyFirst = true,
   stickyLast = false,
@@ -74,6 +79,16 @@ export default function DataTable({
     }
     return true;
   });
+  const hasSearchOrFilter = Boolean(search.trim() || filter);
+  const renderedEmptyState = emptyState || (
+    <EmptyState
+      compact
+      kind={hasSearchOrFilter ? (filter ? "filter" : "search") : "empty"}
+      title={emptyTitle || undefined}
+      description={emptyDescription || (emptyMessage !== "No records found." ? emptyMessage : undefined)}
+      action={emptyAction}
+    />
+  );
 
   if (loading) {
     return (
@@ -160,9 +175,9 @@ export default function DataTable({
               <tr>
                 <td
                   colSpan={columns.length + (rowActions ? 1 : 0)}
-                  className="px-4 py-10 text-center text-[13px] text-[#54637A] dark:text-[#9AA7B5]"
+                  className="p-0 align-middle"
                 >
-                  {emptyMessage}
+                  {renderedEmptyState}
                 </td>
               </tr>
             ) : (
@@ -201,9 +216,7 @@ export default function DataTable({
       {mobileCards && (
         <div className="divide-y divide-[#E7ECF1] md:hidden dark:divide-[#2A3645]">
           {filteredRows.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[13px] text-[#54637A] dark:text-[#9AA7B5]">
-              {emptyMessage}
-            </p>
+            <div>{renderedEmptyState}</div>
           ) : (
             filteredRows.map((row, i) => (
               <article

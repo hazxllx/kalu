@@ -3,7 +3,7 @@ import { Search, Plus, Trash2, Pill, ChevronDown, ChevronUp } from "lucide-react
 import { medicinesApi } from "@/services/api";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { isDuplicateMedicine } from "../lib/consultationForm";
-import { PRESCRIPTION_ROUTES, PRESCRIPTION_FREQUENCIES } from "../../../../../shared/consultationClinical.js";
+import { PRESCRIPTION_ROUTES, PRESCRIPTION_FREQUENCIES, calculatePrescriptionQuantity } from "../../../../../shared/consultationClinical.js";
 
 const inputCls =
   "h-10 w-full min-w-0 rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue disabled:opacity-70 dark:border-border dark:bg-card dark:text-foreground";
@@ -18,9 +18,6 @@ const emptyMedication = (overrides = {}) => ({
   brandName: "",
   strength: "",
   dosageForm: "",
-  dose: "",
-  doseAmount: "",
-  doseUnit: "",
   route: "",
   frequency: "",
   duration: "",
@@ -81,28 +78,15 @@ export default function MedicineSelector({
   const wrapRef = useRef(null);
   const searchInputRef = useRef(null);
   const debounceRef = useRef(null);
-  const calculatedQuantitiesRef = useRef(new Map());
-
   useEffect(() => {
-    const dosesPerDay = (frequency) => ({
-      "Once daily": 1, "Twice daily": 2, "Three times daily": 3, "Every 4 hours": 6,
-      "Every 6 hours": 4, "Every 8 hours": 3, "Every 12 hours": 2,
-    })[frequency];
     medications.forEach((m, index) => {
-      const units = Number(m.doseAmount);
-      const days = Number(m.duration);
-      const perDay = dosesPerDay(m.frequency);
-      if (!Number.isFinite(units) || units <= 0 || !Number.isInteger(days) || days <= 0 || !perDay) return;
-      const calculated = String(Math.ceil(units * perDay * days));
-      const previousCalculated = calculatedQuantitiesRef.current.get(index);
-      if (!m.quantity || m.quantity === previousCalculated) {
-        calculatedQuantitiesRef.current.set(index, calculated);
-        updateAt(index, { quantity: calculated });
-      }
+      const calculated = calculatePrescriptionQuantity(m.frequency, m.duration);
+      const nextQuantity = calculated || "";
+      if (m.quantity !== nextQuantity) updateAt(index, { quantity: nextQuantity });
     });
   // The effect intentionally reacts to the structured fields only; updateAt is stable for this component's lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [medications.map((m) => `${m.doseAmount}|${m.frequency}|${m.duration}|${m.quantity}`).join(";")]);
+  }, [medications.map((m) => `${m.frequency}|${m.duration}|${m.quantity}`).join(";")]);
 
   // Debounced catalog search (matches generic name, brand name, strength, form).
   useEffect(() => {
@@ -281,7 +265,7 @@ export default function MedicineSelector({
 
               {(!collapsible || expandedMedicationIndices.has(i)) && (
                 <div id={`medicine-prescription-${i}`}>
-                  {!([m.dose, m.route, m.frequency, m.duration, m.quantity, m.instructions]
+                  {!([m.route, m.frequency, m.duration, m.quantity, m.instructions]
                     .some((field) => String(field ?? "").trim())) && (
                     <p className="mt-2 text-xs font-medium text-brand-amber" role="status">
                       Prescription not yet provided
@@ -321,12 +305,6 @@ export default function MedicineSelector({
                     {[m.strength, m.dosageForm].filter(Boolean).join(" \u00b7 ") || "No strength/form on file"}
                   </p>
                 )}
-                <label className="text-xs text-brand-gray">Dose <span className="text-brand-danger">*</span>
-                  <div className="mt-1.5 flex gap-2">
-                    <input aria-label="Dose amount" type="number" min="0.01" step="any" disabled={disabled} value={m.doseAmount ?? ""} onChange={(e) => updateAt(i, { doseAmount: e.target.value, dose: e.target.value && (m.doseUnit || m.dosageForm) ? `${e.target.value} ${m.doseUnit || m.dosageForm}` : e.target.value })} placeholder="Amount" className={inputCls} />
-                    <input aria-label="Dose unit" disabled={disabled} value={m.doseUnit ?? ""} onChange={(e) => updateAt(i, { doseUnit: e.target.value, dose: m.doseAmount ? `${m.doseAmount} ${e.target.value}` : m.dose })} placeholder={m.dosageForm || "unit"} className={inputCls} />
-                  </div>
-                </label>
                 <SearchableSelect
                   label="Route" ariaLabel="Route" value={m.route || ""} required
                   onChange={(route) => updateAt(i, { route })}
@@ -343,7 +321,7 @@ export default function MedicineSelector({
                   <input aria-label="Duration" type="number" min="1" step="1" disabled={disabled} value={m.duration} onChange={(e) => updateAt(i, { duration: e.target.value })} placeholder="Days" className={`${inputCls} mt-1.5`} />
                 </label>
                 <label className="text-xs text-brand-gray">Quantity <span className="text-brand-danger">*</span>
-                  <input aria-label="Quantity" type="number" min="1" max="10000" step="1" inputMode="numeric" disabled={disabled} value={m.quantity} onChange={(e) => updateAt(i, { quantity: e.target.value })} placeholder="Auto-calculated" className={`${inputCls} mt-1.5`} />
+                  <input aria-label="Quantity" readOnly type="number" min="1" max="10000" step="1" inputMode="numeric" disabled={disabled} value={m.quantity} placeholder="Auto-calculated" className={`${inputCls} mt-1.5 bg-brand-bg`} />
                 </label>
                 <label className="col-span-2 text-xs text-brand-gray sm:col-span-3">Instructions
                   <input aria-label="Additional instructions" disabled={disabled} value={m.instructions} onChange={(e) => updateAt(i, { instructions: e.target.value })} placeholder="Medicine-specific instructions" className={`${inputCls} mt-1.5`} />

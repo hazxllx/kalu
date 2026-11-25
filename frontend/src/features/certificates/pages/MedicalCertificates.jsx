@@ -39,6 +39,10 @@ export default function MedicalCertificates() {
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [historyOnly, setHistoryOnly] = useState(false);
+  const [issuedFrom, setIssuedFrom] = useState("");
+  const [issuedTo, setIssuedTo] = useState("");
+  const [examiner, setExaminer] = useState("");
   const [selected, setSelected] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [toast, setToast] = useState(null);
@@ -55,6 +59,10 @@ export default function MedicalCertificates() {
     const has = (value) => String(value ?? "").toLowerCase().includes(q);
     return (Array.isArray(certificates) ? certificates : [])
       .filter((c) => statusFilter === "All" || c.status === statusFilter)
+      .filter((c) => !historyOnly || c.status === "Issued")
+      .filter((c) => !issuedFrom || String(c.dateIssued || "") >= issuedFrom)
+      .filter((c) => !issuedTo || String(c.dateIssued || "") <= issuedTo)
+      .filter((c) => !examiner || String(c.medicalOfficer || c.issuedBy || "").toLowerCase().includes(examiner.trim().toLowerCase()))
       .filter(
         (c) =>
           !q ||
@@ -64,7 +72,7 @@ export default function MedicalCertificates() {
           has(c.barangay)
       )
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [certificates, query, statusFilter]);
+  }, [certificates, query, statusFilter, historyOnly, issuedFrom, issuedTo, examiner]);
 
   const statuses = ["All", ...(meta.statuses || [])];
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -72,7 +80,7 @@ export default function MedicalCertificates() {
 
   useEffect(() => {
     setPage(1);
-  }, [query, statusFilter]);
+  }, [query, statusFilter, historyOnly, issuedFrom, issuedTo, examiner]);
 
   useEffect(() => {
     setPage((current) => Math.min(current, pageCount));
@@ -93,6 +101,16 @@ export default function MedicalCertificates() {
           </button>
         )}
       />
+
+      {isReviewer && (
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          {[
+            ["Total certificates", certificates.length],
+            ["Issued this month", certificates.filter((c) => c.status === "Issued" && String(c.dateIssued || "").startsWith(new Date().toISOString().slice(0, 7))).length],
+            ["Residents with issued certificates", new Set(certificates.filter((c) => c.status === "Issued").map((c) => c.patientId)).size],
+          ].map(([label, value]) => <Card key={label} className="px-4 py-3"><p className="text-xs text-brand-gray">{label}</p><p className="mt-1 text-xl font-semibold text-brand-ink">{value}</p></Card>)}
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
@@ -118,6 +136,10 @@ export default function MedicalCertificates() {
           >
             {statuses.map((s) => <option key={s} value={s}>{s === "All" ? "All Status" : s}</option>)}
           </select>
+          {isReviewer && <button type="button" onClick={() => setHistoryOnly((value) => !value)} className={`rounded-btn border px-3 py-2.5 text-sm ${historyOnly ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-brand-ink"}`}>Issued history</button>}
+          {isReviewer && <input type="date" value={issuedFrom} onChange={(e) => setIssuedFrom(e.target.value)} aria-label="Issued from" className="rounded-btn border border-slate-200 px-3 py-2.5 text-sm" />}
+          {isReviewer && <input type="date" value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} aria-label="Issued to" className="rounded-btn border border-slate-200 px-3 py-2.5 text-sm" />}
+          {isReviewer && <input value={examiner} onChange={(e) => setExaminer(e.target.value)} placeholder="Examining personnel" className="rounded-btn border border-slate-200 px-3 py-2.5 text-sm" />}
           {statusFilter !== "All" && (
             <button onClick={() => setStatusFilter("All")} className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline">
               <X className="h-3.5 w-3.5" /> Clear

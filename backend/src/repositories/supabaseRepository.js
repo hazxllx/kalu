@@ -783,12 +783,18 @@ const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
 // explicit allow-list so the API can never leak columns added later.
 const PROFILE_ADMIN_COLUMNS =
   'id,email,full_name,first_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
+// Compatibility with deployments paused before 20261126000000, which does
+// not yet have the optional BHW first_name column.
+const PROFILE_ADMIN_COLUMNS_LEGACY =
+  'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
 const PERSONNEL_ACCOUNT_COLUMNS =
   'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_assigned_by,temporary_password_assigned_at,temporary_password_expires_at,password_changed_at,suspended_at,suspension_reason,decision_reason,credential_valid_after,version';
 const PERSONNEL_NOTIFICATION_COLUMNS =
   'id,account_id,event_type,actor_id,reason,status,attempts,next_attempt_at,last_error_code,provider_message_id,created_at,sent_at';
 const PROFILE_ADMIN_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
+const PROFILE_ADMIN_LEGACY_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS_LEGACY},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
 const PROFILE_ADMIN_SELECT = `${PROFILE_ADMIN_BASE_SELECT},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
+const PROFILE_ADMIN_LEGACY_SELECT = `${PROFILE_ADMIN_LEGACY_BASE_SELECT},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
 
 /**
  * Maps PostgreSQL SQLSTATE error codes from personnel/account RPCs (`42501`,
@@ -899,6 +905,9 @@ const isEmbeddedResourceUnavailable = (error) => {
   const message = error?.message || '';
   return code === 'PGRST200' || /could not find a relationship/i.test(message);
 };
+
+const isProfileFirstNameUnavailable = (error) =>
+  error?.code === '42703' && /first_name/i.test(error?.message || '');
 
 /** Map a profiles row to the curated admin-user shape (no secrets). */
 export const profileToAdminUser = (row) => {
@@ -1703,19 +1712,24 @@ export const supabaseRepository = {
     return data ? householdFromRow(data) : null;
   },
 
-  /** True when a household with the same head + purok + street exists in scope. */
+  /** True when a household with the same normalized head + location exists in scope. */
   async findHouseholdDuplicate({ barangayId, headName, purok, streetAddress }) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from(TABLES.households)
       .select('id, head_name')
       .eq('barangay_id', barangayId)
-      .ilike('head_name', String(headName || '').trim())
       .ilike('purok', String(purok || '').trim())
       .ilike('street_address', String(streetAddress || '').trim())
-      .limit(1);
+      .limit(100);
     throwOnError(error, 'Could not check for duplicate households');
-    return (data || [])[0] || null;
+    const normalize = (value) => String(value || '')
+      .normalize('NFKC')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLocaleLowerCase();
+    const wanted = normalize(headName);
+    return (data || []).find((row) => normalize(row.head_name) === wanted) || null;
   },
 
   /** Inserts a `household_members` row for `householdId`, mapping duplicate `(household_id, resident_id)` to HTTP 409. */
@@ -2130,8 +2144,14 @@ export const supabaseRepository = {
       return applyAccountFilters(query, { q, role, roles, status, municipalityId, barangayId, facilityId, rhuStation, personnelOnly, approvalStatus, lifecycleState });
     };
     let { data, error, count } = await read(PROFILE_ADMIN_SELECT);
+    if (error && isProfileFirstNameUnavailable(error)) {
+      ({ data, error, count } = await read(PROFILE_ADMIN_LEGACY_SELECT));
+    }
     if (error && isEmbeddedResourceUnavailable(error)) {
       ({ data, error, count } = await read(PROFILE_ADMIN_BASE_SELECT));
+      if (error && isProfileFirstNameUnavailable(error)) {
+        ({ data, error, count } = await read(PROFILE_ADMIN_LEGACY_BASE_SELECT));
+      }
     }
     throwAccountError(error, 'The account service is unavailable. Please try again shortly.');
     return { rows: (data || []).map(profileToAdminUser), total: count ?? (data || []).length };
@@ -2144,8 +2164,14 @@ export const supabaseRepository = {
       .order('created_at', { referencedTable: 'notifications', ascending: false })
       .limit(1, { referencedTable: 'notifications' }).maybeSingle();
     let { data, error } = await read(PROFILE_ADMIN_SELECT);
+    if (error && isProfileFirstNameUnavailable(error)) {
+      ({ data, error } = await read(PROFILE_ADMIN_LEGACY_SELECT));
+    }
     if (error && isEmbeddedResourceUnavailable(error)) {
       ({ data, error } = await read(PROFILE_ADMIN_BASE_SELECT));
+      if (error && isProfileFirstNameUnavailable(error)) {
+        ({ data, error } = await read(PROFILE_ADMIN_LEGACY_BASE_SELECT));
+      }
     }
     throwAccountError(error, 'The account service is unavailable. Please try again shortly.');
     return data ? profileToAdminUser(data) : null;

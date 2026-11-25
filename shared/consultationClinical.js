@@ -45,8 +45,21 @@ export const PRESCRIPTION_FREQUENCIES = Object.freeze([
   ['As prescribed', 'As prescribed'], ['As needed', 'As needed (PRN)'],
 ].map(([value, label]) => Object.freeze({ value, label })));
 
+export const PRESCRIPTION_FREQUENCY_PER_DAY = Object.freeze({
+  'Once daily': 1, 'Twice daily': 2, 'Three times daily': 3,
+  'Every 4 hours': 6, 'Every 6 hours': 4, 'Every 8 hours': 3, 'Every 12 hours': 2,
+});
+
+export function calculatePrescriptionQuantity(frequency, duration) {
+  const days = Number(duration);
+  const perDay = PRESCRIPTION_FREQUENCY_PER_DAY[frequency];
+  if (!Number.isInteger(days) || days <= 0 || !perDay) return '';
+  const quantity = perDay * days;
+  return Number.isSafeInteger(quantity) && quantity <= 10000 ? String(quantity) : '';
+}
+
 const PRESCRIPTION_LIMITS = Object.freeze({ genericName: 160, brandName: 160, strength: 80, dosageForm: 80,
-  dose: 120, doseAmount: 20, doseUnit: 40, route: 80, frequency: 120, duration: 20, quantity: 20, instructions: 400, medicineId: 160 });
+  dose: 120, route: 80, frequency: 120, duration: 20, quantity: 20, instructions: 400, medicineId: 160 });
 const prescriptionSignature = (row) => JSON.stringify(Object.keys(PRESCRIPTION_LIMITS).map((field) =>
   row?.[field] ?? (field === 'genericName' ? row?.name ?? '' : field === 'medicineId' ? null : '')));
 
@@ -63,14 +76,14 @@ export function validateConsultationMedications(medications, { previous = [] } =
     for (const key of Object.keys(row)) if (![...Object.keys(PRESCRIPTION_LIMITS), 'name', 'custom', 'source'].includes(key)) errors[`${prefix}.${key}`] = 'This prescription field is not supported.';
     for (const [field, max] of Object.entries(PRESCRIPTION_LIMITS)) {
       const value = field === 'genericName' ? row.genericName ?? row.name : row[field];
-      const numericField = ['doseAmount', 'duration', 'quantity'].includes(field);
+      const numericField = ['duration', 'quantity'].includes(field);
       if (numericField && value !== null && value !== undefined && value !== '') {
         const number = numericText(value);
-        if (!Number.isFinite(number) || (field !== 'doseAmount' && (!Number.isInteger(number) || number < 1))) errors[`${prefix}.${field}`] = 'Enter a valid positive number.';
+        if (!Number.isFinite(number) || (!Number.isInteger(number) || number < 1)) errors[`${prefix}.${field}`] = 'Enter a valid positive number.';
       } else if (!numericField && value != null && typeof value !== 'string') errors[`${prefix}.${field}`] = 'Use a text value.';
       else if (typeof value === 'string' && value.length > max) errors[`${prefix}.${field}`] = `Use ${max} characters or fewer.`;
       const empty = value === null || value === undefined || (typeof value === 'string' && !value.trim());
-      if (['genericName', 'dose', 'route', 'frequency', 'duration', 'quantity'].includes(field) && empty) errors[`${prefix}.${field}`] = 'This prescription field is required.';
+      if (['genericName', 'route', 'frequency', 'duration', 'quantity'].includes(field) && empty) errors[`${prefix}.${field}`] = 'This prescription field is required.';
     }
     if (!PRESCRIPTION_ROUTES.some(({ value }) => value === text(row.route))) errors[`${prefix}.route`] = 'Choose a predefined prescription route.';
     if (!PRESCRIPTION_FREQUENCIES.some(({ value }) => value === text(row.frequency))) errors[`${prefix}.frequency`] = 'Choose a predefined prescription frequency.';
@@ -78,8 +91,12 @@ export function validateConsultationMedications(medications, { previous = [] } =
     if (quantity !== null && (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000)) errors[`${prefix}.quantity`] = 'Quantity must be a whole number from 1 to 10000.';
     const duration = numericText(row.duration);
     if (duration !== null && (!Number.isInteger(duration) || duration < 1 || duration > 3650)) errors[`${prefix}.duration`] = 'Duration must be a whole number of days.';
-    const doseAmount = numericText(row.doseAmount);
-    if (doseAmount !== null && (!Number.isFinite(doseAmount) || doseAmount <= 0)) errors[`${prefix}.doseAmount`] = 'Enter a positive dose amount.';
+    const calculatedQuantity = calculatePrescriptionQuantity(text(row.frequency), row.duration);
+    if (!calculatedQuantity) {
+      if (text(row.frequency) && row.duration) errors[`${prefix}.quantity`] = 'Quantity cannot be calculated until frequency and duration are valid.';
+    } else if (String(row.quantity) !== calculatedQuantity) {
+      errors[`${prefix}.quantity`] = `Quantity must equal frequency × duration (${calculatedQuantity}).`;
+    }
     const catalog = Boolean(text(row.medicineId));
     if (catalog && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(row.medicineId)) errors[`${prefix}.medicineId`] = 'Select a valid catalog medicine.';
     if (row.custom !== undefined && (typeof row.custom !== 'boolean' || row.custom !== !catalog)) errors[`${prefix}.custom`] = 'Custom/catalog choice must agree with the selected medicine.';

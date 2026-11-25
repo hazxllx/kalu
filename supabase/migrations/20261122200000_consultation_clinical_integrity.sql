@@ -474,9 +474,9 @@ begin
       for medication in select value from jsonb_array_elements(new.medications) loop
         if tg_op = 'UPDATE' and exists(select 1 from jsonb_array_elements(coalesce(old.medications,'[]'::jsonb)) where value = medication) then continue; end if;
         if jsonb_typeof(medication) <> 'object' then raise exception 'A structured prescription is required' using errcode='23514'; end if;
-        foreach field in array array['genericName','dose','route','frequency','duration','quantity'] loop
+        foreach field in array array['genericName','route','frequency','duration','quantity'] loop
           if jsonb_typeof(medication->field) is distinct from 'string' or length(btrim(medication->>field)) = 0 then
-            raise exception 'Prescription requires medicine, dose, route, frequency, duration and quantity' using errcode='23514';
+            raise exception 'Prescription requires medicine, route, frequency, duration and quantity' using errcode='23514';
           end if;
         end loop;
         if medication->>'route' not in ('Oral','Sublingual','Buccal','Topical','Inhalation','Intranasal','Ophthalmic','Otic','Rectal','Vaginal','Intramuscular','Subcutaneous','Intravenous','Other / As prescribed')

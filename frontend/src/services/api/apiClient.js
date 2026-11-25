@@ -64,14 +64,31 @@ class ApiTransportError extends TypeError {
   }
 }
 
-async function getAuthIdentity() {
+let refreshSessionInFlight = null;
+
+async function getAuthIdentity({ refreshIfNeeded = true, forceRefresh = false } = {}) {
   if (!supabase) return { token: null, userId: null, expiresAt: null };
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
+  const session = data?.session;
+  const expiresSoon = session?.expires_at && session.expires_at * 1000 <= Date.now() + 60_000;
+  if (refreshIfNeeded && session?.refresh_token && (forceRefresh || expiresSoon)) {
+    if (!refreshSessionInFlight) {
+      refreshSessionInFlight = supabase.auth.refreshSession()
+        .finally(() => { refreshSessionInFlight = null; });
+    }
+    const refreshed = await refreshSessionInFlight;
+    if (refreshed.error) throw refreshed.error;
+    return {
+      token: refreshed.data?.session?.access_token || null,
+      userId: refreshed.data?.session?.user?.id || null,
+      expiresAt: refreshed.data?.session?.expires_at || null,
+    };
+  }
   return {
-    token: data?.session?.access_token || null,
-    userId: data?.session?.user?.id || null,
-    expiresAt: data?.session?.expires_at || null,
+    token: session?.access_token || null,
+    userId: session?.user?.id || null,
+    expiresAt: session?.expires_at || null,
   };
 }
 
@@ -136,7 +153,7 @@ async function request(
     const expectedOwnerId = ownerId === null ? getOfflineOwnerId() : ownerId;
     const ownerGuard = expectedOwnerId !== null ? captureOwnerGuard(expectedOwnerId) : null;
     if (ownerGuard) assertCurrentOwner(ownerGuard);
-    const { token, userId, expiresAt } = await getAuthIdentity();
+    let { token, userId, expiresAt } = await getAuthIdentity();
     if (ownerGuard) {
       assertCurrentOwner(ownerGuard);
       if (!token || userId !== expectedOwnerId || (expiresAt && expiresAt * 1000 <= Date.now())) {
@@ -180,6 +197,31 @@ async function request(
       throw new ApiTransportError(error);
     }
 
+    // A token can expire between getSession() and fetch(). Recover once using
+    // the shared refresh single-flight so concurrent requests do not rotate
+    // the same refresh token against each other. A genuine 401 is still
+    // surfaced to the caller and invalidates permissions below.
+    if (response.status === 401 && supabase) {
+      const refreshed = await getAuthIdentity({ refreshIfNeeded: true, forceRefresh: true });
+      if (refreshed.token && refreshed.token !== token) {
+        token = refreshed.token;
+        userId = refreshed.userId;
+        expiresAt = refreshed.expiresAt;
+        response = await fetch(buildUrl(path, params), {
+          method,
+          credentials: 'include',
+          headers: {
+            ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+            Authorization: `Bearer ${token}`,
+            ...headers,
+          },
+          ...(requestBody !== undefined && requestBody !== null ? { body: requestBody } : {}),
+          ...(effectiveSignal ? { signal: effectiveSignal } : {}),
+          ...rest,
+        });
+      }
+    }
+
     // Record API performance metric
     const duration = performance.now() - startTime;
     performanceMonitor.recordApiMetric(path, method, duration, response.status);
@@ -202,7 +244,15 @@ async function request(
       errorCode: isJson ? payload?.error?.code || payload?.code || null : null,
       message: isJson ? payload?.error?.message || payload?.message || null : null,
     });
-    if ((response.status === 401 || response.status === 403) && userId) {
+    // A 403 from an ordinary feature endpoint means that particular action is
+    // forbidden; it is not evidence that the user's verified role matrix is
+    // invalid. Treating every feature-level 403 as a permission-session
+    // failure cleared the entire UI for valid users (including Health
+    // Supervisors) whenever a background request was outside their scope.
+    // Only an unauthenticated response proves that the signed-in session must
+    // be discarded. The PermissionsProvider handles a 403 from its own matrix
+    // request directly and displays a retry affordance.
+    if (response.status === 401 && userId) {
       void invalidateVerifiedPermissions(userId)
         .catch((error) => console.error('[kalusagap/permissions] Could not clear rejected permissions.', error))
         .finally(() => {

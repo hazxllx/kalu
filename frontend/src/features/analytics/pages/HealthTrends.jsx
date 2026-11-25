@@ -527,15 +527,15 @@ export default function HealthTrends() {
       ) : (
         <>
           {/* Summary */}
-          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
+          <div className="grid items-stretch gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {summaryCards.map((c) => (
-              <div key={c.label} className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
-                <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${c.tone}`}>
-                  <c.icon className="w-5 h-5" strokeWidth={1.8} />
+              <div key={c.label} className="flex min-h-[132px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-3.5 shadow-card sm:p-4">
+                <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${c.tone}`}>
+                  <c.icon className="h-4 w-4" strokeWidth={1.8} />
                 </div>
-                <p className="mt-4 text-xs text-brand-gray uppercase tracking-wide">{c.label}</p>
-                <p className="mt-1 text-2xl font-stat font-bold text-brand-ink">{c.value}</p>
-                <p className="mt-1 text-xs text-brand-gray">{c.sub}</p>
+                <p className="mt-2.5 text-[11px] uppercase tracking-wide text-brand-gray">{c.label}</p>
+                <p className="mt-0.5 truncate text-xl font-stat font-bold text-brand-ink sm:text-2xl" title={String(c.value)}>{c.value}</p>
+                <p className="mt-0.5 text-[11px] leading-4 text-brand-gray">{c.sub}</p>
               </div>
             ))}
           </div>

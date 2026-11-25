@@ -447,18 +447,18 @@ export default function HouseholdRiskDetail() {
           <div className="flex flex-wrap items-center gap-2">
             {canEditWorkflow && (
               <>
-                <button onClick={() => setAction("followup")} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+                <button onClick={() => setAction("followup")} className="inline-flex h-11 items-center gap-1.5 rounded-btn bg-brand-blue px-3.5 text-sm font-medium text-white hover:bg-brand-dark">
                   <PhoneCall className="h-4 w-4" /> Record Household Follow-up
                 </button>
-                <button onClick={() => setAction("assign")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
+                <button onClick={() => setAction("assign")} className="inline-flex h-11 items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
                   <UserPlus className="h-4 w-4" /> Assign Health Worker
                 </button>
-                <button onClick={() => setAction("escalate")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card">
+                <button onClick={() => setAction("escalate")} className="inline-flex h-11 items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card">
                   <ArrowUpRight className="h-4 w-4" /> Escalate
                 </button>
               </>
             )}
-             <Link to={backPath} className="inline-flex min-h-11 items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
+             <Link to={backPath} className="inline-flex h-11 items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
                <ChevronRight className="h-4 w-4 rotate-180" /> {user?.role === "bhw" ? "Back to Households" : "Back to Risk Overview"}
             </Link>
           </div>

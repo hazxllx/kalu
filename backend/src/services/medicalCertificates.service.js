@@ -91,7 +91,12 @@ const text = (v) => String(v ?? '').trim();
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const throwOnError = (error, fallback) => {
-  if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
+  if (!error) return;
+  const message = String(error.message || '');
+  if (/schema cache|column .* does not exist|could not find the .* column/i.test(message)) {
+    throw new ApiError(503, 'The medical certificate service is temporarily unavailable while its database schema is being updated. Please try again shortly.');
+  }
+  throw Object.assign(new Error(message || fallback), { statusCode: 500, details: error });
 };
 
 const ageFrom = (birthDate) => {
@@ -125,6 +130,7 @@ const toCertificate = (row, audit = []) => {
     address: resident?.current_address || resident?.permanent_address || '',
     purpose: row.purpose || '',
     findings: row.findings || '',
+    chiefComplaint: row.chief_complaint || '',
     dateOfExamination: row.date_of_examination || '',
     medicalOfficer: row.medical_officer || '',
     signatoryPosition: row.signatory_position || '',
@@ -433,6 +439,7 @@ const sanitizeWrite = (payload = {}) => {
     row.purpose = text(payload.purpose) || CERT_PURPOSES[0];
   }
   if (payload.findings !== undefined) row.findings = text(payload.findings);
+  if (payload.chiefComplaint !== undefined) row.chief_complaint = text(payload.chiefComplaint);
   if (payload.dateOfExamination !== undefined) {
     const value = text(payload.dateOfExamination);
     if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw ApiError.unprocessable('Invalid date of examination.');
@@ -472,6 +479,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     row.status = CERT_STATUS.FOR_REVIEW;
   } else {
     if (!row.findings) throw ApiError.unprocessable('Clinical findings are required.');
+    if (!row.chief_complaint) throw ApiError.unprocessable('Chief complaint is required.');
     // The authorized signatory is resolved server-side from the preparer's
     // profile. A PHN-issued certificate records its approval and issuance at
     // creation; MHO-prepared certificates remain drafts for review.
@@ -556,6 +564,9 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
   const row = sanitizeWrite(payload);
   if (Object.prototype.hasOwnProperty.call(payload, 'findings') && !row.findings) {
     throw ApiError.unprocessable('Clinical findings are required.');
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'chiefComplaint') && !row.chief_complaint) {
+    throw ApiError.unprocessable('Chief complaint is required.');
   }
   if (Object.keys(row).length === 0) {
     const certificate = await hydrateCertificateProfiles(supabase, existing);

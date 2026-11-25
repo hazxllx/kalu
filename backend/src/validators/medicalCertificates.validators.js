@@ -38,6 +38,11 @@ const certificateFields = (input, errors, { requireClinical }) => {
     if (findings.length > LIMITS.notes) errors.findings = 'Clinical findings are too long.';
     row.findings = findings;
   }
+  if (input?.chiefComplaint !== undefined) {
+    const chiefComplaint = text(input.chiefComplaint);
+    if (chiefComplaint.length > LIMITS.notes) errors.chiefComplaint = 'Chief complaint is too long.';
+    row.chiefComplaint = chiefComplaint;
+  }
 
   if (input?.dateOfExamination !== undefined) {
     const value = text(input.dateOfExamination);

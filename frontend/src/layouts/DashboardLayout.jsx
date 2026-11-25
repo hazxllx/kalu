@@ -43,6 +43,7 @@ import { isNavigatorOnline } from "@/services/offline/connectivity";
 import { getSupervisorScope } from "@/lib/supervisorScope";
 import { authApi } from "@/services/api";
 import { personnelPasswordError, personnelPasswordRequirements } from "@/features/authentication/personnelPasswordSetup";
+import { accountDisplayName } from "@/lib/accountDisplayName";
 
 const BP_CONFIG_READ_ROLES = new Set(["admin", "mho", "phn", "health_supervisor", "rhu_personnel"]);
 const PERSONNEL_ROLES = new Set(["phn", "bhw", "health_supervisor", "rhu_personnel"]);
@@ -156,7 +157,10 @@ export default function DashboardLayout({ roleKey }) {
   }, [roleKey]);
 
   useEffect(() => {
-    if (!BP_CONFIG_READ_ROLES.has(roleKey)) return undefined;
+    // The setup modal is shown immediately after a first-time login. During
+    // that period the API intentionally rejects clinical requests, so do not
+    // surface a misleading configuration error to the user.
+    if (!BP_CONFIG_READ_ROLES.has(roleKey) || user?.mustChangePassword === true) return undefined;
     let active = true;
     const unsubscribe = subscribeBloodPressureConfig(() => {
       if (active) setBpConfigRevision((revision) => revision + 1);
@@ -174,7 +178,7 @@ export default function DashboardLayout({ roleKey }) {
       active = false;
       unsubscribe();
     };
-  }, [roleKey, user?.id, toast]);
+  }, [roleKey, user?.id, user?.mustChangePassword, toast]);
 
   // Track online/offline status for connectivity indicator
   useEffect(() => {
@@ -313,7 +317,7 @@ export default function DashboardLayout({ roleKey }) {
   }, [location.pathname, items]);
 
   // Identity always comes from the authenticated account, never a demo person.
-  const displayName = user?.name || role.name;
+  const displayName = accountDisplayName(user) || role.name;
   const displayEmail =
     user?.email ||
     (isSupervisor ? "Email unavailable" : `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`);

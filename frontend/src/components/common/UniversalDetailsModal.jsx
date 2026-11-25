@@ -108,17 +108,11 @@ export default function UniversalDetailsModal({
             ))}
           </div>
 
-          <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-brand-border bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between sm:px-6 dark:bg-card">
-            <Dialog.Close asChild>
-              <button
-                type="button"
-                className="h-10 rounded-btn border border-brand-border px-4 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:border-border dark:text-muted-foreground dark:hover:bg-hover"
-              >
-                Close
-              </button>
-            </Dialog.Close>
-            {actions && <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">{actions}</div>}
-          </footer>
+          {actions && (
+            <footer className="flex shrink-0 justify-end border-t border-brand-border bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 dark:bg-card">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">{actions}</div>
+            </footer>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

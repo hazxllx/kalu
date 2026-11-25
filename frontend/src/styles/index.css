@@ -939,6 +939,7 @@
   box-sizing: border-box;
   width: 210mm;
   min-height: 297mm;
+  max-width: 100%;
   padding: 8mm 10mm;
   background: #fff;
   color: #000;
@@ -1068,6 +1069,35 @@
   text-align: center;
 }
 .cert-doc { display: flex; flex-direction: column; }
+
+/* Municipal submission snapshot dialog: keep the persisted detail view centered
+   and bounded while retaining its existing independent body scroll. */
+div.fixed.inset-0.z-\[70\] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+}
+div.fixed.inset-0.z-\[70\] > aside {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 100%;
+  max-width: 1180px;
+  height: min(88dvh, 900px);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+div.fixed.inset-0.z-\[70\] > aside > header { padding: 0.75rem 1rem; }
+div.fixed.inset-0.z-\[70\] > aside > div { padding: 1rem; }
+@media (min-width: 640px) {
+  div.fixed.inset-0.z-\[70\] { padding: 1rem; }
+  div.fixed.inset-0.z-\[70\] > aside > header,
+  div.fixed.inset-0.z-\[70\] > aside > div { padding-left: 1.5rem; padding-right: 1.5rem; }
+}
+@media screen and (max-width: 700px) {
+  .cert-doc { min-height: 0; height: auto; }
+}
 
 /* ===========================================================================
    FHSIS M1 — official reporting form
@@ -2753,6 +2783,13 @@ a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 
 
 /* Dark login follows the split navy portal treatment while light mode retains
    its original white form surface. */
+.login-page { box-sizing: border-box; }
+.login-page .login-card { max-width: 100%; }
+@media (max-height: 720px) {
+  .login-page { justify-content: flex-start; }
+  .login-page .login-form-panel { padding-top: 1.25rem; padding-bottom: 1.25rem; }
+  .login-page .login-form-panel form { margin-top: 1rem; }
+}
 .dark .login-page .login-form-panel { background-color: #121b29; }
 .dark .login-page .login-input { border-color: #344256; }
 .dark .login-page .login-input:focus-within { border-color: #1682ed; }
@@ -3182,6 +3219,58 @@ body,
   max-width: 100%;
 }
 
+/* Compact masthead used by the household registration workflow. */
+.page-header-hero .page-header-hero-body {
+  position: relative;
+  min-height: 8rem;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 1.25rem 2rem;
+}
+
+.page-header-hero .ui-page-header-eyebrow {
+  align-items: center;
+}
+
+.page-header-hero .ui-page-header-eyebrow > div:first-child {
+  border-left: 2px solid #f5b82e;
+  padding-left: 1rem;
+}
+
+.page-header-hero .ui-page-header-meta {
+  position: absolute;
+  right: 2rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.page-header-hero .ui-page-header-main {
+  padding-left: 1rem;
+}
+
+.page-header-hero .ui-page-header-main h1 {
+  font-size: 1.75rem;
+}
+
+.page-header-hero .ui-page-header-main p {
+  margin-top: 0.25rem;
+  font-size: 0.9375rem;
+}
+
+@media (max-width: 767px) {
+  .page-header-hero .page-header-hero-body {
+    min-height: 0;
+    padding: 1.25rem 1rem;
+  }
+
+  .page-header-hero .ui-page-header-meta {
+    position: static;
+    transform: none;
+    margin-top: 0.75rem;
+    justify-content: flex-end;
+  }
+}
+
 .ui-page-header-main,
 .ui-page-header-eyebrow,
 .ui-page-header-actions {
@@ -3429,5 +3518,58 @@ body:has([aria-modal="true"]) {
 
   [role="dialog"] footer :is(button, a) {
     min-height: 2.75rem;
+  }
+}
+/* Compact two-column household profiling layout. The form remains one column
+   below tablet widths so controls never force horizontal scrolling. */
+.household-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (min-width: 768px) {
+  .household-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.875rem;
+  }
+}
+
+.household-section-members,
+.household-section-risk,
+.household-section-actions {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .household-form-grid {
+    gap: 0.625rem;
+  }
+
+  .household-form-grid .p-3 {
+    padding: 0.75rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .household-form-grid {
+    gap: 0.625rem;
+  }
+}
+
+/* Keep the two respondent status groups visually distinct without adding
+   height to the whole row. */
+.respondent-status-secondary {
+  border-top: 1px solid var(--brand-border, #d7e0ea);
+  padding-top: 0.75rem;
+}
+
+@media (min-width: 768px) {
+  .respondent-status-secondary {
+    border-top: 0;
+    border-left: 1px solid var(--brand-border, #d7e0ea);
+    padding-top: 0;
+    padding-left: 1rem;
   }
 }

@@ -23,6 +23,7 @@ import {
   KeySquare, FileText, Copy, ChevronDown,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { accountDisplayName } from "@/lib/accountDisplayName";
 
 const ROLE_LABELS = {
   admin: "System Administrator",
@@ -1107,7 +1108,7 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
   const fixedRole = currentUser?.role === "health_supervisor" ? "bhw" : null;
   const fixedMunicipalityId = isDelegate ? currentUser?.municipalityId || null : null;
   const fixedBarangayId = currentUser?.role === "health_supervisor" ? currentUser?.barangayId || null : null;
-  const canCreate = isDelegate || (isAdmin && can("accounts.create"));
+  const canCreate = (isDelegate || isAdmin) && can("accounts.create");
   const canEdit = isDelegate || (isAdmin && can("accounts.edit"));
   const canManageRoles = isAdmin && can("accounts.roles.manage");
   const canApprove = isAdmin && can("accounts.personnel.approve");
@@ -1196,6 +1197,7 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
       if (sequence !== requestSequence.current) return;
       setUsers((result?.rows || []).map((account) => ({
         ...account,
+        name: accountDisplayName(account),
         roleId: account.role,
         role: roleLabel(account.role),
         statusId: account.status,

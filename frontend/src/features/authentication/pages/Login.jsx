@@ -84,7 +84,7 @@ export default function Login() {
     });
 
   return (
-    <div className="login-page relative flex min-h-dvh w-full flex-col items-center justify-center gov-navy-panel px-4 py-5 sm:py-7">
+    <div className="login-page relative flex min-h-dvh w-full flex-col items-center justify-center overflow-x-hidden overflow-y-auto gov-navy-panel px-3 py-4 sm:px-4 sm:py-5">
       <div className="pointer-events-none absolute inset-0 gov-guilloche opacity-50" aria-hidden="true" />
       <div
         className="pointer-events-none absolute inset-0"
@@ -96,12 +96,12 @@ export default function Login() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="relative flex w-full max-w-5xl flex-col"
+        className="relative flex w-full min-w-0 max-w-5xl flex-col"
       >
         {/* Branding above the card */}
-        <div className="mb-3 flex items-center justify-center gap-3 text-center">
+        <div className="mb-3 flex min-w-0 items-center justify-center gap-3 text-center">
           <GovSeal height={52} eager />
-          <div className="text-left">
+          <div className="min-w-0 text-left">
             <p className="font-display text-[20px] font-bold leading-tight tracking-[0.02em] text-white">KALUSAGAP</p>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">Community Health System</p>
           </div>

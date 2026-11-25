@@ -73,6 +73,9 @@ export function personnelActions(account, { isAdmin = false, isDelegate = false,
 }
 
 export function personnelActionMessage(action, account) {
+  if (action === "create" && account?.notification?.status === "sent" && account?.setupRequired === true) {
+    return "Account created. Awaiting password setup. Email accepted by the mail server; inbox delivery isn't confirmed.";
+  }
   if (action === "invite" && account?.notification?.status === "sent") {
     return "Password setup link has been successfully sent to the registered email address.";
   }

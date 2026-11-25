@@ -487,7 +487,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                               <InfoItem label="Quantity" value={m.quantity} fallback="Not provided" />
                               <InfoItem label="Special Instructions" value={m.instructions} fallback="Not provided" />
                             </div>
-                            {![m.dose, m.frequency, m.route, m.duration, m.instructions].some(hasValue) && <p className="mt-2 text-xs text-brand-gray">Prescription details have not yet been provided.</p>}
+                            {![m.strength, m.dosageForm, m.frequency, m.route, m.duration, m.instructions].some(hasValue) && <p className="mt-2 text-xs text-brand-gray">Prescription details have not yet been provided.</p>}
                           </li>
                         ))}
                       </ul>

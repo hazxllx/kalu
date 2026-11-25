@@ -8,7 +8,7 @@ export function validateHouseholdField(field, value, { member = false, adding = 
     const date = /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T00:00:00Z`) : null;
     if (!date || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text) return 'Enter a valid calendar date.';
   }
-  if (field === 'contact' && text && !/^(?:\+63|0)9\d{9}$/.test(text.replace(/[\s()\-.]/g, ''))) return 'Enter a valid PH mobile number (09 or +639).';
+  if (field === 'contact' && text && !/^(?:(?:\+63|0)9\d{9}|(?:\+63|0)(?:2|3|4|5|6|7|8)\d{7,8})$/.test(text.replace(/[\s()\-.]/g, ''))) return 'Enter a valid Philippine mobile or landline number.';
   if (text && ['families', 'monthlyIncome', 'age'].includes(field)) {
     const n = Number(value);
     if (!Number.isFinite(n)) return 'Enter a valid number.';
@@ -19,6 +19,13 @@ export function validateHouseholdField(field, value, { member = false, adding = 
   const limits = { headName: 120, name: 120, purok: 60, streetAddress: 200, respondentFirst: 120, respondentLast: 120, respondentMaiden: 120, philhealthId: 120, nhts: 120, ip: 120 };
   if (limits[field] && text.length > limits[field]) return `Use ${limits[field]} characters or fewer.`;
   return '';
+}
+
+export function validateHouseholdOption(field, value, options = []) {
+  const text = String(value ?? '').trim();
+  if (!text || !options.length) return '';
+  const values = options.map((option) => typeof option === 'object' ? option.value : option);
+  return values.includes(value) ? '' : 'Select a valid option.';
 }
 
 const technical = /postgres|supabase|sql|constraint|stack|relation[ "]|column|schema|ECONN|TypeError|\/src\/|\\src\\/i;

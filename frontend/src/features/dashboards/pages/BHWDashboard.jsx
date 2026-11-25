@@ -15,7 +15,7 @@ import {
   bhwDashboardGreeting,
   bhwProfileFirstName,
 } from "../lib/bhwDashboardData";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 function formatDate(value) {
   if (!value) return "";
@@ -93,7 +93,6 @@ export default function BHWDashboard() {
         title={`${bhwDashboardGreeting(localTime)}${firstName ? `, ${firstName}` : ""}!`}
         subtitle="Household conditions and risk classification across the barangay."
         meta={assignedBarangay ? <span className="break-words text-xs text-white/75">{`Assigned barangay: ${assignedBarangay}`}</span> : null}
-        action={<Link to="/app/bhw/households/new" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark md:w-auto"><Plus className="h-4 w-4" /> Add Household</Link>}
       />
       <KpiHorizontal count={4} className="mb-6">
          <KpiHorizontal.Item label="HOUSEHOLDS IN BARANGAY" value={loading ? "…" : monitoring?.totalHouseholds ?? households.length} tone="blue" description="Total registered" />

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Eye, Search } from "lucide-react";
 import DataTable from "@/components/tables/DataTable";
+import EmptyState from "@/components/common/EmptyState";
 
 /**
  * M1IndicatorTable — Institutional data table for M1 health indicators.
@@ -81,8 +82,8 @@ export default function M1IndicatorTable({
 
   if (!rows || rows.length === 0) {
     return (
-      <div className="rounded-md border border-brand-border bg-white p-6 text-center">
-        <p className="text-xs text-brand-gray">{emptyText}</p>
+      <div className="rounded-md border border-brand-border bg-white">
+        <EmptyState compact title="No M1 indicators" description={emptyText} />
       </div>
     );
   }
@@ -128,16 +129,19 @@ export default function M1IndicatorTable({
       </div>
 
       {filteredRows.length === 0 ? (
-        <div className="p-8 text-center text-xs text-brand-gray">
-          No indicators match &ldquo;{searchQuery}&rdquo;
-          <button
+        <EmptyState
+          compact
+          kind="search"
+          title="No matching M1 indicators"
+          description={`No indicators match “${searchQuery}”.`}
+          action={<button
             type="button"
             onClick={() => setSearchQuery("")}
-            className="ml-2 font-medium text-brand-blue hover:underline"
+            className="text-xs font-medium text-brand-blue hover:underline"
           >
             Reset filter
-          </button>
-        </div>
+          </button>}
+        />
       ) : (
         <DataTable
           rows={filteredRows}

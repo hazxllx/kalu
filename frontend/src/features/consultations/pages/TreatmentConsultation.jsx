@@ -1709,7 +1709,7 @@ export default function TreatmentConsultation() {
                       </div>
                       <div className="min-w-0">
                         <p className="break-words font-medium text-brand-ink" title={row.resident?.name}>{row.resident?.name || "Name not recorded"}</p>
-                        <p className="text-xs text-brand-gray">{row.resident?.barangay || ""}</p>
+                        <p className="text-xs text-brand-gray">{[row.resident?.healthRecordNo || row.resident?.health_record_no, row.resident?.barangay].filter(Boolean).join(" · ")}</p>
                       </div>
                     </div>
                   );
@@ -1755,7 +1755,7 @@ export default function TreatmentConsultation() {
                             {row.resident?.name || "Name not recorded"}
                           </p>
                           <p className="mt-0.5 break-words text-xs leading-4 text-brand-gray">
-                            {row.resident?.barangay || "Barangay not recorded"}
+                            {[row.resident?.healthRecordNo || row.resident?.health_record_no, row.resident?.barangay || "Barangay not recorded"].filter(Boolean).join(" · ")}
                           </p>
                         </div>
                         <div className="shrink-0">{renderRecordActions(row, "card")}</div>

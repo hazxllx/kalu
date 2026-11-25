@@ -65,6 +65,25 @@ const adminOrPersonnelManager = (options = null) => (req, res, next) => {
 
 const administratorOnly = (options = {}) => authorize(FEATURE_ROLES.users, options);
 
+// Delegated personnel managers retain their strict role/scope rules in the
+// service and RPCs, but must still hold the configurable create permission.
+// Administrators additionally require their administrative permission set.
+const createPersonnelAuthorizer = (req, res, next) => {
+  if (req.user?.role !== 'admin') {
+    return authorize(FEATURE_ROLES.personnelManagement, { permission: 'accounts.create' })(req, res, next);
+  }
+  return adminOrPersonnelManager({
+    allPermissions: (request) => {
+      const input = request.body?.user || request.body || {};
+      const permissions = ['accounts.create', 'accounts.roles.manage'];
+      if (input.approvalStatus !== 'pending') permissions.push('accounts.personnel.approve');
+      if (typeof input.temporaryPassword === 'string') permissions.push('accounts.personnel.approve');
+      if (input.activate ?? (input.status !== 'disabled')) permissions.push('accounts.deactivate');
+      return permissions;
+    },
+  })(req, res, next);
+};
+
 // Read & reference endpoints (`accounts.view`):
 // - GET /options : Assignment dropdown metadata (roles, municipalities, barangays, facilities, stations).
 // - GET /summary : Filtered/global account status counters (`userQueryValidator`).
@@ -80,16 +99,7 @@ router.get('/', adminOrPersonnelManager({ permission: 'accounts.view' }), valida
 router.post(
   '/',
   validate(createUserValidator),
-  adminOrPersonnelManager({
-    allPermissions: (req) => {
-      const input = req.body?.user || req.body || {};
-      const permissions = ['accounts.create', 'accounts.roles.manage'];
-      if (input.approvalStatus !== 'pending') permissions.push('accounts.personnel.approve');
-      if (typeof input.temporaryPassword === 'string') permissions.push('accounts.personnel.approve');
-      if (input.activate ?? (input.status !== 'disabled')) permissions.push('accounts.deactivate');
-      return permissions;
-    },
-  }),
+  createPersonnelAuthorizer,
   asyncHandler(controller.createUser),
 );
 

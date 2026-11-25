@@ -180,7 +180,7 @@ begin
   for v_prescription in select value from jsonb_array_elements(coalesce(new.medications,'[]'::jsonb)) loop
     -- An untouched historical prescription is not a new prescribing act.
     if tg_op='UPDATE' and exists(select 1 from jsonb_array_elements(coalesce(old.medications,'[]'::jsonb)) item where item=v_prescription) then continue; end if;
-    for v_field in select unnest(array['genericName','dose','route','frequency','duration','quantity']) loop
+    for v_field in select unnest(array['genericName','route','frequency','duration','quantity']) loop
       if jsonb_typeof(v_prescription->v_field) is distinct from 'string' or length(trim(v_prescription->>v_field))=0 then
         raise exception 'Required prescription field: %',v_field using errcode='23514';
       end if;

@@ -69,6 +69,7 @@ export default function PageHeader({
   variant = "default",
   dense = false,
   management = false,
+  hero = false,
 }) {
   const isReport = variant === "report";
   const hasCrumbs = Array.isArray(crumbs) && crumbs.length > 0;
@@ -78,13 +79,13 @@ export default function PageHeader({
   return (
     <section
       aria-label={typeof title === "string" ? `${title} header` : "Page header"}
-      className={`ui-page-header ${management ? "admin-management-header mb-4 min-h-[140px]" : dense ? "mb-4" : "mb-6"} overflow-hidden rounded-lg border border-brand-deep bg-brand-dark text-white shadow-card`}
+      className={`ui-page-header ${management ? "admin-management-header mb-4 min-h-[140px]" : dense ? "mb-4" : "mb-6"} overflow-hidden rounded-lg border border-brand-deep bg-brand-dark text-white shadow-card ${hero ? "page-header-hero" : ""}`}
     >
       {/* Hairline gold rule — the official accent token, no gradient. */}
       <div aria-hidden="true" className="ui-page-header-rule h-0.5 w-full bg-brand-gold/70" />
-      <div className={`ui-page-header-body flex flex-col ${management ? "min-h-[138px] justify-center gap-2 px-5 py-5 md:px-6" : dense ? "gap-3 px-5 py-4 md:px-7" : "gap-4 px-5 py-6 md:px-7"}`}>
+      <div className={`ui-page-header-body flex flex-col ${management ? "min-h-[138px] justify-center gap-2 px-5 py-5 md:px-6" : dense ? "gap-3 px-5 py-4 md:px-7" : "gap-4 px-5 py-6 md:px-7"} ${hero ? "page-header-hero-body" : ""}`}>
         {showEyebrowRow && (
-          <div className="ui-page-header-eyebrow flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="ui-page-header-eyebrow flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
               {leadingAction}
               {isReport && (
@@ -133,7 +134,7 @@ export default function PageHeader({
               ) : null}
             </div>
              {meta && (
-               <div className="ui-page-header-meta flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">{meta}</div>
+               <div className="ui-page-header-meta flex min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">{meta}</div>
             )}
           </div>
         )}

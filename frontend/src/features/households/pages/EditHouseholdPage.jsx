@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { usePermissions } from '@/context/PermissionsContext';
 import PageHeader from '@/components/common/PageHeader';
 import HouseholdFeedback from '../components/HouseholdFeedback';
-import { validateHouseholdField, householdFieldErrors, safeHouseholdError } from '../lib/householdFeedback';
+import { validateHouseholdField, validateHouseholdOption, householdFieldErrors, safeHouseholdError } from '../lib/householdFeedback';
 import { householdsApi } from '@/services/api/householdsApi';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
 import { getHouseholdOffline, updateHouseholdOffline } from '@/services/offline/householdOfflineService';
@@ -45,7 +45,9 @@ const SECTIONS = [
     ['respondentFirst', 'First name'], ['respondentLast', 'Last name'], ['respondentMaiden', "Mother's maiden name"],
   ] },
   { id: 'philhealth', title: 'HH Head PhilHealth Information', fields: [
-    ['nhts', 'NHTS status'], ['ip', 'Indigenous People status'], ['philhealthMember', 'PhilHealth member?', 'boolean'],
+    ['nhts', 'NHTS status', 'radio', ['NHTS-4Ps', 'NHTS Non-4Ps', 'Non-NHTS']],
+    ['ip', 'Indigenous People status', 'radio', ['IP', 'Non-IP']],
+    ['philhealthMember', 'PhilHealth member?', 'radio', ['No', 'Yes']],
     ['philhealthId', 'PhilHealth ID'], ['philhealthCategory', 'PhilHealth category', 'select', PHILHEALTH_CATEGORIES],
   ] },
   { id: 'water', title: 'Water Source and Sanitation Details', fields: [
@@ -122,6 +124,22 @@ function InputField({ label, type = 'text', value, options = [], onChange, contr
       ))}</div>
     </fieldset>;
   }
+  if (type === 'radio') {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    const booleanRadio = options.length === 2 && options.includes('No') && options.includes('Yes');
+    const selected = booleanRadio
+      ? (value === true || ['true', 'yes', '1'].includes(normalized) ? 'Yes' : value === false || ['false', 'no', '0'].includes(normalized) ? 'No' : value)
+      : value;
+    return <fieldset className="min-w-0"><legend className="mb-1.5 text-sm font-medium text-brand-ink">{label}</legend>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">{options.map((option) => (
+        <label key={option} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-brand-ink">
+          <input {...controlProps} type="radio" name={`household-${label}`} checked={selected === option}
+            onChange={() => onChange(booleanRadio ? option === 'Yes' : option)} className="h-4 w-4 accent-brand-blue" />
+          {option}
+        </label>
+      ))}</div>
+    </fieldset>;
+  }
   if (type === 'multi') {
     const selected = Array.isArray(value) ? value : [];
     return <fieldset className="space-y-2"><legend className="text-sm font-medium text-brand-ink">{label}</legend>
@@ -173,6 +191,7 @@ export default function EditHouseholdPage() {
   const [noticeTone, setNoticeTone] = useState('success');
   const [feedbackScope, setFeedbackScope] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
+  const [validationSummary, setValidationSummary] = useState([]);
   const submitLock = useRef(false);
   const dismissNotice = useCallback(() => setNotice(''), []);
   const setFieldError = (key, message) => {
@@ -220,6 +239,7 @@ export default function EditHouseholdPage() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [householdId, user?.id]);
+
 
   useEffect(() => {
     const query = residentSearch.query.trim();
@@ -295,27 +315,7 @@ export default function EditHouseholdPage() {
     finally { submitLock.current = false; setSavingSection(''); }
   };
 
-  const saveMember = async (member) => {
-    if (submitLock.current) return;
-    beginFeedback(`member-${member.id}`);
-    if (!validateFields(`member-${member.id}`, MEMBER_FIELDS, member)) return;
-    submitLock.current = true;
-
-    setSavingMember(member.id); setError(''); setNotice('');
-    try {
-      const response = await householdsApi.updateMember(householdId, member.id, member);
-      const updatedMember = { ...member, ...(response?.member || {}) };
-      setMembers((current) => current.map((item) => item.id === member.id ? updatedMember : item));
-      setSavedMembers((current) => current.map((item) => item.id === member.id ? updatedMember : item));
-      let historyNotice = '';
-      try { await saveVisitHistory([MEMBER_SECTION]); }
-      catch { historyNotice = 'Member saved; visit history was not recorded.'; }
-      setNoticeTone(historyNotice ? 'warning' : 'success');
-      setNotice(historyNotice || 'Member saved.');
-      setCollapsedMembers((current) => new Set(current).add(member.id));
-    } catch (saveError) { fail(saveError, `member-${member.id}`, MEMBER_FIELDS); }
-    finally { submitLock.current = false; setSavingMember(''); }
-  };
+  const saveMember = async () => { /* Member changes are staged for the unified household save. */ };
 
   const chooseResident = (resident) => {
     const name = [resident.firstName, resident.middleName, resident.lastName, resident.suffix]
@@ -350,32 +350,12 @@ export default function EditHouseholdPage() {
     submitLock.current = true;
     setAddingMember(true); setError(''); setNotice('');
     try {
-      const response = await householdsApi.addMember(householdId, {
-        ...newMember,
-        name: newMember.name.trim(),
-        age: newMember.age === '' ? null : Number(newMember.age),
-        residentId: linkedResidentId || undefined,
-      });
-      let refreshWarning = '';
-      const household = response?.household;
-      if (household?.members) {
-        setMembers(household.members.map((member) => ({ ...member })));
-        setSavedMembers(household.members.map((member) => ({ ...member })));
-      } else {
-        try {
-        const result = await householdsApi.get(householdId);
-        const refreshed = result?.household?.members || [];
-        setMembers(refreshed.map((member) => ({ ...member })));
-        setSavedMembers(refreshed.map((member) => ({ ...member })));
-        } catch { refreshWarning = 'Member added. Reload to see the updated roster.'; }
-      }
+      const stagedMember = { ...newMember, name: newMember.name.trim(), age: newMember.age === '' ? null : Number(newMember.age), residentId: linkedResidentId || undefined, _pending: true, _clientId: newVisitRequestId() };
+      setMembers((current) => [...current, stagedMember]);
       setShowAddMember(false);
       resetNewMember();
-      let historyNotice = '';
-      try { await saveVisitHistory([MEMBER_SECTION]); }
-      catch { historyNotice = 'Member added; visit history was not recorded.'; }
-      setNoticeTone(historyNotice || refreshWarning ? 'warning' : 'success');
-      setNotice([refreshWarning, historyNotice].filter(Boolean).join(' ') || 'Member added.');
+      setNoticeTone('success');
+      setNotice('Member added to pending changes. Save the household profile to persist it.');
     } catch (addError) {
       fail(addError, 'newMember', MEMBER_FIELDS);
     } finally {
@@ -403,8 +383,105 @@ export default function EditHouseholdPage() {
     JSON.stringify(form[field] ?? null) !== JSON.stringify(savedForm?.[field] ?? null)));
   const memberChangesPending = members.some((member) => {
     const saved = savedMembers.find((item) => item.id === member.id);
-    return MEMBER_FIELDS.some(([field]) => JSON.stringify(member[field] ?? null) !== JSON.stringify(saved?.[field] ?? null));
+    return member._pending || MEMBER_FIELDS.some(([field]) => JSON.stringify(member[field] ?? null) !== JSON.stringify(saved?.[field] ?? null));
   });
+  const hasUnsavedChanges = Boolean(form) && (sectionChangesPending || memberChangesPending || showAddMember);
+  useEffect(() => {
+    const warn = (event) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault(); event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasUnsavedChanges]);
+  const saveAllChanges = async () => {
+    if (submitLock.current) return;
+    beginFeedback('all-household');
+    const errors = {};
+    const summary = [];
+    const addError = (scope, field, section, label, message) => { if (!message) return; const key = `${scope}.${field}`; errors[key] = message; summary.push({ key, section, label, message, scope }); };
+    const optionFields = new Map(SECTIONS.flatMap((section) => section.fields.map(([field, , type, options]) => [field, options || []])));
+    SECTIONS.forEach((section) => section.fields.forEach(([field, label]) => {
+      let message = validateHouseholdField(field, form[field], { member: false });
+      message ||= validateHouseholdOption(field, form[field], optionFields.get(field));
+      if (field === 'philhealthMember' && !['Yes', 'No', true, false, 'yes', 'no'].includes(form[field])) message = 'Select Yes or No.';
+      if (field === 'nhts' && form[field] && !['NHTS-4Ps', 'NHTS Non-4Ps', 'Non-NHTS'].includes(form[field])) message = 'Select a valid NHTS status.';
+      if (field === 'ip' && form[field] && !['IP', 'Non-IP'].includes(form[field])) message = 'Select a valid Indigenous People status.';
+      if (field === 'philhealthCategory' && (form.philhealthMember === true || form.philhealthMember === 'Yes') && !String(form[field] || '').trim()) message = 'PhilHealth category is required for members.';
+      addError('household', field, section.title, label, message);
+    }));
+    const seenMembers = new Set();
+    members.forEach((member, index) => {
+      const scope = `member-${member.id || index}`;
+      const duplicateKey = `${String(member.name || '').trim().toLowerCase()}|${member.birthday || ''}`;
+      if (duplicateKey !== '|' && seenMembers.has(duplicateKey)) addError(scope, 'name', MEMBER_SECTION, `Member ${index + 1} name`, 'This member duplicates another household member.');
+      seenMembers.add(duplicateKey);
+      MEMBER_FIELDS.forEach(([field, label, , options]) => {
+        let message = validateHouseholdField(field, member[field], { member: true });
+        message ||= validateHouseholdOption(field, member[field], options || []);
+        if (['relationship', 'sex'].includes(field) && !String(member[field] || '').trim()) message = 'This field is required.';
+        addError(scope, field, MEMBER_SECTION, `Member ${index + 1}: ${label}`, message);
+      });
+    });
+    if (showAddMember) {
+      MEMBER_FIELDS.forEach(([field, label, , options]) => {
+        let message = validateHouseholdField(field, newMember[field], { member: true, adding: true });
+        message ||= validateHouseholdOption(field, newMember[field], options || []);
+        addError('newMember', field, MEMBER_SECTION, `New member: ${label}`, message);
+      });
+    }
+    setFieldErrors((current) => ({ ...Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith('household.') && !key.startsWith('member-') && !key.startsWith('newMember.'))), ...Object.fromEntries(Object.entries(errors)) }));
+    setValidationSummary(summary);
+    if (summary.length) {
+      setError('Please review your household information.');
+      setCollapsedSections((current) => { const next = new Set(current); summary.forEach((item) => { const section = SECTIONS.find((entry) => entry.title === item.section); if (section) next.delete(section.id); }); return next; });
+      const first = summary[0];
+      setCollapsedMembers((current) => { const next = new Set(current); if (first.scope.startsWith('member-')) next.delete(first.scope.slice(7)); return next; });
+      setTimeout(() => document.querySelector(`[data-feedback-scope="${first.scope}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+      return;
+    }
+    if (!canAny(['households.create', 'households.verify'])) return setError('You do not have permission to edit this household.');
+    submitLock.current = true;
+    setSavingSection('all-household'); setError(''); setNotice('');
+    try {
+      const payload = Object.fromEntries(SECTIONS.flatMap((section) => section.fields.map(([field]) => [field, form[field] ?? (field === 'treatmentMethods' ? [] : '')])));
+      if (payload.families !== '') payload.families = Number(payload.families);
+      if (payload.monthlyIncome === '') payload.monthlyIncome = null;
+      const result = await updateHouseholdOffline({ ownerId: user?.id, serverId: householdId, payload, baseRevision: revision });
+      if (result.queued) {
+        const queuedValues = Object.fromEntries(SECTIONS.flatMap((section) => section.fields.map(([field]) => [field, payload[field]])));
+        setRevision(result?.household?.revision ?? revision);
+        setForm((current) => ({ ...current, ...queuedValues }));
+        setSavedForm((current) => ({ ...current, ...queuedValues }));
+        setNoticeTone('warning'); setNotice('Household changes saved on this device. Member changes will sync when a connection is available.');
+        return;
+      }
+      const persistedMembers = [];
+      for (const member of members) {
+        const memberPayload = Object.fromEntries(MEMBER_FIELDS.map(([field]) => [field, member[field] ?? (field === 'isPwd' ? false : '')]));
+        if (member._pending) {
+          const response = await householdsApi.addMember(householdId, { ...memberPayload, residentId: member.residentId });
+          persistedMembers.push({ ...member, ...(response?.member || {}), _pending: false });
+        } else if (member.id && MEMBER_FIELDS.some(([field]) => JSON.stringify(member[field] ?? null) !== JSON.stringify(savedMembers.find((item) => item.id === member.id)?.[field] ?? null))) {
+          const response = await householdsApi.updateMember(householdId, member.id, memberPayload);
+          persistedMembers.push({ ...member, ...(response?.member || {}), _pending: false });
+        } else persistedMembers.push(member);
+      }
+      setMembers(persistedMembers);
+      setSavedMembers(persistedMembers.map((member) => ({ ...member })));
+      const savedValues = Object.fromEntries(SECTIONS.flatMap((section) => section.fields.map(([field]) => [field, result.household?.[field] ?? payload[field]])));
+      setRevision(result?.household?.revision ?? revision);
+      setForm((current) => ({ ...current, ...savedValues }));
+      setSavedForm((current) => ({ ...current, ...savedValues }));
+      let historyNotice = '';
+      try { await saveVisitHistory([...SECTIONS.map((section) => section.title), ...(memberChangesPending ? [MEMBER_SECTION] : [])]); } catch { historyNotice = 'Profile saved; visit history was not recorded.'; }
+      setValidationSummary([]);
+      setNoticeTone(historyNotice ? 'warning' : 'success');
+      setNotice(historyNotice || 'All household changes saved successfully.');
+      setCollapsedSections(new Set(SECTIONS.map((section) => section.id)));
+    } catch (saveError) { fail(saveError, 'household', SECTIONS.flatMap((section) => section.fields)); }
+    finally { submitLock.current = false; setSavingSection(''); }
+  };
   const resubmitHousehold = async () => {
     if (submitLock.current) return;
     beginFeedback('resubmit');
@@ -455,7 +532,7 @@ export default function EditHouseholdPage() {
   if (user?.role !== 'bhw') return <FeedbackContext.Provider value={{ errors: fieldErrors, setFieldError, clearNotice: dismissNotice, pending: Boolean(savingSection || savingMember || addingMember || recordingVisit) }}><div className="mx-auto w-full max-w-6xl space-y-4 [overflow-wrap:anywhere]">
     <PageHeader
       dense
-      action={<button type="button" onClick={() => navigate(householdsPath)} className="inline-flex min-h-11 items-center gap-2 rounded px-2 text-xs font-medium text-white/90 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"><ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to households</button>}
+      action={<div className="flex flex-wrap items-center justify-end gap-2"><button type="button" disabled={Boolean(savingSection || savingMember || !hasUnsavedChanges)} onClick={saveAllChanges} className="inline-flex min-h-11 items-center gap-2 rounded-btn bg-white px-3 py-2 text-xs font-semibold text-brand-blue hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"><Save className="h-4 w-4" />{savingSection === 'all-household' ? 'Saving Changes...' : 'Save Changes'}</button><button type="button" onClick={() => navigate(householdsPath)} className="inline-flex min-h-11 items-center gap-2 rounded px-2 text-xs font-medium text-white/90 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"><ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to households</button></div>}
       title="Household Profile" subtitle="Review and update the household's registered information." meta={<span className="text-xs text-white/75">Household {householdId}</span>} />
     <Card className="p-5 sm:p-7"><form noValidate onSubmit={saveLegacy} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">{LEGACY_FIELDS.map(([field, label, type]) => <Field key={field} field={field} label={label} type={type} value={form[field] ?? ''} onChange={(value) => updateField(field, value)} />)}</div>
@@ -471,6 +548,11 @@ export default function EditHouseholdPage() {
       action={<button type="button" onClick={() => navigate(householdsPath)} className="inline-flex min-h-11 items-center gap-2 rounded px-2 text-xs font-medium text-white/90 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"><ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to households</button>}
       title="Household Profile" subtitle="Review and update the household's registered information." meta={<span className="text-xs text-white/75">{`Household ${householdId}${syncStatus.online ? '' : ' · Working offline'}`}</span>} />
     {feedbackScope === '' && error && <HouseholdFeedback message={error} tone="error" />}
+    {validationSummary.length > 0 && <Card className="border-red-200 bg-red-50 p-4 sm:p-5" role="alert" aria-labelledby="validation-summary-title">
+      <h2 id="validation-summary-title" className="text-sm font-semibold text-red-900">Please review your household information.</h2>
+      <p className="mt-1 text-sm text-red-800">There {validationSummary.length === 1 ? 'is' : 'are'} {validationSummary.length} item{validationSummary.length === 1 ? '' : 's'} that need{validationSummary.length === 1 ? 's' : ''} your attention:</p>
+      <ul className="mt-2 space-y-1 text-sm text-red-800">{validationSummary.map((item) => <li key={item.key}><button type="button" className="text-left underline decoration-red-300 underline-offset-2 hover:text-red-950" onClick={() => { const section = SECTIONS.find((entry) => entry.title === item.section); if (section) setCollapsedSections((current) => { const next = new Set(current); next.delete(section.id); return next; }); if (item.scope.startsWith('member-')) setCollapsedMembers((current) => { const next = new Set(current); next.delete(item.scope.slice(7)); return next; }); setTimeout(() => document.querySelector(`[data-feedback-scope="${item.scope}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0); }}>{item.section}: {item.label} — {item.message}</button></li>)}</ul>
+    </Card>}
     {feedback('resubmit')}
     {user?.role === 'bhw' && form.verificationStatus === 'Returned for Correction' && <Card className="border-amber-300 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10 sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -507,19 +589,17 @@ export default function EditHouseholdPage() {
             onClick={() => { setNotice(''); setCollapsedSections((current) => { const next = new Set(current); if (next.has(section.id)) next.delete(section.id); else next.add(section.id); return next; }); }}
             className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 text-left text-sm font-semibold text-brand-ink hover:text-brand-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue">
             <span id={`section-heading-${section.id}`}>{({ household: 'Household information', details: 'Household details', respondent: 'Respondent information', philhealth: 'Household head PhilHealth', water: 'Water and sanitation' })[section.id]}
-              {sectionDirty && <span className="ml-2 text-xs font-normal text-amber-700">Unsaved changes</span>}
+              {sectionDirty && section.id !== 'philhealth' && <span className="ml-2 text-xs font-normal text-amber-700">Unsaved changes</span>}
             </span>
             <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-brand-gray transition-transform ${collapsed ? '' : 'rotate-180'}`} />
           </button>
-          {sectionDirty && <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={Boolean(savingSection)} onClick={() => { clearFieldFeedback('household', section.fields); setForm((current) => ({ ...current, ...Object.fromEntries(section.fields.map(([field]) => [field, savedForm?.[field]])) })); }} className="min-h-11 rounded-btn border border-brand-border px-3 py-2 text-sm text-brand-gray hover:bg-brand-bg">Cancel</button>
-            <button type="button" disabled={Boolean(savingSection)} onClick={() => saveSection(section)} className="inline-flex min-h-11 items-center gap-2 rounded-btn bg-brand-blue px-3 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"><Save className="h-4 w-4" />{savingSection === section.id ? 'Saving...' : 'Save section'}</button>
-          </div>}
         </div>
         {feedback(section.id)}
         <div id={`section-${section.id}`} hidden={collapsed} className="p-4">
       {section.id === 'details' && <p className="mb-4 text-xs text-brand-gray">Household status: {form.hhStatus || '—'} · Approval: {form.approvalStatus || '—'} · Assigned BHW: {form.collectorName || '—'}</p>}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">{section.fields.map(([field, label, type = 'text', options]) => {
+        const philhealthMember = form.philhealthMember === true || ['true', 'yes', '1'].includes(String(form.philhealthMember ?? '').trim().toLowerCase());
+        if (section.id === 'philhealth' && ['philhealthId', 'philhealthCategory'].includes(field) && !philhealthMember) return null;
         const fieldOptions = field === 'purok' && form.purok && !PUROKS.includes(form.purok)
           ? [...PUROKS, form.purok]
           : options || [];
@@ -545,7 +625,7 @@ export default function EditHouseholdPage() {
         const collapsed = collapsedMembers.has(member.id);
         return <div key={member.id || `${member.name}-${index}`} data-feedback-scope={`member-${member.id}`} className="rounded-xl border border-brand-border p-4">
         {feedback(`member-${member.id}`)}
-        <div className={`flex flex-wrap items-center justify-between gap-3 ${collapsed ? "" : "mb-3"}`}><div className="min-w-0 flex-1 basis-40"><p className="text-sm font-semibold text-brand-ink">{member.name || `Member ${index + 1}`}{member.residentId ? <span className="ml-2 text-xs font-normal text-emerald-700">Linked resident</span> : null}</p>{collapsed && <p className="mt-1 text-xs text-brand-gray">{[member.relationship, member.sex, member.age !== null && member.age !== undefined && member.age !== "" ? `${member.age} yrs` : "", MEMBER_PHILHEALTH.find((option) => option.value === member.philhealth)?.label].filter(Boolean).join(" / ")}</p>}{memberDirty && <p className="mt-1 text-xs font-medium text-amber-700">Unsaved changes</p>}</div><div className="flex flex-wrap gap-2 [&>button]:min-h-11">{memberDirty && <button type="button" disabled={Boolean(savingMember || savingSection)} onClick={() => { clearFieldFeedback(`member-${member.id}`, MEMBER_FIELDS); setMembers((current) => current.map((row) => row.id === member.id ? { ...savedMember } : row)); }} className="rounded-btn border border-brand-border px-3 py-2 text-xs font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>}{!collapsed && <button type="button" disabled={!member.id || !memberDirty || Boolean(savingMember)} onClick={() => saveMember(member)} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-3 py-2 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"><Save className="h-3.5 w-3.5" />{savingMember === member.id ? 'Saving…' : 'Save member'}</button>}
+        <div className={`flex flex-wrap items-center justify-between gap-3 ${collapsed ? "" : "mb-3"}`}><div className="min-w-0 flex-1 basis-40"><p className="text-sm font-semibold text-brand-ink">{member.name || `Member ${index + 1}`}{member.residentId ? <span className="ml-2 text-xs font-normal text-emerald-700">Linked resident</span> : null}</p>{collapsed && <p className="mt-1 text-xs text-brand-gray">{[member.relationship, member.sex, member.age !== null && member.age !== undefined && member.age !== "" ? `${member.age} yrs` : "", MEMBER_PHILHEALTH.find((option) => option.value === member.philhealth)?.label].filter(Boolean).join(" / ")}</p>}{memberDirty && <p className="mt-1 text-xs font-medium text-amber-700">Pending household save</p>}</div><div className="flex flex-wrap gap-2 [&>button]:min-h-11">{memberDirty && <button type="button" disabled={Boolean(savingMember || savingSection)} onClick={() => { clearFieldFeedback(`member-${member.id}`, MEMBER_FIELDS); setMembers((current) => member._pending ? current.filter((row) => row !== member) : current.map((row) => row.id === member.id ? { ...savedMember } : row)); }} className="rounded-btn border border-brand-border px-3 py-2 text-xs font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>}
           <button type="button" aria-expanded={!collapsed} aria-controls={`member-fields-${member.id || index}`} disabled={savingMember === member.id}
             onClick={() => { setNotice(''); setCollapsedMembers((current) => { const next = new Set(current); if (next.has(member.id)) next.delete(member.id); else next.add(member.id); return next; }); }}
             className="rounded-btn border border-brand-border px-3 py-2 text-xs font-medium text-brand-blue hover:bg-brand-bg disabled:opacity-60">
@@ -601,5 +681,9 @@ export default function EditHouseholdPage() {
         </div>
       )}
     </Card>
+    <div className="sticky bottom-0 z-20 flex items-center justify-end gap-3 border-t border-brand-border bg-white/95 px-4 py-3 shadow-[0_-2px_8px_rgba(15,23,42,0.08)] backdrop-blur">
+      <button type="button" onClick={() => { if (!hasUnsavedChanges || window.confirm('Discard all unsaved household changes?')) navigate(householdsPath); }} className="min-h-11 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg">Cancel</button>
+      <button type="button" disabled={Boolean(savingSection || savingMember || !hasUnsavedChanges)} onClick={saveAllChanges} className="inline-flex min-h-11 items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"><Save className="h-4 w-4" />{savingSection === 'all-household' ? 'Saving Changes...' : 'Save Changes'}</button>
+    </div>
   </div></FeedbackContext.Provider>;
 }

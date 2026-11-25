@@ -12,7 +12,6 @@ import {
   fetchConditions,
 } from "@/services/api/earlyWarningApi";
 import CommunityHealthMap from "@/features/analytics/components/CommunityHealthMap";
-import HouseholdClusterSummary from "@/features/households/components/HouseholdClusterSummary";
 import { formatDateRange, toLocalISODate } from "@/lib/dateUtils";
 
 /**
@@ -319,9 +318,7 @@ export default function MHODashboard() {
         ))}
       </KpiHorizontal>
 
-      <HouseholdClusterSummary />
-
-      <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-card dark:border-border dark:bg-card">
+      <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-card dark:border-border dark:bg-card">
         <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold text-brand-ink dark:text-foreground">Health Heatmap</p>

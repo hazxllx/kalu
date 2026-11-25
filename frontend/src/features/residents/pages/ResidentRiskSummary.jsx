@@ -381,11 +381,11 @@ export default function ResidentRiskSummary() {
   const assessmentCoverage = totalResidents ? Math.round((assessedResidents / totalResidents) * 100) : 0;
   const pendingFollowUps = Number.isFinite(summary.pendingFollowUps) ? summary.pendingFollowUps : null;
   const distribution = [
-    ['Low Risk', summary.low ?? 0, 'bg-emerald-500'],
-    ['Moderate Risk', summary.moderate ?? 0, 'bg-amber-500'],
-    ['High Risk', summary.high ?? 0, 'bg-rose-500'],
-    ['Incomplete', summary.incomplete ?? 0, 'bg-violet-500'],
-    ['Unassessed', summary.unassessed ?? 0, 'bg-slate-400'],
+    ['Low Risk', summary.low ?? 0, 'bg-emerald-500', 'text-emerald-700 dark:text-emerald-400'],
+    ['Moderate Risk', summary.moderate ?? 0, 'bg-amber-500', 'text-amber-700 dark:text-amber-400'],
+    ['High Risk', summary.high ?? 0, 'bg-rose-500', 'text-rose-700 dark:text-rose-400'],
+    ['Incomplete', summary.incomplete ?? 0, 'bg-slate-500', 'text-slate-600 dark:text-slate-300'],
+    ['Unassessed', summary.unassessed ?? 0, 'bg-slate-400', 'text-slate-500 dark:text-slate-400'],
   ];
 
   return <div className="space-y-5">
@@ -415,18 +415,23 @@ export default function ResidentRiskSummary() {
         <h2 className="font-semibold text-brand-ink dark:text-foreground">Risk Distribution</h2>
         <p className="text-xs text-brand-gray dark:text-muted-foreground">For the currently filtered resident set</p>
       </div>
-      <div className="space-y-3">
-        {distribution.map(([label, rawValue, tone]) => {
+      <div className="mb-4 flex h-2.5 w-full overflow-hidden rounded-full bg-brand-bg dark:bg-card-nested" role="img" aria-label="Risk distribution by resident classification">
+        {distribution.map(([label, rawValue, barTone]) => {
           const value = Number(rawValue);
           const percent = totalResidents ? Math.min(100, (value / totalResidents) * 100) : 0;
-          return <div key={label} className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)_2.5rem] items-center gap-3 text-sm sm:grid-cols-[minmax(0,8rem)_minmax(0,1fr)_3rem]">
-            <span className="break-words text-brand-gray dark:text-muted-foreground">{label}</span>
-            {value > 0
-              ? <div className="h-2.5 min-w-0 overflow-hidden rounded-full bg-brand-bg dark:bg-card-nested" role="img" aria-label={`${label}: ${value} of ${totalResidents} residents`}>
-                <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
-              </div>
-              : <span className="text-xs text-brand-gray dark:text-muted-foreground">No residents</span>}
-            <span className="text-right font-semibold tabular-nums text-brand-ink dark:text-foreground">{value}</span>
+          return percent > 0 ? <div key={label} className={`h-full ${barTone}`} style={{ width: `${percent}%` }} title={`${label}: ${value} (${percent.toFixed(0)}%)`} /> : null;
+        })}
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 xl:grid-cols-5">
+        {distribution.map(([label, rawValue, barTone, textTone]) => {
+          const value = Number(rawValue);
+          const percent = totalResidents ? Math.min(100, (value / totalResidents) * 100) : 0;
+          return <div key={label} className="min-w-0 text-sm">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${barTone}`} />
+              <span className="truncate text-xs text-brand-gray dark:text-muted-foreground">{label}</span>
+            </div>
+            <p className={`mt-1 pl-3.5 font-semibold tabular-nums ${textTone}`}>{value} <span className="font-normal text-brand-gray dark:text-muted-foreground">({percent.toFixed(0)}%)</span></p>
           </div>;
         })}
       </div>

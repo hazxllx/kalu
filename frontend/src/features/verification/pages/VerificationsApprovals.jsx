@@ -18,7 +18,7 @@ const TABS = [
 
 export default function VerificationsApprovals() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { can } = usePermissions();
+  const { can, matrixLoadState, refreshMatrix } = usePermissions();
   const { user } = useAuth();
   const requestedTab = searchParams.get("tab");
   const availableTabs = TABS.filter(
@@ -58,9 +58,28 @@ export default function VerificationsApprovals() {
 
       <section aria-label="Verification and approval workflows">
         {availableTabs.length === 0 ? (
-          <p className="rounded-card border border-brand-border bg-white px-4 py-3 text-sm text-brand-gray dark:border-border dark:bg-card">
-            No verification or approval permissions are assigned to this role.
-          </p>
+          matrixLoadState.status === "loading" || matrixLoadState.status === "error" ? (
+            <div className="rounded-card border border-brand-border bg-white px-4 py-3 text-sm text-brand-gray dark:border-border dark:bg-card" role="status">
+              <p>
+                {matrixLoadState.status === "loading"
+                  ? "Checking your verification and account-management permissions…"
+                  : matrixLoadState.error || "Your permissions could not be verified. Reconnect, then try again."}
+              </p>
+              {matrixLoadState.status === "error" && (
+                <button
+                  type="button"
+                  className="supervisor-button is-quiet mt-3"
+                  onClick={() => void refreshMatrix({ forceOnline: true })}
+                >
+                  Retry permission check
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="rounded-card border border-brand-border bg-white px-4 py-3 text-sm text-brand-gray dark:border-border dark:bg-card">
+              No verification or approval permissions are assigned to this role.
+            </p>
+          )
         ) : (
         <>
         <div className="tab-scrollbar mb-4 flex w-full gap-2 overflow-x-auto border-b border-brand-border bg-background sm:gap-8 dark:border-border" role="tablist" aria-label="Verification workflows">

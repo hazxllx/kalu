@@ -109,6 +109,7 @@ const signatoryName = authorizedSignatory.name || "Signatory name not set";
 const [form, setForm] = useState(() => /** @type {Record<string, any>} */ ({
   purpose: certificate?.purpose || "",
   findings: certificate?.findings || "",
+  chiefComplaint: certificate?.chiefComplaint || "",
   dateOfExamination: certificate?.dateOfExamination || new Date().toISOString().slice(0, 10),
   medicalOfficer: authorizedSignatory.name,
   licenseNumber: authorizedSignatory.licenseNumber,
@@ -179,6 +180,7 @@ const [savedId, setSavedId] = useState(null);
     address: patient?.address || certificate?.address || "",
     purpose: form.purpose,
     findings: form.findings,
+    chiefComplaint: form.chiefComplaint,
     dateOfExamination: form.dateOfExamination,
     medicalOfficer: authorizedSignatory.name,
     licenseNumber: authorizedSignatory.licenseNumber,
@@ -195,6 +197,7 @@ const [savedId, setSavedId] = useState(null);
   const validate = () => {
     const next = {};
     if (!form.purpose) next.purpose = "Purpose is required.";
+    if (!form.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
     if (!form.findings.trim()) next.findings = "Clinical findings are required.";
     if (!form.dateOfExamination) next.dateOfExamination = "Date of examination is required.";
     if (!form.medicalOfficer.trim()) next.medicalOfficer = "Medical officer name is required.";
@@ -211,9 +214,13 @@ const [savedId, setSavedId] = useState(null);
       const payload = {
         purpose: form.purpose,
         findings: form.findings.trim(),
+        chiefComplaint: form.chiefComplaint.trim(),
         dateOfExamination: form.dateOfExamination,
         medicalOfficer: form.medicalOfficer.trim(),
         licenseNumber: form.licenseNumber.trim(),
+        civilStatus: record?.civilStatus || certificate?.civilStatus || patient?.civilStatus || "",
+        recommendation: record?.recommendation || certificate?.recommendation || "",
+        remarks: record?.remarks || certificate?.remarks || "",
         notes: form.notes,
       };
       if (isEdit) {
@@ -240,6 +247,7 @@ const [savedId, setSavedId] = useState(null);
   };
 
   const decide = async (decision) => {
+    if (busy || !view?.id) return;
     if (decision === "reject" && !actionNotes.trim()) {
       setErrors((p) => ({ ...p, decision: "A reason is required to reject a certificate." }));
       return;
@@ -351,6 +359,9 @@ const [savedId, setSavedId] = useState(null);
                   </select>
                 </Field>
               </div>
+              <Field label="Chief Complaint" required error={errors.chiefComplaint}>
+                <textarea rows={2} value={form.chiefComplaint} onChange={(e) => set("chiefComplaint")(e.target.value)} placeholder="Reason for the visit or certificate..." className={`${inputCls(errors.chiefComplaint)} resize-none`} />
+              </Field>
               <Field label="Clinical Findings / Diagnosis" required error={errors.findings}>
                 <textarea
                   rows={3}
@@ -402,6 +413,7 @@ const [savedId, setSavedId] = useState(null);
                     ["Date examined", view.dateOfExamination],
                     ["Civil status", view.civilStatus],
                     ["Diagnosis / medical impression", view.findings],
+                    ["Chief complaint", view.chiefComplaint],
                     ["Recommendation", view.recommendation],
                     ["Remarks", view.remarks],
                     ["Certificate creator", view.preparedBy],
@@ -570,7 +582,7 @@ const [savedId, setSavedId] = useState(null);
           aria-modal="true"
           aria-labelledby="certificate-preview-title"
         >
-          <div className="flex max-h-[96dvh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-card">
+          <div className="flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-card">
             <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 px-4 py-3 dark:border-border sm:px-6">
               <div>
                 <h3 id="certificate-preview-title" className="text-base font-semibold text-brand-ink">
@@ -592,7 +604,7 @@ const [savedId, setSavedId] = useState(null);
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-3 dark:bg-background sm:p-5">
-              <div className="flex min-h-full w-max min-w-full justify-center">
+              <div className="flex min-h-full w-full justify-center">
                 <MedicalCertificateDocument
                   certificate={isFormMode ? previewCertificate : view}
                   signatoryName={signatoryName}

@@ -395,7 +395,7 @@ export const resolveConsultationMedications = async ({ medications = [], previou
   if (Object.keys(fieldErrors).length) throw ApiError.unprocessable('Please correct the prescription entries.', fieldErrors);
   const errors = {};
   const used = new Set();
-  const fields = ['genericName', 'brandName', 'strength', 'dosageForm', 'dose', 'doseAmount', 'doseUnit', 'route', 'frequency', 'duration', 'quantity', 'instructions', 'medicineId'];
+  const fields = ['genericName', 'brandName', 'strength', 'dosageForm', 'route', 'frequency', 'duration', 'quantity', 'instructions', 'medicineId'];
   const comparable = (row) => Object.fromEntries(fields.map((field) => [field, row?.[field] ?? (field === 'medicineId' ? null : '')]));
   const output = [];
   for (const [index, raw] of medications.entries()) {
@@ -410,7 +410,7 @@ export const resolveConsultationMedications = async ({ medications = [], previou
       for (const [field, message] of Object.entries(error.details || {})) errors[field.replace('medications[0]', prefix)] = message;
       continue;
     }
-    for (const field of ['dose', 'route', 'frequency', 'duration', 'quantity']) if (!text(entry[field])) errors[`${prefix}.${field}`] = 'This prescription field is required.';
+    for (const field of ['route', 'frequency', 'duration', 'quantity']) if (!text(entry[field])) errors[`${prefix}.${field}`] = 'This prescription field is required.';
     if (!PRESCRIPTION_ROUTES.some(({ value }) => value === text(entry.route))) errors[`${prefix}.route`] = 'Choose a predefined prescription route.';
     if (!PRESCRIPTION_FREQUENCIES.some(({ value }) => value === text(entry.frequency))) errors[`${prefix}.frequency`] = 'Choose a predefined prescription frequency.';
     if (!/^[1-9]\d{0,4}$/.test(text(entry.quantity)) || Number(entry.quantity) > 10000) errors[`${prefix}.quantity`] = 'Quantity must be a whole number from 1 to 10000.';
@@ -651,6 +651,7 @@ export const fromVisit = async (visit, supabase = serviceClientFor(), riskConfig
     resident: {
       id: resident.id || visit.residentId,
       name: [resident.firstName, resident.middleName, resident.lastName].filter(Boolean).join(' '),
+      healthRecordNo: resident.healthRecordNo || resident.health_record_no || '',
       barangay: resident.barangay || '',
       barangayId: resident.barangayId || visit.barangay_id || '',
       zone: resident.zone ?? null,

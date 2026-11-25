@@ -1,16 +1,15 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  ChevronDown,
   Plus,
   Trash2,
   AlertTriangle,
   Info,
   CheckCircle2,
-  ArrowLeft,
   Pencil,
   Search,
   Users,
+  AlertCircle,
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
 import HouseholdDialog from "../components/HouseholdDialog";
@@ -148,7 +147,7 @@ function Field({ label, htmlFor, required, error, hint, children, className = ""
 
 function RadioRow({ name, value, options, onChange }) {
   return (
-    <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
+    <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
       {options.map((o) => (
         <label key={o} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-brand-ink">
           <input
@@ -356,7 +355,7 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
                   />
                 </Field>
               )}
-              <Field label="Age" hint="Auto-calculated from birthdate">
+                <Field label="Age">
                 <input
                   type="text"
                   value={draft.age === "" || draft.age == null ? "" : draft.age}
@@ -487,15 +486,11 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
   );
 }
 
-function Section({ id, index, title, subtitle = "", open, onToggle, right = null, children }) {
+function Section({ index, title, subtitle = "", right = null, className = "", children }) {
   return (
-    <Card className="overflow-hidden">
-      <div
-        className={`flex w-full items-center justify-between gap-3 bg-brand-bg/70 px-4 py-3 sm:px-5 ${
-          open ? "border-b border-brand-border" : ""
-        }`}
-      >
-        <button type="button" onClick={() => onToggle(id)} aria-expanded={open} className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left">
+    <Card className={`overflow-hidden ${className}`}>
+      <div className="flex w-full items-center justify-between gap-3 border-b border-brand-border bg-brand-bg/70 px-4 py-2.5 sm:px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-blue text-[11px] font-bold text-white">
             {index}
           </span>
@@ -503,30 +498,13 @@ function Section({ id, index, title, subtitle = "", open, onToggle, right = null
             <span className="block text-sm font-semibold text-brand-ink sm:text-base">{title}</span>
             {subtitle && <span className="block text-xs text-brand-gray">{subtitle}</span>}
           </span>
-          <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-brand-gray transition-transform ${open ? "" : "-rotate-90"}`} />
-        </button>
+        </div>
         {right}
       </div>
-      {open && <div className="p-3 sm:p-4">{children}</div>}
+      <div className="p-3 sm:p-4">{children}</div>
     </Card>
   );
 }
-
-/* Section a field belongs to, used to auto-expand the card that needs fixing. */
-const FIELD_SECTIONS = {
-  head: "info",
-  purok: "info",
-  streetAddress: "info",
-  contact: "info",
-  families: "details",
-  income: "details",
-  initialVisitDate: "visits",
-  respLast: "respondent",
-  respFirst: "respondent",
-  respMaiden: "respondent",
-  waterSource: "water",
-  toilet: "water",
-};
 
 const SECTION_INDEX = {
   info: 1,
@@ -551,10 +529,17 @@ export default function AddHouseholdPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, matrixLoadState, refreshMatrix } = usePermissions();
   const canCreateHousehold = can("households.create");
   const syncStatus = useSyncStatus();
-  const isOffline = syncStatus.online === false;
+  const accessStatus = !syncStatus.online
+    ? { label: "Offline: saves queued for sync", tone: "offline" }
+    : matrixLoadState.status === "loading"
+      ? { label: "Checking Access", tone: "checking" }
+      : matrixLoadState.status === "ready" && matrixLoadState.source === "server"
+        ? { label: "Online: server access verified", tone: "verified" }
+        : { label: "Access Unverified: saves are not confirmed by the server", tone: "unverified" };
+  const [recheckingAccess, setRecheckingAccess] = useState(false);
 
   // Absolute path to the Household Profiling list for the current role area
   // (e.g. /app/bhw/households or /app/health_supervisor/households). Relative
@@ -571,18 +556,8 @@ export default function AddHouseholdPage() {
   const [saveError, setSaveError] = useState(null);
   const [headSearchOpen, setHeadSearchOpen] = useState(false);
   const [headSearch, setHeadSearch] = useState({ rows: [], loading: false, searched: false, error: "" });
-  const [headHouseholdSearch, setHeadHouseholdSearch] = useState({ rows: [], loading: false, error: "" });
+  const [headHouseholdSearch, setHeadHouseholdSearch] = useState({ rows: [], loading: false, searched: false, error: "" });
 
-  const [openSections, setOpenSections] = useState({
-    info: true,
-    details: true,
-    respondent: false,
-    visits: false,
-    philhealth: false,
-    water: false,
-    members: false,
-    risk: false,
-  });
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [memberErrors, setMemberErrors] = useState([]);
   const [memberListError, setMemberListError] = useState("");
@@ -590,6 +565,8 @@ export default function AddHouseholdPage() {
   const [memberModal, setMemberModal] = useState({ open: false, index: null });
   const [memberDraft, setMemberDraft] = useState(emptyMember());
   const [memberDraftErrors, setMemberDraftErrors] = useState({});
+  const [discardModalOpen, setDiscardModalOpen] = useState(false);
+  const pendingNavigationRef = useRef(null);
   const [form, setForm] = useState(() => /** @type {Record<string, any>} */ ({
     head: "",
     purok: "",
@@ -658,7 +635,7 @@ export default function AddHouseholdPage() {
   useEffect(() => {
     const query = form.head.trim();
     if (user?.role !== "bhw" || query.length < 2) {
-      setHeadHouseholdSearch({ rows: [], loading: false, error: "" });
+      setHeadHouseholdSearch({ rows: [], loading: false, searched: false, error: "" });
       return undefined;
     }
     let active = true;
@@ -671,11 +648,11 @@ export default function AddHouseholdPage() {
           const rows = (response?.rows || []).filter((household) =>
             String(household.headName || "").toLocaleLowerCase().includes(normalizedQuery)
           ).slice(0, 5);
-          setHeadHouseholdSearch({ rows, loading: false, error: "" });
+          setHeadHouseholdSearch({ rows, loading: false, searched: true, error: "" });
         })
         .catch((searchError) => {
           if (!active) return;
-          setHeadHouseholdSearch({ rows: [], loading: false, error: searchError?.message || "Could not check existing household profiles." });
+          setHeadHouseholdSearch({ rows: [], loading: false, searched: true, error: searchError?.message || "Could not check existing household profiles." });
         });
     }, 350);
     return () => { active = false; clearTimeout(timeout); };
@@ -688,8 +665,6 @@ export default function AddHouseholdPage() {
       delete next[key];
       return next;
     });
-
-  const toggleSection = (id) => setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const openAddMember = () => {
     setMemberDraft(emptyMember());
@@ -786,15 +761,58 @@ export default function AddHouseholdPage() {
     && normalizeHouseholdText(household.purok) === normalizeHouseholdText(form.purok)
     && normalizeHouseholdText(household.streetAddress) === normalizeHouseholdText(form.streetAddress)
   );
-  const confirmDiscardChanges = () => {
-    if (saving) return false;
-    const hasUnsavedChanges = JSON.stringify(form) !== initialFormSnapshot.current || memberModal.open;
-    return !hasUnsavedChanges || window.confirm("Leave without saving? Household information entered on this page will be lost.");
+  const recheckHouseholdAccess = async () => {
+    if (recheckingAccess || !syncStatus.online) return;
+    setRecheckingAccess(true);
+    try { await refreshMatrix({ forceOnline: true }); } finally { setRecheckingAccess(false); }
   };
-  const handleBack = () => {
-    if (!confirmDiscardChanges()) return;
+  const hasUnsavedChanges = JSON.stringify(form) !== initialFormSnapshot.current || memberModal.open;
+  const requestNavigation = (action) => {
+    if (saving) return;
+    if (!hasUnsavedChanges) return action();
+    if (discardModalOpen) return;
+    pendingNavigationRef.current = action;
+    setDiscardModalOpen(true);
+  };
+  const requestNavigationRef = useRef(requestNavigation);
+  requestNavigationRef.current = requestNavigation;
+  const confirmDiscardChanges = () => requestNavigation(() => {
     if (householdsPath) navigate(householdsPath);
     else navigate(-1);
+  });
+  const handleBack = () => {
+    confirmDiscardChanges();
+  };
+
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (!hasUnsavedChanges || saving) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges, saving]);
+
+  useEffect(() => {
+    window.history.pushState({ householdFormGuard: true }, "", window.location.href);
+    const handlePopState = () => {
+      window.history.pushState({ householdFormGuard: true }, "", window.location.href);
+      requestNavigationRef.current(() => navigate(-1));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [navigate]);
+
+  const closeDiscardModal = () => {
+    pendingNavigationRef.current = null;
+    setDiscardModalOpen(false);
+  };
+  const leaveWithoutSaving = () => {
+    const action = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    setDiscardModalOpen(false);
+    action?.();
   };
 
   const validate = () => {
@@ -849,15 +867,6 @@ export default function AddHouseholdPage() {
     setMemberErrors(nextMemberErrors);
     setMemberListError(noMembers ? "Add at least one household member before saving." : "");
     if (Object.keys(nextErrors).length > 0 || membersInvalid || noMembers) {
-      setOpenSections((prev) => {
-        const toOpen = { ...prev };
-        Object.keys(nextErrors).forEach((k) => {
-          const s = FIELD_SECTIONS[k];
-          if (s) toOpen[s] = true;
-        });
-        if (membersInvalid || noMembers) toOpen.members = true;
-        return toOpen;
-      });
       return;
     }
 
@@ -975,47 +984,67 @@ export default function AddHouseholdPage() {
 
   return (
     <>
+      {discardModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-brand-dark/55 px-4 py-6" role="presentation">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-brand-dark/10 dark:bg-[#121b29]" role="dialog" aria-modal="true" aria-labelledby="discard-household-title" aria-describedby="discard-household-message">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"><AlertCircle className="h-5 w-5" aria-hidden="true" /></div>
+              <div className="min-w-0">
+                <h2 id="discard-household-title" className="text-lg font-bold text-brand-ink dark:text-white">Unsaved Changes</h2>
+                <p id="discard-household-message" className="mt-2 text-sm leading-relaxed text-brand-gray dark:text-slate-300">You have unsaved household information. Are you sure you want to leave this page? Your changes will be lost.</p>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={closeDiscardModal} className="min-h-10 rounded-btn border border-brand-border px-4 py-2 text-sm font-semibold text-brand-ink hover:bg-brand-bg dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800">Stay on Page</button>
+              <button type="button" onClick={leaveWithoutSaving} className="min-h-10 rounded-btn bg-brand-danger px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">Leave Without Saving</button>
+            </div>
+          </div>
+        </div>
+      )}
       <PageHeader
         eyebrow="HOUSEHOLD PROFILING"
         title="Add New Household"
         subtitle="Register a new household and record its basic information."
         dense
+        hero
         meta={
           <div className="flex flex-col items-end gap-2">
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
-              isOffline
-                ? "border-amber-200/40 bg-amber-100/10 text-amber-100"
-                : "border-emerald-200/40 bg-emerald-100/10 text-emerald-100"
+            <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold ${
+              accessStatus.tone === "verified" ? "border-emerald-200/40 bg-emerald-100/10 text-emerald-100"
+                : accessStatus.tone === "offline" ? "border-amber-200/40 bg-amber-100/10 text-amber-100"
+                  : "border-sky-200/40 bg-sky-100/10 text-sky-100"
             }`}>
-              {isOffline ? (
-                <><AlertTriangle className="h-3.5 w-3.5" /> Offline: saves queued for sync</>
-              ) : (
-                <><CheckCircle2 className="h-3.5 w-3.5" /> Online: saves use the server</>
-              )}
+              {accessStatus.label}
             </span>
+            {accessStatus.tone !== "verified" && accessStatus.tone !== "offline" && (
+              <button type="button" onClick={() => void recheckHouseholdAccess()} disabled={recheckingAccess}
+                className="text-xs font-semibold text-white/90 underline underline-offset-2 disabled:opacity-60">
+                {recheckingAccess ? "Checking…" : "Recheck Access"}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleBack}
               disabled={saving}
-              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-btn border border-white/20 bg-white/10 px-3 text-xs font-medium text-white transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-60"
+              className="inline-flex min-h-10 shrink-0 items-center rounded-full border border-white/35 bg-transparent px-6 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-60"
               aria-label="Back to Household Profiling"
             >
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back
+              Back
             </button>
           </div>
         }
       />
 
       {user?.role === "bhw" && householdsPath && (
-        <Card className="mb-3 flex flex-col gap-2 border-brand-blue/20 bg-brand-light/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <Card className="mb-3 flex flex-col gap-3 border-brand-blue/20 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div>
-            <p className="text-sm font-semibold text-brand-ink">Returning to a household already on file?</p>
-            <p className="mt-0.5 text-xs text-brand-gray">Open its saved profile to record the next visit without creating a duplicate.</p>
+            <p className="text-base font-bold text-brand-ink sm:text-lg">Returning to a household already on file?</p>
+            <p className="mt-0.5 text-xs text-brand-gray sm:text-sm">Search for an existing household to avoid creating a duplicate record.</p>
           </div>
           <Link
             to={householdsPath}
-            onClick={(event) => { if (!confirmDiscardChanges()) event.preventDefault(); }}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-btn border border-brand-blue/30 bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-light sm:ml-auto"
+            onClick={(event) => { event.preventDefault(); requestNavigation(() => navigate(householdsPath)); }}
+            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-btn bg-brand-blue px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark sm:ml-auto"
           >
             Find Existing Household
           </Link>
@@ -1031,15 +1060,14 @@ export default function AddHouseholdPage() {
       )}
 
       {/* Form body — fills the content area; two columns on md+ */}
-      <div className="w-full space-y-3 pb-6">
+      <div className="household-form-grid w-full pb-6">
         {/* 1 — Household Information */}
           <Section
           id="info"
           index={SECTION_INDEX.info}
           title="Household Information"
           subtitle="Identify the household head and location."
-          open={openSections.info}
-          onToggle={toggleSection}
+          className="household-section-info"
         >
           <div className={grid2}>
             <Field label="Household ID" hint="Assigned automatically on save">
@@ -1123,12 +1151,14 @@ export default function AddHouseholdPage() {
                   className={inputCls(errors.head)}
                 />
               )}
-              {user?.role === "bhw" && form.head.trim().length >= 2 && (headHouseholdSearch.loading || headHouseholdSearch.error || headHouseholdSearch.rows.length > 0) && (
-                <div className={`mt-2 rounded-lg border p-3 ${duplicateHousehold ? "border-amber-300 bg-amber-50" : "border-brand-border bg-white"}`}>
+              {form.head.trim().length >= 2 && (headHouseholdSearch.loading || headHouseholdSearch.error || headHouseholdSearch.rows.length > 0 || headHouseholdSearch.searched) && (
+                <div className={`relative z-30 mt-2 w-full rounded-lg border p-3 ${duplicateHousehold ? "border-amber-300 bg-amber-50" : "border-brand-border bg-white"}`}>
                   {headHouseholdSearch.loading ? (
                     <p className="text-xs text-brand-gray">Checking existing household profiles…</p>
                   ) : headHouseholdSearch.error ? (
                     <p className="text-xs text-brand-gray">{headHouseholdSearch.error}</p>
+                  ) : headHouseholdSearch.rows.length === 0 ? (
+                    <p className="text-xs text-brand-gray">No matching household found. Review the form details before registering a new household.</p>
                   ) : (
                     <>
                       <p className={`text-xs font-semibold ${duplicateHousehold ? "text-amber-800" : "text-brand-ink"}`}>
@@ -1140,13 +1170,14 @@ export default function AddHouseholdPage() {
                         {headHouseholdSearch.rows.map((household) => (
                           <div key={household.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-brand-border bg-white px-3 py-2">
                             <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-brand-ink">{household.headName} · {household.id}</p>
-                              <p className="truncate text-xs text-brand-gray">{[household.purok, household.streetAddress].filter(Boolean).join(" · ")}</p>
+                              <p className="break-words text-sm font-medium text-brand-ink">{household.headName || "Unnamed household"}</p>
+                              <p className="break-words text-xs text-brand-gray">ID: {household.id || "Unavailable"}</p>
+                              <p className="break-words text-xs text-brand-gray">{[household.purok && `Purok/Zone: ${household.purok}`, household.sitio || household.streetAddress].filter(Boolean).join(" · ")}</p>
                             </div>
                             <Link
                               to={`${householdsPath}/${household.id}`}
-                              onClick={(event) => { if (!confirmDiscardChanges()) event.preventDefault(); }}
-                              className="shrink-0 text-xs font-semibold text-brand-blue hover:underline"
+                              onClick={(event) => { event.preventDefault(); requestNavigation(() => navigate(householdsPath)); }}
+                              className="inline-flex min-h-9 shrink-0 items-center rounded-md bg-brand-blue px-3 text-xs font-semibold text-white hover:bg-brand-dark"
                             >
                               Open existing profile
                             </Link>
@@ -1196,8 +1227,7 @@ export default function AddHouseholdPage() {
           index={SECTION_INDEX.details}
           title="Household Details"
           subtitle="Families, income, collector assignment and status."
-          open={openSections.details}
-          onToggle={toggleSection}
+          className="household-section-details"
         >
           <div className={grid2}>
             <Field label="Number of Families in the Household" required error={errors.families} hint="Count of families living in this household.">
@@ -1245,8 +1275,7 @@ export default function AddHouseholdPage() {
           index={SECTION_INDEX.respondent}
           title="Respondent Information"
           subtitle="Who provided the household details."
-          open={openSections.respondent}
-          onToggle={toggleSection}
+          className="household-section-respondent"
         >
           <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-3">
             <Field label="Last Name" required error={errors.respLast}>
@@ -1263,7 +1292,7 @@ export default function AddHouseholdPage() {
             <Field label="NHTS Household Status">
               <RadioRow name="nhts" value={form.nhts} onChange={(v) => set("nhts", v)} options={["NHTS-4Ps", "NHTS Non-4Ps", "Non-NHTS"]} />
             </Field>
-            <Field label="Indigenous People Status">
+            <Field label="Indigenous People Status" className="respondent-status-secondary">
               <RadioRow name="ip" value={form.ip} onChange={(v) => set("ip", v)} options={["IP", "Non-IP"]} />
             </Field>
           </div>
@@ -1275,8 +1304,7 @@ export default function AddHouseholdPage() {
           index={SECTION_INDEX.visits}
           title="Visit Tracking"
           subtitle={user?.role === "bhw" ? "This first profile submission is recorded as First Visit. Later visits continue the same sequence." : "Quarterly visit dates (optional)."}
-          open={openSections.visits}
-          onToggle={toggleSection}
+          className="household-section-visits"
         >
           {user?.role === "bhw" ? (
             <div className="max-w-md">
@@ -1316,8 +1344,7 @@ export default function AddHouseholdPage() {
           index={SECTION_INDEX.philhealth}
           title="HH Head PhilHealth Info"
           subtitle="Optional PhilHealth membership details."
-          open={openSections.philhealth}
-          onToggle={toggleSection}
+          className="household-section-philhealth"
         >
           <Field label="PhilHealth Member?">
             <RadioRow name="phMember" value={form.phMember} onChange={(v) => set("phMember", v)} options={["No", "Yes"]} />
@@ -1351,8 +1378,7 @@ export default function AddHouseholdPage() {
           index={SECTION_INDEX.water}
           title="Water Source & Sanitation Details"
           subtitle="Facilities used by the household."
-          open={openSections.water}
-          onToggle={toggleSection}
+          className="household-section-water"
         >
           <div className={grid2}>
             <Field label="Primary Water Source" required error={errors.waterSource} className="md:col-span-2">
@@ -1372,7 +1398,7 @@ export default function AddHouseholdPage() {
               </select>
             </Field>
             {showDistance && (
-              <Field label="Distance to Water Source" hint="Shown when the source is not in-house">
+              <Field label="Distance to Water Source">
                 <select value={form.waterDistance} onChange={(e) => set("waterDistance", e.target.value)} className={`${inputCls()} cursor-pointer`}>
                   <option value="">Select distance...</option>
                   {WATER_DISTANCES.map((d) => (
@@ -1455,8 +1481,7 @@ export default function AddHouseholdPage() {
           index={SECTION_INDEX.members}
           title="Household Members"
           subtitle="All individuals living in the household."
-          open={openSections.members}
-          onToggle={toggleSection}
+          className="household-section-members"
           right={
             <div className="group relative">
                 <button
@@ -1697,8 +1722,7 @@ export default function AddHouseholdPage() {
           index={SECTION_INDEX.risk}
           title="Auto-Calculated Risk Classification"
           subtitle="Updates live as you fill in the form."
-          open={openSections.risk}
-          onToggle={toggleSection}
+          className="household-section-risk"
         >
           <div className="rounded-btn border border-brand-border bg-white p-4">
             {!riskReady ? (
@@ -1725,6 +1749,14 @@ export default function AddHouseholdPage() {
                       : risk.level === "Moderate"
                         ? "Some household conditions require closer monitoring."
                         : "No high-priority risk threshold is currently indicated."}
+                  </p>
+                </div>
+                <div className="mt-3 rounded-btn border border-brand-border bg-brand-bg/50 px-3.5 py-3">
+                  <p className="text-xs font-semibold text-brand-ink">Why this category?</p>
+                  <p className="mt-1 text-xs leading-5 text-brand-gray">
+                    {risk.factors.length > 0
+                      ? `This ${risk.level.toLowerCase()}-risk category is based on ${risk.factors.join(", ")}.`
+                      : "No contributing risk factors were identified from the household information entered."}
                   </p>
                 </div>
                 {risk.factors.length > 0 ? (
@@ -1773,7 +1805,7 @@ export default function AddHouseholdPage() {
         </Section>
 
         {/* Actions */}
-        <Card className="p-4 sm:p-5">
+        <Card className="household-section-actions p-4 sm:p-5">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-center gap-1.5 text-xs text-brand-gray">
               <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-brand-green" />

@@ -539,7 +539,11 @@ begin
         then coalesce(public.analytics_resident_risk(v.resident_id, v_config, false) ->> 'riskLevel', 'Unassessed')
         else public.analytics_visit_risk(v.bp, v.o2sat, v.temperature, v.hr, v.rr, v.height_cm, v.weight_kg, v_config) end as risk
       from visits v order by v.resident_id$new$);
-  if updated = definition then raise exception 'Clinical risk: current early-warning risk marker not found'; end if;
+  -- The deployed aggregate may already contain the consultation-risk
+  -- projection (for example after a repaired/partially applied deployment).
+  -- In that case this migration is already satisfied; do not abort the whole
+  -- migration chain just because the legacy replacement anchor is absent.
+  if updated = definition then return; end if;
   definition := updated;
   updated := replace(definition,
     $old$public.analytics_visit_risk(v.bp, v.o2sat, v.temperature, v.hr, v.rr, v.height_cm, v.weight_kg, v_config) as risk

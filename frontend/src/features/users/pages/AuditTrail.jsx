@@ -4,6 +4,7 @@ import { Download, Search, X, AlertCircle, Loader2 } from "lucide-react";
 
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
+import EmptyState from "@/components/common/EmptyState";
 import { auditTrailApi } from "@/services/api";
 
 const PAGE_SIZE = 100;
@@ -205,10 +206,13 @@ export default function AuditTrail() {
           <Loader2 className="h-4 w-4 animate-spin" /> Loading audit entries...
         </div>
       ) : tableRows.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-card dark:border-border dark:bg-card">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            {hasFilters ? "No entries match these filters." : "No audit entries have been recorded yet."}
-          </p>
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-card dark:border-border dark:bg-card">
+          <EmptyState
+            kind={hasFilters ? "filter" : "empty"}
+            title={hasFilters ? "No matching audit entries" : "No audit entries yet"}
+            description={hasFilters ? "No audit entries match the selected filters." : "System activity will appear here as it is recorded."}
+            action={hasFilters ? <button type="button" onClick={() => { setQuery(""); setActionFilter(""); setModuleFilter(""); setDateFilter(""); }} className="text-sm font-medium text-brand-blue hover:underline">Clear filters</button> : null}
+          />
         </div>
       ) : (
         <DataTable

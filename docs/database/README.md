@@ -27,6 +27,27 @@ one Barangay Health Center per active barangay. Historical non-approved
 barangay rows are retained as inactive; resident and health records are not
 renamed or deleted.
 
+For a hosted database, apply migrations in place with `supabase db push` and
+run the non-destructive reference seed separately with:
+
+```
+supabase db query --linked --file supabase/seed.sql
+```
+
+`supabase db seed` is not a supported command in the project CLI workflow, and
+the configured seed section is disabled so a database reset cannot implicitly
+seed a hosted project.
+
+## Account-integrity review
+
+Before applying a new uniqueness constraint to a populated database, run the
+read-only [account integrity audit](../../supabase/maintenance/audit_account_integrity.sql)
+in the Supabase SQL editor. It reports confirmed normalized-email collisions,
+duplicate account links, orphaned profiles, and resident/personnel role
+conflicts without changing any data. Resolve each finding through an authorized
+administrative process, preserving historical health records and audit trails;
+the report never treats matching names or contact numbers as duplicates.
+
 ## Environment variables
 
 Backend (`backend/.env`) - server only, never in the frontend:

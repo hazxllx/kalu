@@ -321,11 +321,15 @@ function MaternalRecordEditor({
   ].filter(([, count]) => count > 0));
   const sections = [
     ["overview", "Overview", true],
-    ["prenatal", "Prenatal Services & Screening", isEditing || screeningRows.length > 0 || prenatalVisits.length > 0 || visitLoading || visitLoadError],
-    ["delivery", "Delivery Information", isEditing || deliveryRows.length > 0 || deliveryVisits.length > 0 || visitLoading || visitLoadError],
-    ["postpartum", "Postpartum Care", isEditing || postpartumRows.length > 0 || postpartumVisits.length > 0 || visitLoading || visitLoadError],
-    ["lifestyle", "Maternal Health & Lifestyle Profile", isEditing || lifestyleRows.length > 0],
-  ].filter(([, , visible]) => visible);
+    // Keep the full maternal workflow visible even when a record has no
+    // entries in one of the sections yet. The tabs were previously coupled
+    // to loaded row counts, so an empty history response made the other tabs
+    // disappear entirely.
+    ["prenatal", "Prenatal Services & Screening", true],
+    ["delivery", "Delivery Information", true],
+    ["postpartum", "Postpartum Care", true],
+    ["lifestyle", "Maternal Health & Lifestyle Profile", true],
+  ];
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">

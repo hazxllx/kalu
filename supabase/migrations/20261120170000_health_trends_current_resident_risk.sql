@@ -13,11 +13,10 @@ begin
     'public.scoped_aggregate_analytics(uuid,text,text,text,text,text,date,date,integer,boolean)'::regprocedure
   );
 
-  updated := replace(definition,
-    $old$from public.visits v join residents r on r.id = v.resident_id
-      where coalesce(v.visit_date, v.created_at) >= v_activity_from::timestamp at time zone 'Asia/Manila'
-        and coalesce(v.visit_date, v.created_at) < (v_activity_to + 1)::timestamp at time zone 'Asia/Manila'$old$,
-    $new$from public.visits v join residents r on r.id = v.resident_id$new$);
+  updated := regexp_replace(definition,
+    'from[[:space:]]+public\.visits[[:space:]]+v[[:space:]]+join[[:space:]]+residents[[:space:]]+r[[:space:]]+on[[:space:]]+r\.id[[:space:]]*=[[:space:]]*v\.resident_id[[:space:]]+where[[:space:]]+coalesce\(v\.visit_date,[[:space:]]*v\.created_at\)[[:space:]]+>=[[:space:]]+v_activity_from::timestamp[[:space:]]+at[[:space:]]+time[[:space:]]+zone[[:space:]]+''Asia/Manila''[[:space:]]+and[[:space:]]+coalesce\(v\.visit_date,[[:space:]]*v\.created_at\)[[:space:]]+<[[:space:]]*\(v_activity_to[[:space:]]*\+[[:space:]]*1\)::timestamp[[:space:]]+at[[:space:]]+time[[:space:]]+zone[[:space:]]+''Asia/Manila''',
+    'from public.visits v join residents r on r.id = v.resident_id',
+    'g');
   if updated = definition and position(
     'where coalesce(v.visit_date, v.created_at) >= v_activity_from::timestamp at time zone ''Asia/Manila''' in definition
   ) > 0 then
@@ -25,18 +24,10 @@ begin
   end if;
   definition := updated;
 
-  updated := replace(definition,
-    $old$    ), risk as (
-      select count(*) filter (where risk = 'Low') as low,
-        count(*) filter (where risk = 'Moderate') as moderate,
-        count(*) filter (where risk = 'High') as high,
-        count(*) filter (where risk = 'Unassessed') as unassessed from latest$old$,
-    $new$    ), risk as (
-      select count(*) filter (where coalesce(l.risk, 'Unassessed') = 'Low') as low,
-        count(*) filter (where l.risk = 'Moderate') as moderate,
-        count(*) filter (where l.risk = 'High') as high,
-        count(*) filter (where coalesce(l.risk, 'Unassessed') = 'Unassessed') as unassessed
-      from residents r left join latest l on l.resident_id = r.id$new$);
+  updated := regexp_replace(definition,
+    '    \), risk as \([[:space:]]*select count\(\*\) filter \(where risk = ''Low''\) as low,[[:space:]]*count\(\*\) filter \(where risk = ''Moderate''\) as moderate,[[:space:]]*count\(\*\) filter \(where risk = ''High''\) as high,[[:space:]]*count\(\*\) filter \(where risk = ''Unassessed''\) as unassessed from latest',
+    '    ), risk as (select count(*) filter (where coalesce(l.risk, ''Unassessed'') = ''Low'') as low, count(*) filter (where l.risk = ''Moderate'') as moderate, count(*) filter (where l.risk = ''High'') as high, count(*) filter (where coalesce(l.risk, ''Unassessed'') = ''Unassessed'') as unassessed from residents r left join latest l on l.resident_id = r.id',
+    'g');
   if updated = definition and position(
     'from residents r left join latest l on l.resident_id = r.id' in definition
   ) = 0 then

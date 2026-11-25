@@ -1,5 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
+import EmptyState from "@/components/common/EmptyState";
 
 /**
  * DataTable - Responsive data table with automatic mobile card layout
@@ -20,6 +21,9 @@ import { motion } from "framer-motion";
  * - fitContainer: boolean - Table fills container width
  * - className: Additional wrapper classes
  * - tableClassName: Additional table classes
+ * - emptyState: Context-specific state rendered when `rows` is empty. It is
+ *   intentionally only evaluated after callers have finished loading/error
+ *   handling, so a failed or pending request is never presented as empty.
  */
 export default function DataTable({ 
   columns, 
@@ -35,6 +39,12 @@ export default function DataTable({
   stickyHeader = false,
   maxHeight = null,
   emptyText = "No records found.",
+  emptyState,
+  emptyTitle,
+  emptyDescription,
+  emptyIcon,
+  emptyAction,
+  emptyKind = "empty",
   striped = false,
 }) {
   const responsiveTableClass = mobileCards
@@ -45,6 +55,16 @@ export default function DataTable({
     ? column.render(row, presentation)
     : renderCell ? renderCell(column.key, row, presentation) : row[column.key];
   const alignClass = (column) => column.align === "right" ? "text-right" : column.align === "center" ? "text-center" : "text-left";
+  const renderedEmptyState = emptyState || (
+    <EmptyState
+      icon={emptyIcon}
+      kind={emptyKind}
+      title={emptyTitle || undefined}
+      description={emptyDescription || (emptyText !== "No records found." ? emptyText : undefined)}
+      action={emptyAction}
+      compact
+    />
+  );
   return (
     <div
       style={maxHeight ? { "--data-table-max-height": maxHeight } : undefined}
@@ -78,7 +98,11 @@ export default function DataTable({
             </motion.tr>
           ))}
           {rows.length === 0 && (
-            <tr><td colSpan={columns.length} className={`${compact ? "px-3 py-6" : "px-5 py-10"} text-center text-sm text-brand-gray`}>{emptyText}</td></tr>
+            <tr>
+              <td colSpan={columns.length} className="p-0 align-middle">
+                {renderedEmptyState}
+              </td>
+            </tr>
           )}
         </tbody>
       </table>
@@ -108,7 +132,7 @@ export default function DataTable({
                </dl>
              </motion.div>
            ))}
-          {rows.length === 0 && <div className="p-6 text-center text-sm text-brand-gray">{emptyText}</div>}
+          {rows.length === 0 && <div>{renderedEmptyState}</div>}
         </div>
       )}
     </div>
