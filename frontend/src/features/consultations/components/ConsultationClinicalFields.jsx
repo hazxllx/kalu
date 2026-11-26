@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/components/ConsultationClinicalFields.jsx
 import React from "react";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 

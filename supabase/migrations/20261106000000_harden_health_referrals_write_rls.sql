@@ -1,3 +1,4 @@
+-- supabase/migrations/20261106000000_harden_health_referrals_write_rls.sql
 -- =============================================================================
 -- Harden health_referrals WRITE policies to match the READ boundary.
 --

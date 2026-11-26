@@ -1,3 +1,4 @@
+-- supabase/migrations/20261008090000_admin_account_lifecycle.sql
 begin;
 
 create or replace function public.admin_provision_profile(

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261124091000_immunization_next_dose_notifications.sql
 begin;
 
 alter table public.immunizations

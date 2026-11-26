@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120140000_resident_risk_analytics_parity.sql
 -- Keep database-backed resident risk classifications identical to the
 -- canonical backend residentRisk.assessVitals implementation.
 begin;

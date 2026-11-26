@@ -1,3 +1,4 @@
+-- supabase/migrations/20261125000000_remove_legacy_identity_verification.sql
 -- Remove any legacy third-party identity-verification objects on databases
 -- that applied the original integration migrations.
 

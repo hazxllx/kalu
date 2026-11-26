@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/FAQSection.jsx
 import React, { useState } from "react";
 import { Minus, Plus, Mail, Phone } from "lucide-react";
 import { SectionHeading } from "@/components/branding/GovChrome";

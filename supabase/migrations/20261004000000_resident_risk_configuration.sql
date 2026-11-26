@@ -1,3 +1,4 @@
+-- supabase/migrations/20261004000000_resident_risk_configuration.sql
 -- Resident risk assessment configuration + persisted resident risk.
 --
 -- Establishes a SINGLE authoritative, rule-based source for resident risk:

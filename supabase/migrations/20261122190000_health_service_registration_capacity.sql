@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122190000_health_service_registration_capacity.sql
 begin;
 
 alter table public.health_services

@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/scheduleCalendarUtils.js
 export function toDateKey(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
   const y = date.getFullYear();

@@ -1,3 +1,4 @@
+// backend/src/repositories/supabaseRepository.js
 /**
  * Supabase (PostgreSQL) repository driver for KALUSAGAP
  * (`route -> authenticate -> authorize -> controller -> service -> supabaseRepository`).

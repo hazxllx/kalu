@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/Features.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { Activity, ShieldAlert, Syringe, HeartPulse, Apple, Sun } from "lucide-react";

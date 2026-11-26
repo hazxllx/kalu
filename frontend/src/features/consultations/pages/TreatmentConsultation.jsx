@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/pages/TreatmentConsultation.jsx
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";

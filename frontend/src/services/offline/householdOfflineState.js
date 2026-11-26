@@ -1,3 +1,4 @@
+// frontend/src/services/offline/householdOfflineState.js
 export const mergePendingHouseholdUpdates = (household, operations) =>
   operations.reduce((current, operation) => {
     if (

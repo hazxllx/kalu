@@ -1,3 +1,4 @@
+-- supabase/migrations/20261128120000_resident_risk_summary_and_screening.sql
 -- Resident-specific clinical screening details and a permission-scoped,
 -- filterable resident risk register. Overall Low/Moderate/High risk continues
 -- to use the existing configured weighted model; clinical flags are separate.

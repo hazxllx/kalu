@@ -1,3 +1,4 @@
+-- supabase/migrations/20261201090000_route_barangay_reports_through_phn.sql
 -- Route Health Supervisor (BHS-level) reports to the PHN, then PHN reports
 -- upward to the MHO. MHO is a recipient/monitoring role only.
 

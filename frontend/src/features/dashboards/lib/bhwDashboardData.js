@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/lib/bhwDashboardData.js
 const HOUSEHOLD_PAGE_SIZE = 100;
 
 export function bhwDashboardGreeting(date = new Date()) {

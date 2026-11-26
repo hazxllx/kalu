@@ -1,4 +1,5 @@
-﻿import React from "react";
+// frontend/src/components/branding/GovInfoBar.jsx
+import React from "react";
 
 export default function GovInfoBar() {
   return (

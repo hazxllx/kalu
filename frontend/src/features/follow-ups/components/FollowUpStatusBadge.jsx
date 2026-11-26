@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/FollowUpStatusBadge.jsx
 import React from "react";
 
 /**

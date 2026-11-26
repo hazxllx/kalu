@@ -1,3 +1,4 @@
+-- supabase/migrations/20261123120000_dynamic_advisories.sql
 begin;
 
 create table public.advisories (

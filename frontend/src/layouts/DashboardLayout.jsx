@@ -1,3 +1,4 @@
+// frontend/src/layouts/DashboardLayout.jsx
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { Outlet, useLocation, useNavigate, Link, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -313,6 +314,22 @@ export default function DashboardLayout({ roleKey }) {
     roleKey === "resident-limited"
       ? "/app/resident-limited/announcements"
       : `/app/${roleKey}/notifications`;
+
+  const handleNotificationsClick = () => {
+    if (unreadCount === 0) return;
+
+    // Opening the notification center acknowledges the unread notifications.
+    setUnreadCount(0);
+    notificationsApi.markAllRead().catch(() => {
+      // Reconcile the badge if the write fails.
+      notificationsApi.list()
+        .then((result) => {
+          const rows = result?.rows || result || [];
+          setUnreadCount(rows.filter((n) => !n.read_at).length);
+        })
+        .catch(() => {});
+    });
+  };
 
   // A pending resident sitting in the limited area re-checks their
   // authoritative profile whenever they open or navigate within it.
@@ -782,6 +799,7 @@ export default function DashboardLayout({ roleKey }) {
             <OfflineStatusIndicator />
             <Link
               to={notificationsPath}
+              onClick={handleNotificationsClick}
               aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
               className={`relative flex items-center justify-center rounded-md hover:bg-slate-50 dark:hover:bg-hover ${roleKey === "admin" ? "h-9 w-9" : "h-10 w-10"}`}
             >

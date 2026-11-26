@@ -1,3 +1,4 @@
+// backend/src/config/bpThresholds.js
 // Shared classification rules and validation for saved admin thresholds.
 import {
   DEFAULT_BP_THRESHOLDS, BP_CATEGORIES, BP_READING_BOUNDS,

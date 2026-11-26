@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/VerificationBadge.jsx
 import React from "react";
 
 const SIZES = {

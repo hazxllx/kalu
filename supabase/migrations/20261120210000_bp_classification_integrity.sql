@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120210000_bp_classification_integrity.sql
 -- Persist the server-computed shared BP snapshot through the atomic triage RPC.
 -- No backfill: historical measurements and classification snapshots are retained.
 do $$

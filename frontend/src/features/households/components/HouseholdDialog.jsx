@@ -1,3 +1,4 @@
+// frontend/src/features/households/components/HouseholdDialog.jsx
 import React, { useLayoutEffect, useRef } from "react";
 
 export default function HouseholdDialog({ label, onClose, className = "max-w-2xl", children }) {

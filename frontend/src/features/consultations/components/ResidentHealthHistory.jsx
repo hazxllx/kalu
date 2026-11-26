@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/components/ResidentHealthHistory.jsx
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { consultationsApi, residentsApi } from "@/services/api";
 import { loadServerRows } from "@/lib/serverRows";

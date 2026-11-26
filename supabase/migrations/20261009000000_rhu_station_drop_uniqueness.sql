@@ -1,3 +1,4 @@
+-- supabase/migrations/20261009000000_rhu_station_drop_uniqueness.sql
 -- =============================================================================
 -- KALUSAGAP — Remove ALL per-facility RHU personnel uniqueness
 --

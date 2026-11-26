@@ -1,3 +1,4 @@
+-- supabase/migrations/20260928150000_staff_account_verification.sql
 -- =============================================================================
 -- KALUSAGAP — staff account verification (operational approval workflow)
 --

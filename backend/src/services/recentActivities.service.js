@@ -1,3 +1,4 @@
+// backend/src/services/recentActivities.service.js
 import repository from '../repositories/index.js';
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';

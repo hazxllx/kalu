@@ -1,3 +1,4 @@
+// backend/src/controllers/phnQueue.controller.js
 /**
  * Public Health Nurse (PHN) clinical queue and RHU referral controller.
  *

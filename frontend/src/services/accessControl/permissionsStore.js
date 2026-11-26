@@ -1,3 +1,4 @@
+// frontend/src/services/accessControl/permissionsStore.js
 /**
  * Persistence for the Role & Permission matrix and its audit trail.
  *

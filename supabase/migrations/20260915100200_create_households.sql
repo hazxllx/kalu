@@ -1,3 +1,4 @@
+-- supabase/migrations/20260915100200_create_households.sql
 -- =============================================================================
 -- KALUSAGAP — households & household members
 --

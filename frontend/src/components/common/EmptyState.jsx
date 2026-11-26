@@ -1,3 +1,4 @@
+// frontend/src/components/common/EmptyState.jsx
 import React from "react";
 
 /**

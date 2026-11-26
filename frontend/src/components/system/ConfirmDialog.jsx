@@ -1,3 +1,4 @@
+// frontend/src/components/system/ConfirmDialog.jsx
 import React, { useState } from "react";
 import { X, AlertTriangle } from "lucide-react";
 import { TYPE } from "@/lib/designTokens";

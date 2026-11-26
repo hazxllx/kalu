@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/DocumentPreviewCard.jsx
 import React, { useEffect, useState } from "react";
 import { Loader2, FileText, Maximize2, Download } from "lucide-react";
 

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120093000_followup_facility_assignment_fix.sql
 -- Ensure every operational follow-up can route resident schedule requests to
 -- the creator's registered facility, or the registered BHS for the resident's
 -- barangay when the creator has no facility assignment.

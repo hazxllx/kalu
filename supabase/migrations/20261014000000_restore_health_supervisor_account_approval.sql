@@ -1,3 +1,4 @@
+-- supabase/migrations/20261014000000_restore_health_supervisor_account_approval.sql
 -- The Health Supervisor's established staff-account authority includes BHW
 -- and resident requests. Restore the persisted permission to its application
 -- default so the sidebar, API authorization, and role matrix agree.

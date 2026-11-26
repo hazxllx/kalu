@@ -1,3 +1,4 @@
+-- supabase/migrations/20261116110000_maternal_visit_detail_snapshots.sql
 -- Preserve the clinical details captured at each maternal encounter while
 -- reusing the existing maternal_visits history table.
 

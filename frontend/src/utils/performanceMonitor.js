@@ -1,3 +1,4 @@
+// frontend/src/utils/performanceMonitor.js
 /**
  * Performance monitoring utilities for KALUSAGAP
  * Measures and reports key performance metrics

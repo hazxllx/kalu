@@ -1,3 +1,4 @@
+// frontend/src/services/local/dashboardData.js
 /**
  * Local (non-demo) dashboard and analytics datasets.
  *

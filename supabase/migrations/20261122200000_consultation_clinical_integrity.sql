@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122200000_consultation_clinical_integrity.sql
 -- Additive consultation integrity and saved screening risk integration.
 -- No historical measurements, pregnancy episodes, protocol approvals, or rows are rewritten.
 begin;

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261028000000_report_review_history.sql
 begin;
 
 create table if not exists public.report_status_history (

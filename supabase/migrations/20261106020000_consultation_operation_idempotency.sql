@@ -1,3 +1,4 @@
+-- supabase/migrations/20261106020000_consultation_operation_idempotency.sql
 -- Durable consultation creates. Apply before deploying the SAFE_SYNC client.
 -- Requires the existing visits, follow-up confirmation/operation-key, shared
 -- consultation_id and consultation notification migrations. No clinical rows

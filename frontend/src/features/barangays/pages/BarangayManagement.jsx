@@ -1,3 +1,4 @@
+// frontend/src/features/barangays/pages/BarangayManagement.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";

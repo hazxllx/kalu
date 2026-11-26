@@ -1,3 +1,4 @@
+// frontend/src/components/common/CoverageSelector.jsx
 import React from "react";
 import { MapPin } from "lucide-react";
 

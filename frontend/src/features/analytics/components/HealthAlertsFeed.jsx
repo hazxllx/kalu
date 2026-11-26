@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/HealthAlertsFeed.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import Icon from "@/components/common/Icon";

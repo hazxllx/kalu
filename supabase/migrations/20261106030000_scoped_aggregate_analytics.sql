@@ -1,3 +1,4 @@
+-- supabase/migrations/20261106030000_scoped_aggregate_analytics.sql
 begin;
 
 -- No clinical rows leave these RPCs. Scope is resolved again from the stored

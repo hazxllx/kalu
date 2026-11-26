@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/HouseholdRiskOverview.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";

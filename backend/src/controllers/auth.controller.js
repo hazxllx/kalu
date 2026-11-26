@@ -1,3 +1,4 @@
+// backend/src/controllers/auth.controller.js
 import * as authService from '../services/auth.service.js';
 import { updateOwnContact } from '../services/profile.service.js';
 import { sendData } from '../utils/apiResponse.js';

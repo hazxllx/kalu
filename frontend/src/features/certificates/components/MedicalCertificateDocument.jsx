@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/components/MedicalCertificateDocument.jsx
 import React from "react";
 
 /**

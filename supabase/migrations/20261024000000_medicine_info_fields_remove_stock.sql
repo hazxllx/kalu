@@ -1,3 +1,4 @@
+-- supabase/migrations/20261024000000_medicine_info_fields_remove_stock.sql
 -- Medicine information fields + removal of per-facility stock availability.
 --
 -- Builds on 20261011120000_bp_thresholds_and_medicine_catalog.sql:

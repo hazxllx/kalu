@@ -1,3 +1,4 @@
+// frontend/src/components/branding/GovIllustration.jsx
 import React from "react";
 
 export default function GovIllustration({ variant = "hero" }) {

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261117150000_temporary_password_email_and_pili_scope.sql
 begin;
 
 alter table public.personnel_accounts

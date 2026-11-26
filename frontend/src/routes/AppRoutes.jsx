@@ -1,3 +1,4 @@
+// frontend/src/routes/AppRoutes.jsx
 import React, { Suspense, lazy } from 'react';
 import { Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import DashboardLayout from '@/layouts/DashboardLayout';

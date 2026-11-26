@@ -1,3 +1,4 @@
+// frontend/src/features/offline/OfflineSyncProvider.jsx
 import { useEffect, useRef } from 'react';
 
 import { useAuth } from '@/context/AuthContext';

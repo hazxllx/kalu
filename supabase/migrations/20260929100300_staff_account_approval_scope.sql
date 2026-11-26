@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100300_staff_account_approval_scope.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-006: staff account approval must be municipality/barangay
 -- scoped, not role-only.

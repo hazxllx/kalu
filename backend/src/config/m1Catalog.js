@@ -1,3 +1,4 @@
+// backend/src/config/m1Catalog.js
 /**
  * KALUSAGAP — FHSIS M1 indicator catalog (single source of truth).
  *

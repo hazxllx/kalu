@@ -1,3 +1,4 @@
+// frontend/src/services/api/index.js
 /**
  * Barrel for the real (Express/Supabase-backed) API service layer.
  *

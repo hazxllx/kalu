@@ -1,3 +1,4 @@
+-- supabase/migrations/20261201130000_restore_bhs_report_delivery.sql
 -- Re-route still-pending BHS reports created under the previous RHU inbox
 -- workflow to the PHN inbox. Preserve records that have already been received,
 -- reviewed, accepted, returned, or rejected.

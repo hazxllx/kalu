@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/TclTabs.jsx
 import React, { useId } from "react";
 
 export default function TclTabs({ tabs, active, onChange, label = "TCL sections", className = "", idPrefix, panelId }) {

@@ -1,3 +1,4 @@
+// frontend/src/features/authentication/components/UserNotRegisteredError.jsx
 import React from 'react';
 
 const UserNotRegisteredError = () => {

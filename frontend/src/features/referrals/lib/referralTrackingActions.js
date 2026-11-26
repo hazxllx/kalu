@@ -1,3 +1,4 @@
+// frontend/src/features/referrals/lib/referralTrackingActions.js
 export const shouldShowReferralDownloadAction = (user) => user?.role !== "mho";
 
 export const REFERRAL_STATUSES = Object.freeze(["Pending", "Accepted", "In Progress", "Completed", "Rejected", "Cancelled"]);

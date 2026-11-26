@@ -1,3 +1,4 @@
+// frontend/src/services/offline/queue.js
 import { assertCurrentOwner, captureOwnerGuard, db, requireEncryptedPayload, safeWrite } from './db.js';
 import { encryptJson } from './crypto.js';
 import { newId, newLocalRef } from './ids.js';

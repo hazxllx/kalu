@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/AddHouseholdPage.jsx
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -978,10 +979,12 @@ export default function AddHouseholdPage() {
       <PageHeader
         eyebrow="HOUSEHOLD PROFILING"
         title="Add New Household"
+        titleClassName="text-[2.25rem] md:text-3xl"
         subtitle="Register a new household and record its basic information."
+        subtitleClassName="text-lg md:text-base"
         dense
         meta={
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex w-full flex-col items-center gap-2 sm:w-auto sm:items-end">
             <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
               isOffline
                 ? "border-amber-200/40 bg-amber-100/10 text-amber-100"
@@ -997,7 +1000,7 @@ export default function AddHouseholdPage() {
               type="button"
               onClick={handleBack}
               disabled={saving}
-              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-btn border border-white/20 bg-white/10 px-3 text-xs font-medium text-white transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-60"
+              className="inline-flex min-h-12 shrink-0 items-center gap-1.5 rounded-btn border border-white/20 bg-white/10 px-8 text-base font-semibold text-white transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-60"
               aria-label="Back to Household Profiling"
             >
               <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back
@@ -1015,7 +1018,7 @@ export default function AddHouseholdPage() {
           <Link
             to={householdsPath}
             onClick={(event) => { if (!confirmDiscardChanges()) event.preventDefault(); }}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-btn border border-brand-blue/30 bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-light sm:ml-auto"
+            className="inline-flex min-h-12 w-full shrink-0 items-center justify-center rounded-btn bg-brand-blue px-4 py-2 text-base font-semibold text-white hover:bg-brand-dark sm:ml-auto sm:w-auto"
           >
             Find Existing Household
           </Link>

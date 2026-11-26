@@ -1,3 +1,4 @@
+// frontend/src/features/reports/components/ReportSnapshotView.jsx
 import React from "react";
 import { FileText } from "lucide-react";
 import { recordStatusTone, hasSnapshot } from "@/features/reports/lib/reportSnapshot";

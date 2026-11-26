@@ -1,3 +1,4 @@
+-- supabase/migrations/20261121150000_atomic_transfer_approval_notification.sql
 -- Keep the established approval RPC, identity checks and geography snapshots intact.
 begin;
 

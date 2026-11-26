@@ -1,3 +1,4 @@
+// backend/src/utils/personnelInvitationRecovery.js
 import { createHash, createHmac } from 'node:crypto';
 
 export const digestInvitationRecoverySecret = (secret) => {

@@ -1,3 +1,4 @@
+// backend/src/routes/observability.routes.js
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';

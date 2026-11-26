@@ -1,3 +1,4 @@
+// frontend/src/features/households/lib/riskDetailAccess.js
 /**
  * Access and data-loading separation for HouseholdRiskDetail.
  *

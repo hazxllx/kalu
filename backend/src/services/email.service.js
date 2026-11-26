@@ -1,3 +1,4 @@
+// backend/src/services/email.service.js
 import nodemailer from 'nodemailer';
 import { readFile } from 'node:fs/promises';
 import env from '../config/env.js';

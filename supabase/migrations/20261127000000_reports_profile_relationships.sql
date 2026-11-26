@@ -1,3 +1,4 @@
+-- supabase/migrations/20261127000000_reports_profile_relationships.sql
 begin;
 
 do $$

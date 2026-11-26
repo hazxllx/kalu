@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122100000_delegated_personnel_account_management.sql
 begin;
 
 -- Delegated health-personnel management uses the existing personnel account

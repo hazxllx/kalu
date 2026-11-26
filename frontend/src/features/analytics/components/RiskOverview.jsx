@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/RiskOverview.jsx
 import React from "react";
 import { normalizeRiskDistribution, RISK_PRESENTATION } from "@/lib/riskLevel";
 

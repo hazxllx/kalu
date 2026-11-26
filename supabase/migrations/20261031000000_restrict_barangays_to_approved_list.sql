@@ -1,3 +1,4 @@
+-- supabase/migrations/20261031000000_restrict_barangays_to_approved_list.sql
 begin;
 
 create table if not exists public.approved_barangay_names (

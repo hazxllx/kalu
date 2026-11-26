@@ -1,3 +1,4 @@
+// frontend/src/features/referrals/lib/referralPdf.js
 import { loadDocumentBranding } from "@/lib/documentBranding";
 import { renderReferralPdf } from "./referralPdfRenderer";
 

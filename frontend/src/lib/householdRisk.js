@@ -1,3 +1,4 @@
+// frontend/src/lib/householdRisk.js
 /**
  * Household Risk Clustering — configurable early-intervention rules.
  *

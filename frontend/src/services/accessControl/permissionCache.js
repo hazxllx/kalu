@@ -1,3 +1,4 @@
+// frontend/src/services/accessControl/permissionCache.js
 import { decryptJson, encryptJson } from '../offline/crypto.js';
 import { db, safeWrite } from '../offline/db.js';
 

@@ -1,3 +1,4 @@
+// frontend/src/features/registration/components/FaceVerification.jsx
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera, RotateCcw, Upload, CheckCircle2, X, AlertCircle, ShieldCheck } from "lucide-react";

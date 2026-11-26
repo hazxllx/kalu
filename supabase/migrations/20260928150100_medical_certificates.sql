@@ -1,3 +1,4 @@
+-- supabase/migrations/20260928150100_medical_certificates.sql
 -- =============================================================================
 -- KALUSAGAP — medical certificate register
 --

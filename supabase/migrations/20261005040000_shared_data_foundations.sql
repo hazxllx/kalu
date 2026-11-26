@@ -1,3 +1,4 @@
+-- supabase/migrations/20261005040000_shared_data_foundations.sql
 -- Reviewed and applied. consultation_id matches visits.id (text).
 -- Draft foundation schema for the shared data model required by §5–§22.
 --

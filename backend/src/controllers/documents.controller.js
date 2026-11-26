@@ -1,3 +1,4 @@
+// backend/src/controllers/documents.controller.js
 import * as documentsService from '../services/documents.service.js';
 import ApiError from '../utils/apiError.js';
 import { sendCreated, sendData, sendNoContent } from '../utils/apiResponse.js';

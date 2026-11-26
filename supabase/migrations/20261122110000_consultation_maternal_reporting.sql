@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122110000_consultation_maternal_reporting.sql
 -- Project explicitly classified consultations in the same transaction as visits.
 -- No historical case/encounter is backfilled, deleted, or clinically reclassified.
 begin;

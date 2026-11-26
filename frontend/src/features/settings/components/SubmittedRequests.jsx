@@ -1,3 +1,4 @@
+// frontend/src/features/settings/components/SubmittedRequests.jsx
 import React, { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Card } from "@/components/common/Card";

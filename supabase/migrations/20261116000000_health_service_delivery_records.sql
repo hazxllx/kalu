@@ -1,3 +1,4 @@
+-- supabase/migrations/20261116000000_health_service_delivery_records.sql
 -- Capture what was assessed and delivered during a scheduled health service.
 -- These fields extend the existing resident/service attendance record so a
 -- service is documented once and can be shown in the resident's Health Record.

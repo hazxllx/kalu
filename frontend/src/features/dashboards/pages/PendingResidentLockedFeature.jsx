@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/PendingResidentLockedFeature.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Lock, ShieldCheck } from "lucide-react";

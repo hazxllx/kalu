@@ -1,4 +1,5 @@
-﻿import React from "react";
+// frontend/src/features/landing/components/WhyKALUSAGAP.jsx
+import React from "react";
 
 export default function WhyKALUSAGAP() {
   return (

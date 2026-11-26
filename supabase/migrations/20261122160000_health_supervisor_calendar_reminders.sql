@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122160000_health_supervisor_calendar_reminders.sql
 begin;
 
 -- Retain source and recipient ids after deletion so cancellation failures remain diagnosable.

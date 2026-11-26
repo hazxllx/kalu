@@ -1,3 +1,4 @@
+// frontend/src/services/offline/syncCore.js
 /**
  * Pure synchronization helpers (no network, no browser globals) so they can be
  * unit-tested directly and reused by the engine/runner.

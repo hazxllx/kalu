@@ -1,3 +1,4 @@
+// frontend/src/lib/designTokens.js
 /**
  * KALUSAGAP Design System — canonical tokens.
  *

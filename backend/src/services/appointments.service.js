@@ -1,3 +1,4 @@
+// backend/src/services/appointments.service.js
 /**
  * Resident Appointment Booking & Clinic Schedule Service (`services/appointments.service.js`).
  *

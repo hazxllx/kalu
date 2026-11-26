@@ -1,3 +1,4 @@
+-- supabase/migrations/20260915100100_accounts_documents_and_clinical_scope.sql
 -- =============================================================================
 -- KALUSAGAP — account applications, documents & clinical scope
 --

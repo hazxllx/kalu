@@ -1,3 +1,4 @@
+-- supabase/migrations/20260923100000_health_supervisor_referrals.sql
 -- KALUSAGAP - Health Supervisor referral coordination
 --
 -- Adds public.health_referrals: the barangay-scoped operational referral

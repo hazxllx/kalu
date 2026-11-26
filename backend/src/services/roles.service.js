@@ -1,3 +1,4 @@
+// backend/src/services/roles.service.js
 /**
  * Role & permission matrix service (BUG-011).
  *

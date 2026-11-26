@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/reportingPeriod.js
 /**
  * KALUSAGAP — reusable reporting-period abstraction.
  *

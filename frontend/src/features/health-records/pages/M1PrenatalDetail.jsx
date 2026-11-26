@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1PrenatalDetail.jsx
 /**
  * M1 Prenatal and Postpartum Program Detail Page
  *

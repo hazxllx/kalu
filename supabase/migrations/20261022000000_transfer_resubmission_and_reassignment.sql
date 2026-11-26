@@ -1,3 +1,4 @@
+-- supabase/migrations/20261022000000_transfer_resubmission_and_reassignment.sql
 -- =============================================================================
 -- KALUSAGAP — Resident transfer: resubmission state + complete reassignment
 --

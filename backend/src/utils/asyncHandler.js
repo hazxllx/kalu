@@ -1,3 +1,4 @@
+// backend/src/utils/asyncHandler.js
 /**
  * @module utils/asyncHandler
  * @description Express promise-rejection bridge for asynchronous middleware and controllers.

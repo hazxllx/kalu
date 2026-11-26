@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/ModulePermissionCard.jsx
 import React from "react";
 import { CheckCheck, Lock, ShieldAlert, XSquare } from "lucide-react";
 

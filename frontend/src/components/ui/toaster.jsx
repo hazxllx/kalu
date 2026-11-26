@@ -1,3 +1,4 @@
+// frontend/src/components/ui/toaster.jsx
 import { useToast } from "@/components/ui/use-toast";
 import {
   Toast,

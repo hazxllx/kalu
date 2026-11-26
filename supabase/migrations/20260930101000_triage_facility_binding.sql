@@ -1,3 +1,4 @@
+-- supabase/migrations/20260930101000_triage_facility_binding.sql
 -- Persist RHU triage facility context from the authenticated staff assignment.
 
 begin;

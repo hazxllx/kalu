@@ -1,3 +1,4 @@
+-- supabase/migrations/20260920210000_resident_registration_documents.sql
 -- KALUSAGAP — Resident registration document requirement
 --
 -- Adds a lightweight registration_documents view/helper so the registration

@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/HealthStatusSummary.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck, Activity, AlertCircle, TrendingUp, TrendingDown } from "lucide-react";

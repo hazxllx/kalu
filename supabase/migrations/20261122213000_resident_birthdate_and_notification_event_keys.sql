@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122213000_resident_birthdate_and_notification_event_keys.sql
 begin;
 
 alter table public.notifications

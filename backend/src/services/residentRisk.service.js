@@ -1,3 +1,4 @@
+// backend/src/services/residentRisk.service.js
 /**
  * Resident risk service — applies the authoritative engine (`utils/residentRisk`)
  * to residents using their recorded consultation data, and exposes the

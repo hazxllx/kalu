@@ -1,3 +1,4 @@
+// frontend/src/features/triage/pages/RhuTriage.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";

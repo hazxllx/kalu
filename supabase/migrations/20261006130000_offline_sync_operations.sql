@@ -1,3 +1,4 @@
+-- supabase/migrations/20261006130000_offline_sync_operations.sql
 -- KALUSAGAP — Offline synchronization support
 --
 -- Additive only. No existing table, row, policy or grant is dropped or

@@ -1,3 +1,4 @@
+// frontend/src/services/api/householdRiskApi.js
 import { api } from "./apiClient";
 import { RISK_LEVELS } from "../../lib/householdRisk.js";
 

@@ -1,3 +1,4 @@
+// frontend/src/features/authentication/personnelPasswordSetup.js
 export const isManagedPersonnelSession = (session) => session?.user?.app_metadata?.personnel_managed === true;
 
 export async function resolvePasswordSetup(session, loadStatus, { knownRequired = false } = {}) {

@@ -1,3 +1,4 @@
+// frontend/src/features/landing/pages/Landing.jsx
 import React from "react";
 import Navbar from "@/features/landing/components/Navbar";
 import Hero from "@/features/landing/components/Hero";

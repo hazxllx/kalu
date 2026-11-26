@@ -1,3 +1,4 @@
+// backend/src/services/notifications.service.js
 /**
  * Account notification helpers (server side).
  *

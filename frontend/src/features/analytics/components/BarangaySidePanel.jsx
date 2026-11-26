@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/BarangaySidePanel.jsx
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Users, Home, Stethoscope, CalendarCheck, CalendarClock, AlertTriangle, Send, HeartPulse, Bell, Activity, UserRound } from "lucide-react";

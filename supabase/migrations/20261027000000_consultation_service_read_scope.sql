@@ -1,3 +1,4 @@
+-- supabase/migrations/20261027000000_consultation_service_read_scope.sql
 -- Keep RHU Personnel's health-service reads behind the consultation-specific
 -- backend endpoint. Other Health Services catalog readers retain their current
 -- municipality/barangay scope; an RHU user may still read a service they

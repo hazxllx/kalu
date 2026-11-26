@@ -1,3 +1,4 @@
+// frontend/src/components/common/Icon.jsx
 import React from "react";
 import {
   Activity, HeartPulse, Home, FileHeart, CalendarClock, RefreshCw, Stethoscope,

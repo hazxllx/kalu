@@ -1,3 +1,4 @@
+-- supabase/migrations/20261113000000_kalusagap_pregnancy_encounter_workflow.sql
 -- KALUSAGAP Phase 1: Pregnancy Registration & Encounter-Based Workflow
 --
 -- This migration introduces a smart, encounter-based maternal care management system

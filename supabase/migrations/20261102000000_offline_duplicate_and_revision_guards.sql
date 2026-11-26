@@ -1,3 +1,4 @@
+-- supabase/migrations/20261102000000_offline_duplicate_and_revision_guards.sql
 -- Offline-first sync: make resident creation replay-safe at the database level.
 --
 -- A retried offline resident create (server committed the row but the response

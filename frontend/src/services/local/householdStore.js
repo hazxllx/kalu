@@ -1,3 +1,4 @@
+// frontend/src/services/local/householdStore.js
 import React, { useSyncExternalStore } from "react";
 import { registerWorkingSetReset } from "./accountWorkingSets";
 

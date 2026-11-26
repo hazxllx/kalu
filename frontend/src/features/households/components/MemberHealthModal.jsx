@@ -1,3 +1,4 @@
+// frontend/src/features/households/components/MemberHealthModal.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, HeartPulse, NotebookPen, Lock, CheckCircle2 } from "lucide-react";
 import HouseholdDialog from "./HouseholdDialog";

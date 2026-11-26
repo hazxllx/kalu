@@ -1,3 +1,4 @@
+-- supabase/migrations/20261106040000_resident_revision_concurrency.sql
 -- Integer resident versions cover every writer, including verification,
 -- household linking and transfers. Existing timestamp If-Match requests remain
 -- supported by the API so encrypted drafts from older clients are not lost.

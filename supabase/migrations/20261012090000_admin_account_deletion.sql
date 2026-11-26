@@ -1,3 +1,4 @@
+-- supabase/migrations/20261012090000_admin_account_deletion.sql
 -- =============================================================================
 -- KALUSAGAP — permanent account deletion guard
 --

@@ -1,3 +1,4 @@
+// frontend/src/features/triage/lib/triageValidation.js
 import { classifyBloodPressure, parseBloodPressure } from '../../../../../shared/bloodPressure.js';
 
 // Entry safeguards, not diagnostic or age-specific normal ranges.

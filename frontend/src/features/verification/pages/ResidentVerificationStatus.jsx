@@ -1,3 +1,4 @@
+// frontend/src/features/verification/pages/ResidentVerificationStatus.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";

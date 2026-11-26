@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/EditHouseholdPage.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, RotateCcw } from 'lucide-react';
@@ -81,6 +82,38 @@ const ageFromBirthday = (value) => {
   return age >= 0 ? age : '';
 };
 
+// Older household records used display labels (for example "No" and
+// "Member") while the current API/validators use canonical values. Normalize
+// at the edit boundary so existing records do not appear selected but fail
+// validation when saved.
+const canonicalOption = (value, options) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const match = options.find((option) => {
+    const optionValue = typeof option === 'string' ? option : option.value;
+    const optionLabel = typeof option === 'string' ? option : option.label;
+    return String(optionValue).toLowerCase() === raw.toLowerCase()
+      || String(optionLabel).toLowerCase() === raw.toLowerCase();
+  });
+  return match ? (typeof match === 'string' ? match : match.value) : raw;
+};
+
+const canonicalBoolean = (value) => {
+  if (typeof value === 'boolean') return value;
+  return ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase());
+};
+
+const normalizeMemberForEdit = (member = {}) => ({
+  ...member,
+  relationship: canonicalOption(member.relationship, RELATIONSHIPS),
+  sex: canonicalOption(member.sex, SEX_OPTIONS),
+  classification: canonicalOption(member.classification, CLASSIFICATIONS),
+  philhealth: canonicalOption(member.philhealth, MEMBER_PHILHEALTH),
+  fpMethod: canonicalOption(member.fpMethod, FP_METHODS),
+  quarterStatus: canonicalOption(member.quarterStatus, QUARTER_STATUSES),
+  isPwd: canonicalBoolean(member.isPwd ?? member.pwd),
+});
+
 function Field({ label, type = 'text', value, options = [], onChange }) {
   if (type === 'boolean') {
     const checked = value === true || ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase());
@@ -145,10 +178,17 @@ export default function EditHouseholdPage() {
     getHouseholdOffline({ ownerId: user?.id, householdId })
       .then((household) => {
         if (!active) return;
-        setForm({ ...household });
-        setSavedForm({ ...household });
-        setMembers((household.members || []).map((member) => ({ ...member })));
-        setSavedMembers((household.members || []).map((member) => ({ ...member })));
+        const normalizedForm = {
+          ...household,
+          philhealthMember: canonicalBoolean(household.philhealthMember),
+          waterTreated: canonicalBoolean(household.waterTreated),
+          wasteSegregation: canonicalBoolean(household.wasteSegregation),
+        };
+        const normalizedMembers = (household.members || []).map(normalizeMemberForEdit);
+        setForm(normalizedForm);
+        setSavedForm(normalizedForm);
+        setMembers(normalizedMembers);
+        setSavedMembers(normalizedMembers);
         setRevision(household.revision ?? null);
       })
       .catch((loadError) => { if (active) setError(loadError?.message || 'Could not load this household.'); })
@@ -195,7 +235,12 @@ export default function EditHouseholdPage() {
 
   const saveSection = async (section) => {
     if (!canAny(['households.create', 'households.verify'])) return setError('You do not have permission to edit this household.');
-    const patch = Object.fromEntries(section.fields.map(([field]) => [field, form[field] ?? (field === 'treatmentMethods' ? [] : '')]));
+    const patch = Object.fromEntries(section.fields.map(([field]) => {
+      const value = form[field] ?? (field === 'treatmentMethods' ? [] : '');
+      return [field, ['philhealthMember', 'waterTreated', 'wasteSegregation'].includes(field)
+        ? canonicalBoolean(value)
+        : value];
+    }));
     if (patch.families !== undefined && patch.families !== '') patch.families = Number(patch.families);
     if (patch.monthlyIncome === '') patch.monthlyIncome = null;
     setSavingSection(section.id); setError(''); setNotice('');
@@ -215,8 +260,9 @@ export default function EditHouseholdPage() {
   const saveMember = async (member) => {
     setSavingMember(member.id); setError(''); setNotice('');
     try {
-      const response = await householdsApi.updateMember(householdId, member.id, member);
-      const updatedMember = { ...member, ...(response?.member || {}) };
+      const normalizedMember = normalizeMemberForEdit(member);
+      const response = await householdsApi.updateMember(householdId, member.id, normalizedMember);
+      const updatedMember = normalizeMemberForEdit({ ...normalizedMember, ...(response?.member || {}) });
       setMembers((current) => current.map((item) => item.id === member.id ? updatedMember : item));
       setSavedMembers((current) => current.map((item) => item.id === member.id ? updatedMember : item));
       let historyNotice = '';

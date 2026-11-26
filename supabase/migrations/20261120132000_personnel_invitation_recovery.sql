@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120132000_personnel_invitation_recovery.sql
 begin;
 
 alter table public.personnel_accounts

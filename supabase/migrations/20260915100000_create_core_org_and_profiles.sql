@@ -1,3 +1,4 @@
+-- supabase/migrations/20260915100000_create_core_org_and_profiles.sql
 -- =============================================================================
 -- KALUSAGAP — core organization & account schema
 --

@@ -1,3 +1,4 @@
+// frontend/src/features/referrals/lib/referralDateValidation.js
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const LOCAL_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 const REFERRAL_TIME_ZONE = "Asia/Manila";

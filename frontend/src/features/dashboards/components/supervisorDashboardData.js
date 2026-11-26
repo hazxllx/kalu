@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/supervisorDashboardData.js
 export const OPEN_REFERRAL_STATUSES = new Set(["Pending", "Accepted", "In Progress"]);
 export const OPEN_CONSULTATION_STATUSES = ["draft", "submitted", "received", "in_review", "referred"];
 const OPEN_FOLLOW_UPS = new Set(["scheduled", "pending", "today", "upcoming", "ongoing"]);

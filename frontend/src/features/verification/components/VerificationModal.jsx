@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/VerificationModal.jsx
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, CheckCircle2, Clock, ShieldCheck } from "lucide-react";

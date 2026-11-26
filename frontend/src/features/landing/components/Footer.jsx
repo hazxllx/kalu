@@ -1,4 +1,5 @@
-﻿import React from "react";
+// frontend/src/features/landing/components/Footer.jsx
+import React from "react";
 import { Link } from "react-router-dom";
 import { Mail, MapPin, Phone, Clock, ArrowUpRight } from "lucide-react";
 import GovSeal from "@/components/branding/GovSeal";

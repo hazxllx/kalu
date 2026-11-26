@@ -1,3 +1,4 @@
+-- supabase/migrations/20261005000000_document_automated_screening.sql
 -- =============================================================================
 -- KALUSAGAP — automated document screening result columns
 --

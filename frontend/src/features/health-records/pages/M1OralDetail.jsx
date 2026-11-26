@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1OralDetail.jsx
 /**
  * M1 Oral Health Program Detail Page
  *

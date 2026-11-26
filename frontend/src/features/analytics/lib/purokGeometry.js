@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/lib/purokGeometry.js
 /**
  * Validation for an authoritative purok GeoJSON layer.
  *

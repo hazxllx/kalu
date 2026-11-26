@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/pages/RiskInterventionSettings.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {

@@ -1,3 +1,4 @@
+// frontend/src/lib/permissions.js
 /**
  * KALUSAGAP — Role & Permission registry (frontend source of truth).
  *

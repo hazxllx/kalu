@@ -1,3 +1,4 @@
+// frontend/src/lib/consultationLocations.js
 import { BARANGAYS } from "@/lib/barangays";
 
 /**

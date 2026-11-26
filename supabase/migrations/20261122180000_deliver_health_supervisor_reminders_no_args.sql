@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122180000_deliver_health_supervisor_reminders_no_args.sql
 begin;
 
 create or replace function public.deliver_health_supervisor_reminders_at(p_now timestamptz)

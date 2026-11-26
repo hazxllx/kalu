@@ -1,3 +1,4 @@
+// frontend/src/features/users/personnelLifecycle.js
 export const PERSONNEL_ROLES = Object.freeze([
   "mho", "phn", "health_supervisor", "rhu_personnel", "bhw",
 ]);

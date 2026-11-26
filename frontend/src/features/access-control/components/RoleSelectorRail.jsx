@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/RoleSelectorRail.jsx
 import React from "react";
 import { Lock } from "lucide-react";
 

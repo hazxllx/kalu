@@ -1,3 +1,4 @@
+// frontend/src/features/households/lib/householdOptions.js
 /**
  * Household Profiling — shared option lists, badge styling and risk computation.
  *

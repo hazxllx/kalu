@@ -1,3 +1,4 @@
+-- supabase/migrations/20261107153000_atomic_transfer_scope_repair.sql
 -- Forward-only repair. Retain clinical identities, immutable referral documents,
 -- household census/health history and the already-applied migration versions.
 begin;

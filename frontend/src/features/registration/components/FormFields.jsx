@@ -1,3 +1,4 @@
+// frontend/src/features/registration/components/FormFields.jsx
 import React from "react";
 import { ChevronDown, Asterisk } from "lucide-react";
 

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261030000000_restore_health_supervisor_resident_permissions.sql
 -- Restore Health Supervisor resident-creation and login-account permissions
 -- to their canonical defaults so the Resident Directory and Add Resident flow
 -- behave consistently across the permission catalogue, the persisted matrix,

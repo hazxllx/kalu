@@ -1,3 +1,4 @@
+// backend/src/services/healthServices.service.js
 /**
  * Health services service — real, scoped, database-backed catalog, personnel
  * assignment, resident registration roster, attendance tracking, and attachments.

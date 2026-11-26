@@ -1,3 +1,4 @@
+// frontend/src/features/residents/components/ResidentConflictReview.jsx
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';

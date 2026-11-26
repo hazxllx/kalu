@@ -1,3 +1,4 @@
+-- supabase/migrations/20261011120000_bp_thresholds_and_medicine_catalog.sql
 -- Smart Blood Pressure classification configuration + Medicine catalog.
 --
 -- Adds three capabilities to the existing consultation workflow WITHOUT

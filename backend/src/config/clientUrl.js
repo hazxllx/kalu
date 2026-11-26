@@ -1,3 +1,4 @@
+// backend/src/config/clientUrl.js
 const isLoopbackIpv4 = (hostname) => {
   const octets = hostname.split('.').map(Number);
   return octets.length === 4 && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)

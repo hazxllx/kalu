@@ -1,3 +1,4 @@
+-- supabase/migrations/20261101010000_health_personnel_account_management.sql
 begin;
 
 -- Profiles remain the authorization source. This sidecar separates an approval

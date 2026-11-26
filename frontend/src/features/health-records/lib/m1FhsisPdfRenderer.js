@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/m1FhsisPdfRenderer.js
 import { jsPDF } from "jspdf";
 
 export const PAGE_W = 792;

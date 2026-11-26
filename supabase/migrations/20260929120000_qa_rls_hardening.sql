@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929120000_qa_rls_hardening.sql
 -- =============================================================================
 -- KALUSAGAP — final-QA RLS hardening (forward-only, additive, non-destructive)
 --

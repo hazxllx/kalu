@@ -1,3 +1,4 @@
+// frontend/src/features/reports/lib/reportSnapshot.js
 /**
  * Report snapshot — the immutable, submitted report content.
  *

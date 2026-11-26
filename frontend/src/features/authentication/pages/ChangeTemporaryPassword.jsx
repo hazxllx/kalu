@@ -1,3 +1,4 @@
+// frontend/src/features/authentication/pages/ChangeTemporaryPassword.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Check, CheckCircle2, Circle, Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";

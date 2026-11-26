@@ -1,3 +1,4 @@
+-- supabase/migrations/20261116100000_notification_priority.sql
 begin;
 
 alter table public.notifications

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261123100000_scoped_personnel_invitation_resend.sql
 begin;
 
 -- Let scoped account managers resend setup invitations to personnel accounts

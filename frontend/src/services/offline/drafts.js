@@ -1,3 +1,4 @@
+// frontend/src/services/offline/drafts.js
 import { assertCurrentOwner, captureOwnerGuard, db, requireEncryptedPayload, requireOwnerId, safeWrite } from './db.js';
 import { decryptJson, encryptJson } from './crypto.js';
 import { ownsLock } from './meta.js';

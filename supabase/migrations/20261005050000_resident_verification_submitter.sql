@@ -1,3 +1,4 @@
+-- supabase/migrations/20261005050000_resident_verification_submitter.sql
 -- Applied. Historical rows leave verification_submitted_by
 -- NULL; new submissions populate it correctly.
 -- §9 verification audit: retain the identity that submitted a resident

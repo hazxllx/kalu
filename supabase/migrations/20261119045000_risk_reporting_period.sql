@@ -1,3 +1,4 @@
+-- supabase/migrations/20261119045000_risk_reporting_period.sql
 -- KFT-015: expose selected-period resident risk without changing legacy EW metrics.
 begin;
 

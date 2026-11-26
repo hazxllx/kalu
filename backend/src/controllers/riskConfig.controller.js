@@ -1,3 +1,4 @@
+// backend/src/controllers/riskConfig.controller.js
 /**
  * Community health risk scoring configuration controller.
  *

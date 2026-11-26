@@ -1,3 +1,4 @@
+// backend/src/services/aiProvider/client.js
 /**
  * AI Provider HTTP Client & Factory (`services/aiProvider/client.js`).
  *

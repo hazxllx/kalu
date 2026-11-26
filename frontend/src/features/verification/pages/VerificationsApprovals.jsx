@@ -1,3 +1,4 @@
+// frontend/src/features/verification/pages/VerificationsApprovals.jsx
 import React, { lazy, Suspense, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { usePermissions } from "@/context/PermissionsContext";

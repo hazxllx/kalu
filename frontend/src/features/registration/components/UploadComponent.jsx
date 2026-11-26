@@ -1,3 +1,4 @@
+// frontend/src/features/registration/components/UploadComponent.jsx
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { UploadCloud, FileText, X, ImageIcon, AlertTriangle, XCircle, Loader2, RotateCcw, FileCheck2 } from "lucide-react";

@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100000_medical_certificate_decision_guard.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-001 (CRITICAL): enforce medical-certificate decision authority
 -- at the database layer.

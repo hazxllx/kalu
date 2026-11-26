@@ -1,3 +1,4 @@
+-- supabase/migrations/20261029000100_scope_role_permission_reads.sql
 begin;
 
 -- Authenticated users may inspect their own permission set. Only active

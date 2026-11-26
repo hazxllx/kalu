@@ -1,3 +1,4 @@
+// frontend/src/lib/statusFormatter.js
 /**
  * Status Label Formatter
  * 

@@ -1,3 +1,4 @@
+// frontend/src/components/branding/GovSeal.jsx
 import React from "react";
 import { LOGO_URL } from "@/lib/brand";
 

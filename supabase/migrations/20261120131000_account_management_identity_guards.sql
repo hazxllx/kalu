@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120131000_account_management_identity_guards.sql
 begin;
 
 -- Permission changes must use the API's verified permission and audit checks.

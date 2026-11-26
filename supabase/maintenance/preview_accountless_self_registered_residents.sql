@@ -1,3 +1,4 @@
+-- supabase/maintenance/preview_accountless_self_registered_residents.sql
 -- Read-only preview for the cleanup requested by the project owner.
 -- It selects only residents created by resident self-registration whose Auth
 -- account has since been deleted. Staff-created residents and residents with

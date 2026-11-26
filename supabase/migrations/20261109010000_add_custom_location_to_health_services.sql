@@ -1,3 +1,4 @@
+-- supabase/migrations/20261109010000_add_custom_location_to_health_services.sql
 -- =============================================================================
 -- Add custom_location field to health_services
 --

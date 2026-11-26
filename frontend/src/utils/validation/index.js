@@ -1,3 +1,4 @@
+// frontend/src/utils/validation/index.js
 /**
  * Shared validation helpers for KALUSAGAP forms.
  *

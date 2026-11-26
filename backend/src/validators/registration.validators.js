@@ -1,3 +1,4 @@
+// backend/src/validators/registration.validators.js
 import {
   CIVIL_STATUSES,
   NAME_SUFFIXES,

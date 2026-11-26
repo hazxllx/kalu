@@ -1,3 +1,4 @@
+// backend/src/controllers/barangayBoundaries.controller.js
 import { assignedBarangay, BARANGAY_SCOPED_ROLES } from '../config/scope.js';
 import { getBarangayBoundaries as loadBoundaries } from '../services/barangayBoundaries.service.js';
 import ApiError from '../utils/apiError.js';

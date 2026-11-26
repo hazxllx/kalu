@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120133500_resident_verification_account_status.sql
 begin;
 
 create function public.sync_resident_verification_account_status()

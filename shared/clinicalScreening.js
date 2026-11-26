@@ -1,3 +1,4 @@
+// shared/clinicalScreening.js
 import { parseBloodPressure } from './bloodPressure.js';
 
 export const CLINICAL_SCREENING_CRITERIA_VERSION = 'adult-screening-2026-02';

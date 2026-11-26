@@ -1,3 +1,4 @@
+// frontend/src/services/offline/clinicalOfflineService.js
 /**
  * Clinical read-cache offline service — Phase 1.
  *

@@ -1,3 +1,4 @@
+-- supabase/maintenance/export_accountless_resident_document_paths.sql
 -- Read-only export to preserve the Storage object paths before deleting the
 -- matching residents. Save the result as CSV; remove the objects through the
 -- Supabase Storage API after the SQL cleanup succeeds.

@@ -1,3 +1,4 @@
+// frontend/src/features/settings/components/OfficialLogosSection.jsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, Image, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { Card } from '@/components/common/Card';

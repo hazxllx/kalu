@@ -1,3 +1,4 @@
+-- supabase/migrations/20261006120000_minor_registration_workflow.sql
 -- KALUSAGAP — minor registration, student ID review, and guardian acceptance.
 --
 -- Student IDs remain in the existing private documents bucket and documents

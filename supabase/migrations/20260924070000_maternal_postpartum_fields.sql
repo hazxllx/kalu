@@ -1,3 +1,4 @@
+-- supabase/migrations/20260924070000_maternal_postpartum_fields.sql
 -- KALUSAGAP - Extend M1 / Maternal records with post-partum care, delivery
 -- outcome, supplementation and lifestyle documentation fields.
 --

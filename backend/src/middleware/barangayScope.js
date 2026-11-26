@@ -1,3 +1,4 @@
+// backend/src/middleware/barangayScope.js
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';
 

@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1NcdDetail.jsx
 /**
  * M1 NCD Risk Assessment Program Detail Page
  *

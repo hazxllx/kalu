@@ -1,3 +1,4 @@
+// frontend/src/features/registration/pages/StaffResidentRegistration.jsx
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Loader2 } from "lucide-react";

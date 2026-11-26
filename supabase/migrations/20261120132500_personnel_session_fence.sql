@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120132500_personnel_session_fence.sql
 begin;
 
 alter table public.personnel_accounts

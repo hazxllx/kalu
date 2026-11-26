@@ -1,3 +1,4 @@
+// frontend/src/services/api/residentsApi.js
 import { api } from './apiClient.js';
 
 /**

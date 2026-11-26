@@ -1,3 +1,4 @@
+// shared/barangays.js
 export const APPROVED_BARANGAYS = Object.freeze([
   "San Antonio",
   "San Isidro",

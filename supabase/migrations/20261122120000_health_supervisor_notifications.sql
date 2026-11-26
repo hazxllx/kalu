@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122120000_health_supervisor_notifications.sql
 -- Real recipient-owned Health Supervisor events and durable upcoming reminders.
 -- No historical events are fabricated, and clinical/workflow state is unchanged.
 begin;

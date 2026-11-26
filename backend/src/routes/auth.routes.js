@@ -1,3 +1,4 @@
+// backend/src/routes/auth.routes.js
 /**
  * Authentication, personnel onboarding, and session profile routes (`/api/auth`).
  *

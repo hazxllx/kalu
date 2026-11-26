@@ -1,3 +1,4 @@
+// frontend/src/services/offline/outbox.js
 import { assertCurrentOwner, captureOwnerGuard, db, requireEncryptedPayload, requireOwnerId, safeWrite } from './db.js';
 import { decryptJson, encryptJson, isEncryptedEnvelope } from './crypto.js';
 import { idempotencyKeyFor, newId } from './ids.js';

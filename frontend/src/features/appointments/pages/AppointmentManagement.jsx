@@ -1,3 +1,4 @@
+// frontend/src/features/appointments/pages/AppointmentManagement.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, CalendarCheck, Search, Loader2, RefreshCw, AlertTriangle, CalendarRange } from "lucide-react";
 import StatusBadge from "@/components/common/StatusBadge";

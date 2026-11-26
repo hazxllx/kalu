@@ -1,3 +1,4 @@
+// backend/src/utils/apiError.js
 /**
  * @module utils/apiError
  *

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261201110000_rhu_consultation_assignment_and_service_attendance.sql
 begin;
 
 -- Persist an explicit PHN decision before an RHU Consultation station can see

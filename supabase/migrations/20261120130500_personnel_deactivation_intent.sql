@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120130500_personnel_deactivation_intent.sql
 begin;
 
 -- A requested disable must also cancel activation deferred until account setup.

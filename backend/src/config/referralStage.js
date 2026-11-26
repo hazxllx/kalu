@@ -1,3 +1,4 @@
+// backend/src/config/referralStage.js
 /**
  * Referral progress stage — the single source of truth for how a barangay
  * referral's progress is DISPLAYED across every module (Health Supervisor and

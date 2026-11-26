@@ -1,3 +1,4 @@
+// frontend/src/services/api/healthRecordsApi.js
 import { consultationsApi } from './consultationsApi.js';
 
 /**

@@ -1,3 +1,4 @@
+// frontend/src/features/registration/sendCodeGate.js
 /**
  * Pure gating logic for the resident registration "Send Verification Code"
  * button. Kept free of React so it can be unit-tested with `node --test` and

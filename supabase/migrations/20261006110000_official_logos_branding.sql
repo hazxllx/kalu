@@ -1,3 +1,4 @@
+-- supabase/migrations/20261006110000_official_logos_branding.sql
 begin;
 
 create table public.official_logos (

@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/lib/residentHealthSnapshot.js
 import { manilaDateKey } from "../../follow-ups/lib/scheduleDates.js";
 import { getResidentFollowUpPresentation } from "../../follow-ups/lib/residentFollowUpPresentation.js";
 

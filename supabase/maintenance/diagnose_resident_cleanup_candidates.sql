@@ -1,3 +1,4 @@
+-- supabase/maintenance/diagnose_resident_cleanup_candidates.sql
 -- Read-only diagnostic. Run this in the same Supabase project where the
 -- candidate and linked-history previews were run.
 

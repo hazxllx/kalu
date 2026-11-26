@@ -1,3 +1,4 @@
+// frontend/src/components/common/SearchableSelect.jsx
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, X, Check } from "lucide-react";

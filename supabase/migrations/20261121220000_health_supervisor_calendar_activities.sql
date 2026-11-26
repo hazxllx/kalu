@@ -1,3 +1,4 @@
+-- supabase/migrations/20261121220000_health_supervisor_calendar_activities.sql
 begin;
 
 create table public.calendar_activities (

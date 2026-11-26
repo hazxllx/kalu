@@ -1,3 +1,4 @@
+-- supabase/migrations/20261201120000_selected_period_map_resident_risk.sql
 -- Community-map reporting risk uses the same period-scoped resident assessment
 -- as Early Warning, instead of carrying an earlier high risk through an
 -- incomplete measurement recorded inside the selected period.

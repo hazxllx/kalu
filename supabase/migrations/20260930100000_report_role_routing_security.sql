@@ -1,3 +1,4 @@
+-- supabase/migrations/20260930100000_report_role_routing_security.sql
 -- Keep report delivery aligned with the role-routed API workflow.
 -- Health Supervisor reports are addressed to RHU. RHU Personnel cannot use the
 -- report API, while PHN/MHO have scoped operational oversight.

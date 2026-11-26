@@ -1,4 +1,5 @@
-﻿import React from "react";
+// frontend/src/features/landing/components/HowItWorks.jsx
+import React from "react";
 import { motion } from "framer-motion";
 import { BadgeCheck, CalendarCheck, FileText, Stethoscope, UserPlus } from "lucide-react";
 import { SectionHeading } from "@/components/branding/GovChrome";

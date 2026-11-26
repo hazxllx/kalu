@@ -1,3 +1,4 @@
+-- supabase/migrations/20261118090000_referral_external_destination_contacts.sql
 -- Store optional outside receiving facility and contact details on the canonical referral.
 begin;
 

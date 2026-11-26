@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/TopHealthTrends.jsx
 import React from "react";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";

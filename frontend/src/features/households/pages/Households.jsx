@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/Households.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";

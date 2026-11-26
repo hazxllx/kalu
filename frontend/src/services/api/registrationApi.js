@@ -1,3 +1,4 @@
+// frontend/src/services/api/registrationApi.js
 import api from './apiClient';
 
 /**

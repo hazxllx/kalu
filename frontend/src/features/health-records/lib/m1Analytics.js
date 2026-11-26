@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/m1Analytics.js
 /**
  * M1 / Maternal analytics — pure, deterministic helpers.
  *

@@ -1,3 +1,4 @@
+-- supabase/maintenance/delete_accountless_self_registered_resident_history.sql
 -- Destructive one-time cleanup. Run only after exporting the storage paths with
 -- export_accountless_resident_document_paths.sql and retaining that CSV.
 -- The script aborts unless the exact 26 reviewed residents still match the

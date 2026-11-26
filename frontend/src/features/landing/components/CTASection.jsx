@@ -1,4 +1,5 @@
-﻿import React from "react";
+// frontend/src/features/landing/components/CTASection.jsx
+import React from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, IdCard, Camera, UserCheck } from "lucide-react";
 import GovSeal from "@/components/branding/GovSeal";

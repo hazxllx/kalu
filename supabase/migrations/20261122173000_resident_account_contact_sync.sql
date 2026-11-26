@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122173000_resident_account_contact_sync.sql
 -- Keep a linked resident's contact and account contact in the same transaction.
 -- Ownership is never created or changed here, and no existing data is backfilled.
 begin;

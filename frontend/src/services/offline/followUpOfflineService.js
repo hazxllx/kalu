@@ -1,3 +1,4 @@
+// frontend/src/services/offline/followUpOfflineService.js
 import { followUpsApi, residentsApi } from '@/services/api';
 import { classifySyncError, SYNC_ERROR } from './errors.js';
 import { queueCreate, queueUpdate } from './queue.js';

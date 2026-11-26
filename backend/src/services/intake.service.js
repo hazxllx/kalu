@@ -1,3 +1,4 @@
+// backend/src/services/intake.service.js
 /**
  * Intake workflow service (BHW / RHU personnel / Health Supervisor).
  *

@@ -1,3 +1,4 @@
+// frontend/src/services/api/authorizedViewsApi.js
 import api from './apiClient';
 
 const aggregate = (value, arrays, summary = true) => {

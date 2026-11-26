@@ -1,3 +1,4 @@
+// backend/src/services/personnelNotifications.service.js
 import { randomBytes } from 'node:crypto';
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';

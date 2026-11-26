@@ -1,3 +1,4 @@
+// backend/src/controllers/analytics.controller.js
 import * as analyticsService from '../services/analytics.service.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import ApiError from '../utils/apiError.js';

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261014000100_medical_certificate_approval_workflow.sql
 begin;
 
 alter table public.medical_certificates

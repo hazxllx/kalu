@@ -1,3 +1,4 @@
+-- supabase/migrations/20261119050000_household_cluster_assignment.sql
 -- Keep the four-tier community cluster assignment separate from the household's
 -- three-tier environmental assessment stored on public.households.risk_level.
 begin;

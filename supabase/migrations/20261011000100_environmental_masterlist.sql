@@ -1,3 +1,4 @@
+-- supabase/migrations/20261011000100_environmental_masterlist.sql
 -- KALUSAGAP - Environmental Health Masterlist (household sanitation monitoring)
 -- Additive only. Integrates the official "Environmental Masterlist" workbook
 -- (Part 1 Household & Water Supply, Part 2 Sanitation Facilities, Part 3 Solid

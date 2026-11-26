@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/LabResultsPanel.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { FileText, FlaskConical, Loader2, Upload } from "lucide-react";
 import { api } from "@/services/api";

@@ -1,3 +1,4 @@
+-- supabase/migrations/20260903120000_create_rhu_patient_workflow.sql
 -- =============================================================================
 -- KALUSAGAP — RHU patient workflow schema
 --

@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/About.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { FileText, Users, ShieldCheck, HeartPulse, MapPin, Quote } from "lucide-react";

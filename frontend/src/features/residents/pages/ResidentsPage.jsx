@@ -1,4 +1,5 @@
-﻿import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+// frontend/src/features/residents/pages/ResidentsPage.jsx
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, MoreVertical, Users } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";

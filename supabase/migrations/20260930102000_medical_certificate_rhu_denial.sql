@@ -1,3 +1,4 @@
+-- supabase/migrations/20260930102000_medical_certificate_rhu_denial.sql
 -- RHU Personnel are not authorized to access or prepare medical certificates.
 -- Preserve the existing scope rules for every other role and add an explicit
 -- database-layer exclusion for RHU Personnel.

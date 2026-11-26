@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/components/PhnCheckupWorkbench.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle, FileText, Pill } from "lucide-react";
 import { Card } from "@/components/common/Card";

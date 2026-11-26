@@ -1,3 +1,4 @@
+-- supabase/migrations/20261009090000_harden_operational_clinical_rls.sql
 -- KALUSAGAP - Restrict direct writes to operational clinical records
 --
 -- The Express API already excludes BHW from these workflows. These policies

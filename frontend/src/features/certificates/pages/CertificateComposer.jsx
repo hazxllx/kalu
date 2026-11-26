@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/pages/CertificateComposer.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";

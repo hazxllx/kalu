@@ -1,3 +1,4 @@
+// frontend/src/components/system/SummaryStrip.jsx
 import React, { forwardRef } from "react";
 import { ChevronRight } from "lucide-react";
 import { TYPE } from "@/lib/designTokens";

@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929130000_transfer_otp_column_grant_fix.sql
 -- =============================================================================
 -- KALUSAGAP — transfer_requests OTP column exposure, correct fix (BUG-012)
 --

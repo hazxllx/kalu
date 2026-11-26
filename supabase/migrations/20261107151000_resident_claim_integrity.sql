@@ -1,3 +1,4 @@
+-- supabase/migrations/20261107151000_resident_claim_integrity.sql
 -- Reserve account ownership without rewriting or selecting a winner among
 -- existing duplicate clinical profiles. A real unique key arbitrates new claims
 -- even when the older residents unique index could not be installed.

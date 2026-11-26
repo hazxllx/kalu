@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100600_drop_legacy_jwt_role.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-017: remove the legacy public.jwt_role() helper
 --

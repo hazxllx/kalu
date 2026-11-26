@@ -1,3 +1,4 @@
+-- supabase/migrations/20261109000000_health_service_attachments.sql
 -- =============================================================================
 -- KALUSAGAP — health service attachments (memo and publication materials)
 --

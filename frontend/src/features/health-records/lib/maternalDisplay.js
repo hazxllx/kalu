@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/maternalDisplay.js
 export const hasRecordedMaternalValue = (value) => {
   if (value === null || value === undefined) return false;
   if (typeof value !== "string") return true;

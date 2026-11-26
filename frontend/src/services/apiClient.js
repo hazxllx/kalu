@@ -1,3 +1,4 @@
+// frontend/src/services/apiClient.js
 /**
  * Backwards-compatible re-export.
  *

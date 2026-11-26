@@ -1,3 +1,4 @@
+// backend/src/validators/barangays.validators.js
 import { isUuid, text, valid, invalid } from './common.js';
 
 /**

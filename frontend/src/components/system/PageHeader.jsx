@@ -1,3 +1,4 @@
+// frontend/src/components/system/PageHeader.jsx
 import React from "react";
 import { ChevronRight } from "lucide-react";
 import { TYPE } from "@/lib/designTokens";

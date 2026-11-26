@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100700_household_risk_workflow.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-009: household risk-cluster workflow persistence
 --

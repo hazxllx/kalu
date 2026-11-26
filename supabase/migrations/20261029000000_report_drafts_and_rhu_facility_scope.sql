@@ -1,3 +1,4 @@
+-- supabase/migrations/20261029000000_report_drafts_and_rhu_facility_scope.sql
 begin;
 
 alter table public.reports

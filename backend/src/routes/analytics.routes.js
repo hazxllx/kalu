@@ -1,3 +1,4 @@
+// backend/src/routes/analytics.routes.js
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';

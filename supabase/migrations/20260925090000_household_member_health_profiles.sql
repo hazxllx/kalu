@@ -1,3 +1,4 @@
+-- supabase/migrations/20260925090000_household_member_health_profiles.sql
 -- KALUSAGAP - Household member health profile (foundation)
 --
 -- Additive only. No existing residents, households, household_members, visits,

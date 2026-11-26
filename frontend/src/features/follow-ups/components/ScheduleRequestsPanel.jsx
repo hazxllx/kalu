@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/ScheduleRequestsPanel.jsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Clock3, RefreshCw, XCircle } from 'lucide-react';
 import { Card } from '@/components/common/Card';

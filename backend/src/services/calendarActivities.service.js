@@ -1,3 +1,4 @@
+// backend/src/services/calendarActivities.service.js
 import { getUserClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 

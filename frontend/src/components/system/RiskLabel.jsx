@@ -1,3 +1,4 @@
+// frontend/src/components/system/RiskLabel.jsx
 import React from "react";
 import { TYPE } from "@/lib/designTokens";
 import { canonicalRiskLevel, RISK_PRESENTATION } from "@/lib/riskLevel";

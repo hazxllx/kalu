@@ -1,3 +1,4 @@
+-- supabase/migrations/20260928180000_health_services.sql
 -- =============================================================================
 -- KALUSAGAP — health services catalog + personnel assignment
 --

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261201140000_consultation_missing_vitals_completion.sql
 -- Allow consultation staff to add only vital signs absent from the original
 -- triage snapshot. The immutable snapshot remains the record of what triage
 -- actually collected; the sparse supplement identifies later measurements.

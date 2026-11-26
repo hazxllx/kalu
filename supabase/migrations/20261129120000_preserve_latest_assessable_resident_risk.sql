@@ -1,3 +1,4 @@
+-- supabase/migrations/20261129120000_preserve_latest_assessable_resident_risk.sql
 -- Prefer the latest finalized consultation that can produce a risk level.
 -- A later empty/draft visit must not erase a valid historical assessment.
 begin;

@@ -1,3 +1,4 @@
+// frontend/src/features/registration/pages/PersonnelRegistration.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { ShieldCheck, Mail, ArrowLeft } from "lucide-react";

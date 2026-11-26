@@ -1,3 +1,4 @@
+// backend/src/services/verifications.service.js
 /**
  * Resident verification service — manual Health Supervisor review.
  *

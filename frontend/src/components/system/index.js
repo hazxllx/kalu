@@ -1,3 +1,4 @@
+// frontend/src/components/system/index.js
 export { default as PageHeader } from "@/components/system/PageHeader";
 export { default as SummaryStrip } from "@/components/system/SummaryStrip";
 export { default as StatusIndicator } from "@/components/system/StatusIndicator";

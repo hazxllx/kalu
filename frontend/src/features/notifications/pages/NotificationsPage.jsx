@@ -1,3 +1,4 @@
+// frontend/src/features/notifications/pages/NotificationsPage.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";

@@ -1,3 +1,4 @@
+-- supabase/migrations/20260928120000_transfer_change_of_barangay.sql
 -- KALUSAGAP — Transfer of Residency = change of the EXISTING resident's barangay
 --
 -- Reframes the transfer workflow. A transfer is NOT a new resident registration

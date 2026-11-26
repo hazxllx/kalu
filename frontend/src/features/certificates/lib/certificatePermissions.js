@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/lib/certificatePermissions.js
 const REVIEWER_ROLES = new Set(["mho", "phn"]);
 
 export const isMedicalCertificateReviewer = (user) => REVIEWER_ROLES.has(user?.role);

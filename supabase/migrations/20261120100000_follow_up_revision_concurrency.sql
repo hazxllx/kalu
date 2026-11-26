@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120100000_follow_up_revision_concurrency.sql
 -- Give staff follow-up actions a server-owned revision for optimistic updates.
 -- Existing rows receive revision 1; each accepted update advances it once.
 begin;

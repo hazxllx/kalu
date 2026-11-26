@@ -1,3 +1,4 @@
+// frontend/src/services/offline/syncEngine.js
 import { isNavigatorOnline, subscribeConnectivity } from './connectivity.js';
 import { lastSyncedKey, readMeta } from './meta.js';
 import { runSyncPass } from './syncRunner.js';

@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/AdminDashboard.jsx
 import React, { useEffect, useState } from "react";
 
 import PageHeader from "@/components/common/PageHeader";

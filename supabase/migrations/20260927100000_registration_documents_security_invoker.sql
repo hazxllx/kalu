@@ -1,3 +1,4 @@
+-- supabase/migrations/20260927100000_registration_documents_security_invoker.sql
 -- KALUSAGAP — QA fix: registration_documents view must not bypass RLS
 --
 -- FINDING (P1): the public.registration_documents view was created without

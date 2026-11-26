@@ -1,3 +1,4 @@
+-- supabase/migrations/20260928150200_system_logs_and_audit.sql
 -- =============================================================================
 -- KALUSAGAP — system log + account audit + RHU referral boundary
 --

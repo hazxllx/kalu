@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100500_resident_document_path_integrity.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-014: resident document storage_path integrity
 --

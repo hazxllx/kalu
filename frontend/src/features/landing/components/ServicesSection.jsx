@@ -1,4 +1,5 @@
-﻿import React from "react";
+// frontend/src/features/landing/components/ServicesSection.jsx
+import React from "react";
 import { motion } from "framer-motion";
 import { ArrowUpRight, Baby, HeartPulse, ShieldCheck, Stethoscope, Syringe, Users, Droplets } from "lucide-react";
 import { SectionHeading } from "@/components/branding/GovChrome";

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261119000000_scope_submitted_report_reads.sql
 begin;
 
 drop policy reports_select on public.reports;

@@ -1,3 +1,4 @@
+-- supabase/maintenance/verify_resident_cleanup_residual_history.sql
 -- Read-only check for any remaining rows tied to the 26 reviewed resident IDs.
 -- It does not depend on the resident rows still existing.
 with reviewed_ids(id) as (

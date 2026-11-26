@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120150000_health_trends_selected_period_series.sql
 -- Keep the Early Warning chart's month buckets and displayed period aligned
 -- with the same selected dates used by its summary and risk/disease figures.
 begin;

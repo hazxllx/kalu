@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/PermissionMatrixTable.jsx
 import React from "react";
 import { Check, ChevronDown, ChevronRight, Minus } from "lucide-react";
 

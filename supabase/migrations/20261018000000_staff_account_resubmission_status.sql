@@ -1,3 +1,4 @@
+-- supabase/migrations/20261018000000_staff_account_resubmission_status.sql
 -- Staff account requests: add a "resubmission_required" decision status.
 --
 -- Mirrors the resident verification workflow, which already supports

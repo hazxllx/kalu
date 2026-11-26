@@ -1,3 +1,4 @@
+-- supabase/migrations/20261119040000_risk_assessment_completeness.sql
 -- KFT-014: completeness follows the current enabled configuration, never the
 -- presence of an unrelated vital. Preserve configured scoring and positive risk.
 begin;

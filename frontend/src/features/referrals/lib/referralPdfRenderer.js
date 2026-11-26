@@ -1,3 +1,4 @@
+// frontend/src/features/referrals/lib/referralPdfRenderer.js
 import { jsPDF } from "jspdf";
 
 /**

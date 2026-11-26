@@ -1,3 +1,4 @@
+-- supabase/migrations/20261021000000_consultation_notification_dedup.sql
 -- =============================================================================
 -- KALUSAGAP — consultation "new record" notification idempotency
 --

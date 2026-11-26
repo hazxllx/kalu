@@ -1,3 +1,4 @@
+// frontend/src/services/api/medicalCertificatesApi.js
 import { api } from './apiClient';
 
 /**

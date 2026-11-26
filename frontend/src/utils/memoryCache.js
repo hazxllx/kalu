@@ -1,3 +1,4 @@
+// frontend/src/utils/memoryCache.js
 /**
  * Simple in-memory cache with TTL support for reference data.
  * Used to cache rarely-changing data like barangays, medicine catalogs, etc.

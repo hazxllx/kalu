@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/M1ModuleGrid.jsx
 import React from "react";
 import { Activity, Baby, Eye, Heart, Home, Smile, Users } from "lucide-react";
 import HealthProgramDirectory from "./HealthProgramDirectory";

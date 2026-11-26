@@ -1,3 +1,4 @@
+-- supabase/migrations/20261003010000_m1_manual_entries.sql
 -- KALUSAGAP — FHSIS M1 manual reporting entries
 --
 -- Additive only. Companion to public.m1_records (the per-event store) and the

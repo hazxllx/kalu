@@ -1,3 +1,4 @@
+// frontend/src/services/local/householdRiskStore.js
 import {
   computeHouseholdRisk,
   getRiskConfig,

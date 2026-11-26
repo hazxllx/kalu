@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/RecentBarangayUpdates.jsx
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, CalendarClock, ClipboardCheck, FilePlus2, Send } from 'lucide-react';

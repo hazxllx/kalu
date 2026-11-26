@@ -1,3 +1,4 @@
+-- supabase/migrations/20261130120000_keep_configured_risk_during_clinical_review.sql
 -- A pending protocol review is not an assessed clinical level and must not
 -- erase a resident risk level independently produced from complete configured
 -- measurements. Keep saved, classified clinical evidence (including prior

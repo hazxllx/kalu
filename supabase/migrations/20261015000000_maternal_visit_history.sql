@@ -1,3 +1,4 @@
+-- supabase/migrations/20261015000000_maternal_visit_history.sql
 -- KALUSAGAP - Maternal visit history
 --
 -- This table stores the repeated prenatal / intrapartum / postpartum visit rows

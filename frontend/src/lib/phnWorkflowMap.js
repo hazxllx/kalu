@@ -1,3 +1,4 @@
+// frontend/src/lib/phnWorkflowMap.js
 /**
  * KALUSAGAP — RHU triage → PHN check-up workflow mapping (BUG-008).
  *

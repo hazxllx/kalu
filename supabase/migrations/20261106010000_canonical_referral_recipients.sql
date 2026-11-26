@@ -1,3 +1,4 @@
+-- supabase/migrations/20261106010000_canonical_referral_recipients.sql
 -- Canonical, explicitly addressed referrals. The legacy documents and their FKs
 -- are retained, but all workflow writes now go through the trusted API RPC.
 begin;

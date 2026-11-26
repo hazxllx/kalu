@@ -1,3 +1,4 @@
+// frontend/src/features/registration/signupResponse.js
 export const normalizeRegistrationEmail = (value) => String(value ?? '').trim().toLowerCase();
 
 /**

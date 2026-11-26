@@ -1,3 +1,4 @@
+// frontend/src/components/common/FormModal.jsx
 import React, { useId } from "react";
 import { X } from "lucide-react";
 

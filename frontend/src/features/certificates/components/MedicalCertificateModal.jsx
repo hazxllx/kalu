@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/components/MedicalCertificateModal.jsx
 import React, { useEffect, useState } from "react";
 import { Card } from "@/components/common/Card";
 import { FormModalHeader } from "@/components/common/FormModal";

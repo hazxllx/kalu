@@ -1,3 +1,4 @@
+-- supabase/migrations/20261025000000_add_neozep_decolgen_brands.sql
 -- Add Neozep and Decolgen as brand aliases of the existing paracetamol +
 -- phenylephrine + chlorphenamine combination.
 --

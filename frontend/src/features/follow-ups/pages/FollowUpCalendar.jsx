@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/pages/FollowUpCalendar.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";

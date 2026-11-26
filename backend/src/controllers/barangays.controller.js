@@ -1,3 +1,4 @@
+// backend/src/controllers/barangays.controller.js
 /**
  * Admin Barangay Management endpoints (admin-only). Thin controllers: read the
  * request, delegate to the service, return the standard envelope.

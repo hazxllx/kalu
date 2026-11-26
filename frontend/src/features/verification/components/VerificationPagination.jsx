@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/VerificationPagination.jsx
 import React from "react";
 import TablePagination from "@/components/tables/TablePagination";
 

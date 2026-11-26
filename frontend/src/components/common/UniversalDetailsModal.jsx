@@ -1,3 +1,4 @@
+// frontend/src/components/common/UniversalDetailsModal.jsx
 import React, { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";

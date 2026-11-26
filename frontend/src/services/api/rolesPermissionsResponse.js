@@ -1,3 +1,4 @@
+// frontend/src/services/api/rolesPermissionsResponse.js
 export const readPermissionMatrix = (payload) => {
   const matrix = payload?.matrix;
   const valid =

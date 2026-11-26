@@ -1,3 +1,4 @@
+-- supabase/migrations/20261126000000_bhw_profile_first_name.sql
 begin;
 
 alter table public.profiles

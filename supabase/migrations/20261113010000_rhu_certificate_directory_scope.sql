@@ -1,3 +1,4 @@
+-- supabase/migrations/20261113010000_rhu_certificate_directory_scope.sql
 -- RHU certificate requests use the same authorized resident directory as the
 -- backend. The risk enrichment RPC previously omitted rhu_personnel, so every
 -- RHU directory page was reported as having a changed scope.

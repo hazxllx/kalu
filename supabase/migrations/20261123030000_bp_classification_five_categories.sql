@@ -1,3 +1,4 @@
+-- supabase/migrations/20261123030000_bp_classification_five_categories.sql
 -- Align newly validated consultation BP snapshots with the shared five-category
 -- reference rules. Existing historical snapshots are deliberately unchanged.
 begin;

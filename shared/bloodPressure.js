@@ -1,3 +1,4 @@
+// shared/bloodPressure.js
 // KALUSAGAP screening categories shared by entry, server validation and saved snapshots.
 export const DEFAULT_BP_THRESHOLDS = Object.freeze({
   // Retained for the legacy settings payload; low readings use the Normal

@@ -1,3 +1,4 @@
+// backend/src/routes/documents.routes.js
 /**
  * Resident identity document upload, rule-based pre-screening, and verification review routes.
  *

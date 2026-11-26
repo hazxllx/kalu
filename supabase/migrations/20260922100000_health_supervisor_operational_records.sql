@@ -1,3 +1,4 @@
+-- supabase/migrations/20260922100000_health_supervisor_operational_records.sql
 -- KALUSAGAP - Health Supervisor operational records
 -- Additive only: no existing resident, household, visit, referral, or Auth row
 -- is deleted or rewritten. Every resident-linked table copies scope from the

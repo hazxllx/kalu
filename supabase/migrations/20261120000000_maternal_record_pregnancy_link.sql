@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120000000_maternal_record_pregnancy_link.sql
 -- Reconcile the legacy maternal case table with the encounter-based pregnancy workflow.
 -- This is additive: existing maternal records remain intact and may continue to
 -- operate independently until explicitly linked to an encounter-based pregnancy.

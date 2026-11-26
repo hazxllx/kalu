@@ -1,3 +1,4 @@
+// backend/src/config/scope.js
 /**
  * Barangay & RHU facility data-scope rules (single source of truth for the API).
  *

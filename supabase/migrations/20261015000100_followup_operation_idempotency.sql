@@ -1,3 +1,4 @@
+-- supabase/migrations/20261015000100_followup_operation_idempotency.sql
 -- Prevent a retried offline follow-up create from inserting a duplicate after
 -- the server committed the row but its response was lost.
 --

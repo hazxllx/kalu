@@ -1,3 +1,4 @@
+// frontend/src/services/api/earlyWarningApi.js
 import api from './apiClient';
 
 const aggregatePayload = (payload, arrays, needsSummary = false) => {

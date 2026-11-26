@@ -1,3 +1,4 @@
+// backend/src/controllers/medicines.controller.js
 /**
  * Medicine catalog controller for prescription lookup and admin formulary management.
  *

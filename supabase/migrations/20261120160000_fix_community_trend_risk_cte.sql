@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120160000_fix_community_trend_risk_cte.sql
 -- The risk-reporting migration inserted the community-map-only CTE into both
 -- map branches. Community-map-trends has no barangay_id/risk columns in its
 -- visits CTE, so remove that unused accidental insertion from this branch.

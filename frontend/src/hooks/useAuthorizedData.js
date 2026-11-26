@@ -1,3 +1,4 @@
+// frontend/src/hooks/useAuthorizedData.js
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 

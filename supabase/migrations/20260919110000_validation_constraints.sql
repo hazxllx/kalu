@@ -1,3 +1,4 @@
+-- supabase/migrations/20260919110000_validation_constraints.sql
 -- =============================================================================
 -- KALUSAGAP — Validation constraints
 --

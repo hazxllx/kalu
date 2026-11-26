@@ -1,3 +1,4 @@
+// frontend/src/lib/supervisorScope.js
 import { ROLE } from "@/lib/roles";
 import { BARANGAYS, isBarangay } from "@/lib/barangays";
 

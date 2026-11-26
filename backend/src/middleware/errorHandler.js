@@ -1,3 +1,4 @@
+// backend/src/middleware/errorHandler.js
 import env from '../config/env.js';
 
 // These are service-authored messages with deliberately sanitized delivery

@@ -1,3 +1,4 @@
+// frontend/src/components/system/Skeleton.jsx
 import React from "react";
 
 /**

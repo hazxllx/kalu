@@ -1,3 +1,4 @@
+// backend/src/services/aiProvider/index.js
 /**
  * AI Provider Subsystem Barrel (`services/aiProvider/index.js`).
  *

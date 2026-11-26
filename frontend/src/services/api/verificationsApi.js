@@ -1,3 +1,4 @@
+// frontend/src/services/api/verificationsApi.js
 import api from './apiClient';
 
 /**

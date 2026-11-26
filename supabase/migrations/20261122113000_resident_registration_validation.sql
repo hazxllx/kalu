@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122113000_resident_registration_validation.sql
 -- Staff registration is a complete, in-person verification workflow. Clinical
 -- intake and household capture intentionally permit incomplete demographics.
 -- Do not backfill, merge, or add an identity unique index to historical rows.

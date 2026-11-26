@@ -1,3 +1,4 @@
+-- supabase/migrations/20261117000000_admin_temporary_personnel_password.sql
 begin;
 
 alter table public.personnel_accounts

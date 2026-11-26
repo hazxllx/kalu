@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/ScheduleCalendarViews.jsx
 import React from "react";
 import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261106041000_bounded_resident_risk.sql
 -- Directory/detail risk uses the same SQL evaluator as aggregate analytics,
 -- without fetching every visit or applying a 5,000-row cutoff in Node.
 begin;

@@ -1,3 +1,4 @@
+// backend/src/services/staffAccounts.service.js
 /**
  * Historical staff account request review, backed exclusively by Supabase.
  * Public personnel submission is disabled. Request, profile, lifecycle, audit

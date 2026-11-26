@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/Immunization.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";

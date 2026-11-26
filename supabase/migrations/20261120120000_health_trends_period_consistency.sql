@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120120000_health_trends_period_consistency.sql
 -- Align early-warning condition and headline counts with the reporting period.
 -- Trend month buckets and labels are already period-scoped in the deployed
 -- function, so this migration only changes the remaining unfiltered inputs.

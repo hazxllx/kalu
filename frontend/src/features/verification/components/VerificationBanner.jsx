@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/VerificationBanner.jsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { AlertTriangle, BadgeCheck, Clock, Loader2, RefreshCw, RotateCcw, ShieldAlert, UploadCloud, X } from "lucide-react";

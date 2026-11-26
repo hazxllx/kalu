@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100200_audit_and_notification_guards.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-007 + BUG-016: audit-log scope + notification column guard
 --

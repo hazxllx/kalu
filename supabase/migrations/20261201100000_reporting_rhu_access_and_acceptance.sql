@@ -1,3 +1,4 @@
+-- supabase/migrations/20261201100000_reporting_rhu_access_and_acceptance.sql
 -- Formal reporting is Health Supervisor -> PHN -> MHO. RHU clinical staff
 -- retain their clinical workflows but no longer receive or review reports.
 begin;

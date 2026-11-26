@@ -1,3 +1,4 @@
+// frontend/src/features/registration/components/AuthIllustration.jsx
 import React from "react";
 
 const SPLINE_URL = "https://app.spline.design/community/file/ad01ab1f-12b9-446d-83de-fbb56a0b2813";

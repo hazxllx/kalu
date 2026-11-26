@@ -1,3 +1,4 @@
+// frontend/src/features/registration/passwordErrors.js
 /**
  * Registration password-error helpers.
  *

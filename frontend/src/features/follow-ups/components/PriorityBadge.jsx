@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/PriorityBadge.jsx
 import React from "react";
 
 /**

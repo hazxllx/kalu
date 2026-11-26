@@ -1,3 +1,4 @@
+// backend/src/config/rhuStations.js
 /**
  * RHU station assignment + station-level authorization (single source of truth
  * for the API).

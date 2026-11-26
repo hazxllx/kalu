@@ -1,2 +1,3 @@
+-- supabase/migrations/20261111000000_didit_identity_consent.sql
 -- LEGACY MIGRATION: third-party identity verification is not implemented.
 -- This file intentionally creates no third-party consent schema objects.

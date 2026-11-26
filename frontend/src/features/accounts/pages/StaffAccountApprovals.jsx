@@ -1,3 +1,4 @@
+// frontend/src/features/accounts/pages/StaffAccountApprovals.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import ReviewModal, { ModalSection, InfoGrid, InfoItem } from "@/features/users/components/ReviewModal";

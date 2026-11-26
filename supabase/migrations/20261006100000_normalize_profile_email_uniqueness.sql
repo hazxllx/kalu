@@ -1,3 +1,4 @@
+-- supabase/migrations/20261006100000_normalize_profile_email_uniqueness.sql
 -- Normalize profile email addresses and enforce case/whitespace-insensitive
 -- uniqueness. Auth users already have an Auth-level unique email constraint;
 -- this protects the application's one-profile-per-email mirror as well.

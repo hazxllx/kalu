@@ -1,2 +1,3 @@
+-- supabase/migrations/20260918100000_create_identity_verification.sql
 -- LEGACY MIGRATION: third-party identity verification is not implemented.
 -- This file intentionally creates no third-party KYC schema objects.

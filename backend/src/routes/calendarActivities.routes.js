@@ -1,3 +1,4 @@
+// backend/src/routes/calendarActivities.routes.js
 import { Router } from 'express';
 import { FEATURE_ROLES } from '../config/roles.js';
 import { authenticate } from '../middleware/authenticate.js';

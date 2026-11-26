@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/lib/residentFollowUpPresentation.js
 import { manilaDateKey } from "./scheduleDates.js";
 
 const ACTIVE_STATUSES = new Set(["pending", "scheduled", "today", "upcoming", "ongoing"]);

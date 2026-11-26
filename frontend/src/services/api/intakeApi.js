@@ -1,3 +1,4 @@
+// frontend/src/services/api/intakeApi.js
 import { api } from './apiClient';
 import { cacheRecord, listCachedRecords } from '@/services/offline/records';
 import { classifySyncError, SYNC_ERROR } from '@/services/offline/errors';

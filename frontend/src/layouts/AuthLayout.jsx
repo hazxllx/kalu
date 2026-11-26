@@ -1,3 +1,4 @@
+// frontend/src/layouts/AuthLayout.jsx
 import React from "react";
 
 /**

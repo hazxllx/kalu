@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/ConfirmPermissionDialog.jsx
 import React from "react";
 import { AlertTriangle, ShieldCheck, Undo2 } from "lucide-react";
 

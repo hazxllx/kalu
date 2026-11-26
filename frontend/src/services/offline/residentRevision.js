@@ -1,3 +1,4 @@
+// frontend/src/services/offline/residentRevision.js
 /** Integer versions are preferred; timestamps support existing encrypted drafts. */
 export const residentRevisionOf = (resident) => {
   if (Number.isInteger(resident?.revision) && resident.revision > 0) return resident.revision;

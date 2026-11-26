@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1SectionDetail.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Card } from "@/components/common/Card";

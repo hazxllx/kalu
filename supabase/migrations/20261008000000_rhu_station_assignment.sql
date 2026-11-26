@@ -1,3 +1,4 @@
+-- supabase/migrations/20261008000000_rhu_station_assignment.sql
 -- =============================================================================
 -- KALUSAGAP — RHU station assignment (Triage / Consultation)
 --

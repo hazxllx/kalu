@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/FamilyCareSection.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { HeartHandshake, HomeIcon, Stethoscope, CheckCircle2 } from "lucide-react";

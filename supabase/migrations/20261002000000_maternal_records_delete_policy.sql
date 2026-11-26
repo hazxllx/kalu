@@ -1,3 +1,4 @@
+-- supabase/migrations/20261002000000_maternal_records_delete_policy.sql
 -- KALUSAGAP — maternal_records DELETE policy (spec PART 13).
 --
 -- The original operational-records migration generated SELECT / INSERT / UPDATE

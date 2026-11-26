@@ -1,3 +1,4 @@
+-- supabase/migrations/20261104000000_household_visit_history.sql
 -- Household profiling visit history with household-scoped sequential numbers.
 -- Existing quarterly dates are copied into chronological history; blank or
 -- malformed dates are intentionally not converted into fabricated visits.

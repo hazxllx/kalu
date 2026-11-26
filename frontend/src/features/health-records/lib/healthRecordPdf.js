@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/healthRecordPdf.js
 import { jsPDF } from "jspdf";
 import { shouldShowPregnancyStatus } from "./pregnancyVisibility.js";
 import { consultationRiskLevel, consultationRiskReasons } from "../../consultations/lib/consultationRisk.js";

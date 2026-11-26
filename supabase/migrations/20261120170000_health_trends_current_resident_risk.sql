@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120170000_health_trends_current_resident_risk.sql
 -- Separate current resident risk from period-scoped activity. The Early
 -- Warning risk classification is the latest risk per resident (same as the
 -- resident directory); periodRiskDistribution remains available for historical

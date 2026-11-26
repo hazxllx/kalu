@@ -1,3 +1,4 @@
+// backend/src/controllers/m1.controller.js
 import * as service from '../services/m1.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 

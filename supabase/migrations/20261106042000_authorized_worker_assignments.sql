@@ -1,3 +1,4 @@
+-- supabase/migrations/20261106042000_authorized_worker_assignments.sql
 -- Stable worker relationships with preserved historical name snapshots.
 -- Ambiguous name-only historical assignments are intentionally not guessed.
 begin;

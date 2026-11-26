@@ -1,3 +1,4 @@
+-- supabase/migrations/20261023000000_activate_resident_by_id.sql
 -- =============================================================================
 -- KALUSAGAP — Existing-resident account activation by Resident ID
 --

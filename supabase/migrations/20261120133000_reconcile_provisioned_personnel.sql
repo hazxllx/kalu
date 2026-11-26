@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120133000_reconcile_provisioned_personnel.sql
 begin;
 
 -- Repair trusted, already-provisioned identities only. This is deliberately not

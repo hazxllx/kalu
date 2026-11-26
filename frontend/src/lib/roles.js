@@ -1,3 +1,4 @@
+// frontend/src/lib/roles.js
 /**
  * KALUSAGAP canonical roles + route-level RBAC map (frontend source of truth).
  *

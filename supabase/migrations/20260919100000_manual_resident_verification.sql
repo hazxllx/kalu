@@ -1,3 +1,4 @@
+-- supabase/migrations/20260919100000_manual_resident_verification.sql
 -- =============================================================================
 -- KALUSAGAP — Manual resident verification (Health Supervisor review)
 --

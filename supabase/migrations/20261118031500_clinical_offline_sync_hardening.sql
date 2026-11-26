@@ -1,3 +1,4 @@
+-- supabase/migrations/20261118031500_clinical_offline_sync_hardening.sql
 -- KALUSAGAP — Stage 2A: Backend Clinical Offline Sync Hardening
 --
 -- Prepares the nine approved clinical/program tables for replay-safe offline

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261105000000_household_visit_change_history.sql
 begin;
 
 alter table public.household_visits

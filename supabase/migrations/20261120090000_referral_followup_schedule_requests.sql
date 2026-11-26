@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120090000_referral_followup_schedule_requests.sql
 -- Keep appointment response/request state separate from clinical progress.
 begin;
 

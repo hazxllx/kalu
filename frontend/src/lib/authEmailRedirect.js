@@ -1,3 +1,4 @@
+// frontend/src/lib/authEmailRedirect.js
 const isLoopbackHostname = (hostname) => {
   const normalized = hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
   const ipv4Parts = normalized.split('.').map(Number);

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261005010000_minor_guardian_linking.sql
 -- =============================================================================
 -- KALUSAGAP — minor / parent-or-guardian linking
 --

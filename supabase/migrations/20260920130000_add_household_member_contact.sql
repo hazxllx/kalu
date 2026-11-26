@@ -1,3 +1,4 @@
+-- supabase/migrations/20260920130000_add_household_member_contact.sql
 -- KALUSAGAP — household_members contact column
 --
 -- Adds an optional contact field for household member reachability.

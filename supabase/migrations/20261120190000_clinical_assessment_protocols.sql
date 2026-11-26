@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120190000_clinical_assessment_protocols.sql
 -- New encounter rules stay unapproved until authorized health personnel review
 -- the references, thresholds and local referral protocol. No automatic seed approval.
 create table if not exists public.clinical_assessment_protocols (

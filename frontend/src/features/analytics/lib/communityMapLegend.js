@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/lib/communityMapLegend.js
 const CONDITION_COLORS = {
   Tuberculosis: '#7C3AED', Dengue: '#BE185D', Malaria: '#A16207',
   Hypertension: '#DC2626', Diabetes: '#2563EB', Respiratory: '#0891B2',

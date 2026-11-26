@@ -1,3 +1,4 @@
+-- supabase/migrations/20261001000000_client_revision_referral_lab_household.sql
 -- KALUSAGAP — Client Revision: Laboratory Test in Referrals, Household Coordinates
 --
 -- This migration addresses the following client requirements:

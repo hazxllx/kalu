@@ -1,3 +1,4 @@
+// frontend/src/features/verification/pages/PendingVerifications.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";

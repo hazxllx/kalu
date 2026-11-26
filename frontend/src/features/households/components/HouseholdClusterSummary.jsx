@@ -1,3 +1,4 @@
+// frontend/src/features/households/components/HouseholdClusterSummary.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Card } from "@/components/common/Card";

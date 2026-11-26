@@ -1,3 +1,4 @@
+// backend/src/controllers/users.controller.js
 /**
  * User and personnel management endpoints. Authorization and account scope are
  * enforced by route middleware, the service, and the database operations.

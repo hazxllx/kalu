@@ -1,3 +1,4 @@
+// frontend/src/features/registration/components/StepIndicatorFourSteps.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { Check } from "lucide-react";

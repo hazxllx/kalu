@@ -1,3 +1,4 @@
+-- supabase/migrations/20261119030000_rhu_visit_api_boundary.sql
 -- Clinical writes use the authenticated Express service, which validates role,
 -- station, patient scope, raw measurements, and workflow state. Browser table
 -- writes must not bypass those checks through the older permissive policies.

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261130130000_repair_immunization_attendance_link.sql
 -- Repair schema drift where the original delivery-record migration was marked
 -- applied but the immunization link column or its unique index is absent.
 -- This link lets the health-service roster show the canonical immunization

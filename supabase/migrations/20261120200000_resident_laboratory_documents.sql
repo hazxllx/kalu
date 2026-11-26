@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120200000_resident_laboratory_documents.sql
 begin;
 
 -- Files are private and served only through the authenticated API. No browser

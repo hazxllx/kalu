@@ -1,3 +1,4 @@
+// backend/src/controllers/clinicalAssessmentProtocol.controller.js
 import { sendData } from '../utils/apiResponse.js';
 import { approveClinicalAssessmentProtocol } from '../services/clinicalAssessmentProtocol.service.js';
 

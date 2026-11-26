@@ -1,3 +1,4 @@
+// frontend/src/layouts/NavTabsLayout.jsx
 import React, { useMemo } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import Icon from "@/components/common/Icon";

@@ -1,3 +1,4 @@
+// frontend/src/services/offline/syncRunner.js
 import { assertCurrentOwner, captureOwnerGuard, db, requireEncryptedPayload } from './db.js';
 import { encryptJson } from './crypto.js';
 import { markDraftStatus } from './drafts.js';

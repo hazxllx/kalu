@@ -1,3 +1,4 @@
+// frontend/src/components/branding/GovChrome.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import GovSeal from "@/components/branding/GovSeal";

@@ -1,3 +1,4 @@
+-- supabase/migrations/20261010000000_report_recipient_and_duplicate_guards.sql
 begin;
 
 -- RHU Personnel are the routed recipients of Health Supervisor reports. They

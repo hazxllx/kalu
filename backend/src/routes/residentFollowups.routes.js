@@ -1,3 +1,4 @@
+// backend/src/routes/residentFollowups.routes.js
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';

@@ -1,3 +1,4 @@
+// backend/src/config/documentScreening.js
 /**
  * KALUSAGAP — rule-based automated document screening configuration.
  *

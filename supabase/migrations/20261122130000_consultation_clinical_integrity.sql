@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122130000_consultation_clinical_integrity.sql
 -- Complete consultation validation and immutable, attributed clinical history.
 -- Legacy/imported visits are retained; the authenticated API stamps v2 writes.
 begin;

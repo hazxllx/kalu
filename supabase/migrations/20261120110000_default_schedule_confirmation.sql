@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120110000_default_schedule_confirmation.sql
 -- Treat an unanswered resident schedule as confirmed by default while keeping
 -- explicit resident responses and staff-reviewed schedule requests distinct.
 begin;

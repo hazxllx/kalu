@@ -1,3 +1,4 @@
+// shared/consultationClinical.js
 import { BP_READING_BOUNDS, classifyBloodPressure, parseBloodPressure } from './bloodPressure.js';
 
 const text = (value) => typeof value === 'string' ? value.trim() : '';

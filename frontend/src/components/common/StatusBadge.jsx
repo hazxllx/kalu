@@ -1,3 +1,4 @@
+// frontend/src/components/common/StatusBadge.jsx
 import React from "react";
 
 const TONES = {

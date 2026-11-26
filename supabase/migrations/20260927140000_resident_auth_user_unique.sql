@@ -1,3 +1,4 @@
+-- supabase/migrations/20260927140000_resident_auth_user_unique.sql
 -- KALUSAGAP — enforce one resident record per authenticated account
 --
 -- Additive, non-destructive integrity hardening for resident data isolation

@@ -1,3 +1,4 @@
+// frontend/src/services/api/riskConfigApi.js
 import { api } from './apiClient';
 
 /**

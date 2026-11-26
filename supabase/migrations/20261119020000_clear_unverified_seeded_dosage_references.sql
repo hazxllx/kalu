@@ -1,3 +1,4 @@
+-- supabase/migrations/20261119020000_clear_unverified_seeded_dosage_references.sql
 -- Remove legacy seed dosage text from the medicine catalog. These values had
 -- no source provenance and must not be mistaken for patient-specific orders.
 -- Consultation prescriptions (public.visits.medications) are not modified.

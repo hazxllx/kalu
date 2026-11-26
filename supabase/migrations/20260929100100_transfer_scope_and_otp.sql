@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100100_transfer_scope_and_otp.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-005 + BUG-012: transfer-request scope + OTP secret protection
 --

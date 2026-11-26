@@ -1,3 +1,4 @@
+-- supabase/maintenance/preview_accountless_resident_history.sql
 -- Read-only preview. Run in Supabase SQL Editor; this file contains SELECTs only.
 
 with candidates as (

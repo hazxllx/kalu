@@ -1,3 +1,4 @@
+-- supabase/migrations/20261124100000_kft_followup_completion_and_rhu_receipt.sql
 begin;
 
 -- KFT-020: retain the staff account that completes a follow-up.

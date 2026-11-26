@@ -1,3 +1,4 @@
+-- supabase/migrations/20261119010000_rhu_triage_integrity.sql
 -- RHU triage integrity: preserve walk-in age and immutable hand-off observations.
 begin;
 

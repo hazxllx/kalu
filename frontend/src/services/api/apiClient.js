@@ -1,3 +1,4 @@
+// frontend/src/services/api/apiClient.js
 import { supabase } from '../../lib/supabase.js';
 import { resolveApiBaseUrl } from './apiBaseUrl.js';
 import {

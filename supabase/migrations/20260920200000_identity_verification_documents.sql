@@ -1,3 +1,4 @@
+-- supabase/migrations/20260920200000_identity_verification_documents.sql
 -- =============================================================================
 -- KALUSAGAP — Structured identity documents for resident registration
 --

@@ -1,3 +1,4 @@
+// backend/src/utils/temporaryPassword.js
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomInt } from 'node:crypto';
 import env from '../config/env.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';

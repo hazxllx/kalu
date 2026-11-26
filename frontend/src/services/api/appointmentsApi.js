@@ -1,3 +1,4 @@
+// frontend/src/services/api/appointmentsApi.js
 import { api } from './apiClient';
 
 /**

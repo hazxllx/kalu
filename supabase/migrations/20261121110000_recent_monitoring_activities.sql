@@ -1,3 +1,4 @@
+-- supabase/migrations/20261121110000_recent_monitoring_activities.sql
 begin;
 
 -- Assessment snapshots contain server-generated ISO timestamps, but retained

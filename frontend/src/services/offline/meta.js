@@ -1,3 +1,4 @@
+// frontend/src/services/offline/meta.js
 import { db, requireOwnerId, safeWrite } from './db.js';
 import { newId } from './ids.js';
 

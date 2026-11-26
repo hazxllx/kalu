@@ -1,3 +1,4 @@
+-- supabase/migrations/20260927120000_followup_resident_decision.sql
 -- KALUSAGAP — resident follow-up confirmation workflow
 --
 -- Additive only. Extends the existing public.follow_ups table (migration

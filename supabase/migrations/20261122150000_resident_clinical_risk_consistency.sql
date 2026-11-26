@@ -1,3 +1,4 @@
+-- supabase/migrations/20261122150000_resident_clinical_risk_consistency.sql
 -- Saved consultation assessments and resident/dashboard risk share one projection.
 -- Human reviewed corrections release older evidence; normal visits do not.
 begin;

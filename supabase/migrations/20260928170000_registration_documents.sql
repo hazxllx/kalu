@@ -1,3 +1,4 @@
+-- supabase/migrations/20260928170000_registration_documents.sql
 -- =============================================================================
 -- KALUSAGAP — personnel (staff) registration verification documents
 --

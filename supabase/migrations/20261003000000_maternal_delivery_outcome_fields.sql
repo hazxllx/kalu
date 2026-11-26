@@ -1,3 +1,4 @@
+-- supabase/migrations/20261003000000_maternal_delivery_outcome_fields.sql
 -- KALUSAGAP — Maternal delivery date + outcome fields (M1 derivation support)
 --
 -- Additive only. The FHSIS M1 intrapartum/delivery indicators (Section B2) are

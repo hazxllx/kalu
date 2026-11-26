@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/pages/Barangays.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";

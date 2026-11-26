@@ -1,3 +1,4 @@
+// frontend/src/services/offline/mutationPolicy.js
 /**
  * Offline mutation policy — determines which write operations can be queued
  * for sync and which require immediate online connectivity.

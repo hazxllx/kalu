@@ -1,3 +1,4 @@
+// frontend/src/lib/dateUtils.js
 // Shared date utilities for KALUSAGAP.
 //
 // The application works with two kinds of dates:

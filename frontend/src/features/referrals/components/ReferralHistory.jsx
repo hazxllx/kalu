@@ -1,3 +1,4 @@
+// frontend/src/features/referrals/components/ReferralHistory.jsx
 import React from "react";
 
 export default function ReferralHistory({ history = [] }) {

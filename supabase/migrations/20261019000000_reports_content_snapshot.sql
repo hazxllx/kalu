@@ -1,3 +1,4 @@
+-- supabase/migrations/20261019000000_reports_content_snapshot.sql
 -- =============================================================================
 -- KALUSAGAP — persist an immutable snapshot of the submitted report content
 --

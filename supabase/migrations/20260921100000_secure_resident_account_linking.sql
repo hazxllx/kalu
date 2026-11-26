@@ -1,3 +1,4 @@
+-- supabase/migrations/20260921100000_secure_resident_account_linking.sql
 -- KALUSAGAP - secure resident account linking
 
 begin;

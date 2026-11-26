@@ -1,3 +1,4 @@
+-- supabase/migrations/20261120130000_health_trends_visit_date_source_fix.sql
 -- Fix the selected-period predicate added to the early-warning visits CTE.
 -- `occurred_at` is an alias in that CTE's SELECT list; the source table uses
 -- `visit_date` (falling back to `created_at`) and cannot reference the alias

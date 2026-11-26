@@ -1,3 +1,4 @@
+// frontend/src/pages/NotFoundPage.jsx
 import { useLocation } from 'react-router-dom';
 
 import { useQuery } from '@tanstack/react-query';

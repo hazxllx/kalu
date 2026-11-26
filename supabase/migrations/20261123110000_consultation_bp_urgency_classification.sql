@@ -1,3 +1,4 @@
+-- supabase/migrations/20261123110000_consultation_bp_urgency_classification.sql
 -- Align persisted consultation classifications with the displayed reference labels.
 begin;
 

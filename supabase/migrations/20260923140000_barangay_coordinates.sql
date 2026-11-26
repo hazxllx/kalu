@@ -1,3 +1,4 @@
+-- supabase/migrations/20260923140000_barangay_coordinates.sql
 -- KALUSAGAP - Barangay point coordinates for the Community Health Overview map.
 --
 -- Additive only: adds nullable latitude/longitude to public.barangays so the

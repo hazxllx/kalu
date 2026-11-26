@@ -1,3 +1,4 @@
+// backend/src/controllers/calendarActivities.controller.js
 import * as service from '../services/calendarActivities.service.js';
 import { sendCreated, sendData } from '../utils/apiResponse.js';
 

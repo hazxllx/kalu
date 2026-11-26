@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/ImageLightbox.jsx
 import React, { useEffect, useState } from "react";
 import { X, Download, ChevronLeft, ChevronRight, ImageOff, Loader2 } from "lucide-react";
 

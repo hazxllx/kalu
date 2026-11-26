@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/pages/Analytics.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";

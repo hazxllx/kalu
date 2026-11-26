@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1EnrollmentDetail.jsx
 /**
  * M1 Program Enrollment Register Detail Page
  *

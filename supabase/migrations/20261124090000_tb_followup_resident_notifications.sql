@@ -1,3 +1,4 @@
+-- supabase/migrations/20261124090000_tb_followup_resident_notifications.sql
 begin;
 
 create or replace function public.deliver_tb_followup_reminders(p_now timestamptz)

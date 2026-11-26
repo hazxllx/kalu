@@ -1,3 +1,4 @@
+// frontend/src/routes/ProtectedRoute.jsx
 import { matchPath, Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';

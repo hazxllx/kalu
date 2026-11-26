@@ -1,3 +1,4 @@
+// frontend/src/services/offline/consultationOfflineService.js
 import { db, safeWrite, captureOwnerGuard, assertCurrentOwner, requireEncryptedPayload } from './db.js';
 import { encryptJson } from './crypto.js';
 import { newId, newLocalRef } from './ids.js';

@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/ScheduleStatusBadge.jsx
 import React from "react";
 
 /**

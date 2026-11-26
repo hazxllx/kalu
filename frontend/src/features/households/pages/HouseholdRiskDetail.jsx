@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/HouseholdRiskDetail.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";

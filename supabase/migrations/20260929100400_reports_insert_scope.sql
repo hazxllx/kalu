@@ -1,3 +1,4 @@
+-- supabase/migrations/20260929100400_reports_insert_scope.sql
 -- =============================================================================
 -- KALUSAGAP — BUG-013: reports INSERT must bind sender municipality/barangay
 --

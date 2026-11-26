@@ -1,3 +1,4 @@
+-- supabase/migrations/20261118000000_atomic_household_member_risk.sql
 -- P0-3: Atomic household member mutations + parent household risk recalculation.
 --
 -- Ensures adding, updating, or removing a household member and persisting the

@@ -1,3 +1,4 @@
+-- supabase/migrations/20260926120000_map_geo_reference_and_zone.sql
 -- KALUSAGAP — Community Health Map geographic reference + resident Zone.
 --
 -- Additive / idempotent. No table, policy or trigger is dropped and no row is
