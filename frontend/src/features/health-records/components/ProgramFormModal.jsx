@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/ProgramFormModal.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Save } from "lucide-react";
 import FormModal from "@/components/common/FormModal";
@@ -14,6 +15,7 @@ const errorCls = "mt-1 text-xs text-brand-danger";
 /** Age bucket used by the BOHC date column. */
 const bohcBucket = (form) => (form.age_group === "pregnant" ? "pregnant" : form.age_group || "");
 
+// Renders or manages Field logic.
 function Field({ config, field, fieldKey, form, setForm, error }) {
   const set = (value) => setForm((f) => ({ ...f, [fieldKey]: value }));
   const common = { id: `pf-${fieldKey}` };

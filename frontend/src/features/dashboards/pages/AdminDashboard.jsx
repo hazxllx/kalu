@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/AdminDashboard.jsx
 import React, { useEffect, useState } from "react";
 
 import PageHeader from "@/components/common/PageHeader";
@@ -55,6 +56,7 @@ const formatUptime = (seconds) => {
     .join(" ");
 };
 
+// Renders or manages AdminDashboard logic.
 export default function AdminDashboard() {
   const [counts, setCounts] = useState({
     total: null,
@@ -369,6 +371,7 @@ export default function AdminDashboard() {
   );
 }
 
+// Handles auditStatus logic.
 function auditStatus(activity) {
   return Array.isArray(activity)
     ? "Available"

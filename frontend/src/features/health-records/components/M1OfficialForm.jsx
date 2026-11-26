@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/M1OfficialForm.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -181,6 +182,7 @@ function FormTable({ table, data }) {
   );
 }
 
+// Renders or manages Block logic.
 function Block({ block, data }) {
   if (block.type === "section") return <div className="m1of-sec">{block.label}</div>;
   if (block.type === "group") return <div className="m1of-grp">{block.label}</div>;
@@ -200,6 +202,7 @@ function Block({ block, data }) {
   return null;
 }
 
+// Renders or manages Blocks logic.
 function Blocks({ blocks = [], data }) {
   return blocks.map((b, i) => <Block key={i} block={b} data={data} />);
 }
@@ -295,6 +298,7 @@ const PRINT_CSS = `
 .m1of-print-portal { display: none; }
 `;
 
+// Renders or manages useM1OfficialPrint logic.
 export function useM1OfficialPrint() {
   const [payload, setPayload] = useState(null);
   const [brandingError, setBrandingError] = useState("");

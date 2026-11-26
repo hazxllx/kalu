@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/PermissionMatrixTable.jsx
 import React from "react";
 import { Check, ChevronDown, ChevronRight, Minus } from "lucide-react";
 
@@ -42,6 +43,7 @@ const Cell = ({ state, on, total, module, action, role, onActionToggle }) => {
   );
 };
 
+// Renders or manages PermissionMatrixTable logic.
 export default function PermissionMatrixTable({
   role,
   permissions,

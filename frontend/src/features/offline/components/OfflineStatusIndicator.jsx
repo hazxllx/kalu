@@ -1,3 +1,4 @@
+// frontend/src/features/offline/components/OfflineStatusIndicator.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,

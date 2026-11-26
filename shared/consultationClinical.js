@@ -1,3 +1,4 @@
+// shared/consultationClinical.js
 import { BP_READING_BOUNDS, classifyBloodPressure, parseBloodPressure } from './bloodPressure.js';
 
 const text = (value) => typeof value === 'string' ? value.trim() : '';
@@ -50,6 +51,7 @@ export const PRESCRIPTION_FREQUENCY_PER_DAY = Object.freeze({
   'Every 4 hours': 6, 'Every 6 hours': 4, 'Every 8 hours': 3, 'Every 12 hours': 2,
 });
 
+// Handles calculatePrescriptionQuantity logic.
 export function calculatePrescriptionQuantity(frequency, duration) {
   const days = Number(duration);
   const perDay = PRESCRIPTION_FREQUENCY_PER_DAY[frequency];
@@ -63,6 +65,7 @@ const PRESCRIPTION_LIMITS = Object.freeze({ genericName: 160, brandName: 160, st
 const prescriptionSignature = (row) => JSON.stringify(Object.keys(PRESCRIPTION_LIMITS).map((field) =>
   row?.[field] ?? (field === 'genericName' ? row?.name ?? '' : field === 'medicineId' ? null : '')));
 
+// Handles validateConsultationMedications logic.
 export function validateConsultationMedications(medications, { previous = [] } = {}) {
   if (medications === undefined) return {};
   if (!Array.isArray(medications) || medications.length > 50) return { medications: 'Use a list of up to 50 prescriptions.' };
@@ -106,6 +109,7 @@ export function validateConsultationMedications(medications, { previous = [] } =
   return errors;
 }
 
+// Handles getManilaDateTime logic.
 export function getManilaDateTime(now = new Date()) {
   const instant = now instanceof Date ? now : new Date(now);
   if (!Number.isFinite(instant.getTime())) return { date: '', time: '' };
@@ -116,6 +120,7 @@ export function getManilaDateTime(now = new Date()) {
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
 }
 
+// Handles isConsultationDate logic.
 export function isConsultationDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000-')) return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -123,6 +128,7 @@ export function isConsultationDate(value) {
 }
 export const isConsultationTime = (value) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
+// Handles validateConsultationDateTime logic.
 export function validateConsultationDateTime(payload = {}, { required = true } = {}) {
   const errors = {};
   for (const [field, label, valid] of [
@@ -136,6 +142,7 @@ export function validateConsultationDateTime(payload = {}, { required = true } =
   return errors;
 }
 
+// Handles consultationNumber logic.
 export function consultationNumber(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
   if (typeof value === 'string' && !/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim())) return null;
@@ -143,6 +150,7 @@ export function consultationNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+// Handles consultationVitalValues logic.
 export function consultationVitalValues(payload = {}) {
   const input = object(payload) ? payload : {};
   const nested = object(input.vitals) ? input.vitals : {};
@@ -162,6 +170,7 @@ export function consultationVitalValues(payload = {}) {
   return values;
 }
 
+// Handles calculateConsultationBmi logic.
 export function calculateConsultationBmi(height, weight) {
   const h = consultationNumber(height);
   const w = consultationNumber(weight);
@@ -169,6 +178,7 @@ export function calculateConsultationBmi(height, weight) {
   return Math.round((w / ((h / 100) ** 2)) * 10) / 10;
 }
 
+// Handles validateConsultationVitals logic.
 export function validateConsultationVitals(payload = {}, { required = true, ranges = CONSULTATION_VITAL_RANGES } = {}) {
   const values = consultationVitalValues(payload);
   const errors = {};
@@ -210,6 +220,7 @@ export function validateConsultationVitals(payload = {}, { required = true, rang
   return errors;
 }
 
+// Handles normalizeConsultationClinicalText logic.
 export function normalizeConsultationClinicalText(payload = {}) {
   if (payload.findings !== undefined) return { findings: text(payload.findings), diagnosis: text(payload.diagnosis) };
   const merged = text(payload.clinicalFindingsDiagnosis);
@@ -225,6 +236,7 @@ export const normalizeConsultationRiskLevel = (value) => ({ low: 'Low', medium: 
   String(value ?? '').trim().toLowerCase().replace(/\s+risk$/, '')
 ] || null;
 
+// Handles consultationAssessmentReasons logic.
 export function consultationAssessmentReasons(assessment) {
   const normalize = (input) => {
     const reason = { ...input };
@@ -251,6 +263,7 @@ export function savedConsultationAssessment(details = {}) {
   return object(screening) ? screening : clinical;
 }
 
+// Handles isAuthorizedRiskReview logic.
 export function isAuthorizedRiskReview(review) {
   return object(review) && normalizeConsultationRiskLevel(review.level) !== null
     && review.reassessmentConfirmed === true && typeof review.reason === 'string' && review.reason.trim().length > 0
@@ -260,6 +273,7 @@ export function isAuthorizedRiskReview(review) {
       || (review.reviewedByRole === 'health_supervisor' && review.clinicianAuthority === 'consultation_station'));
 }
 
+// Handles consultationChronology logic.
 export function consultationChronology(visit = {}) {
   if (!object(visit)) return '';
   const details = visit.consultationDetails ?? visit.consultation_details ?? {};

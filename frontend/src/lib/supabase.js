@@ -1,3 +1,4 @@
+// frontend/src/lib/supabase.js
 import { createClient } from '@supabase/supabase-js';
 import { publicSupabaseConfigurationError } from '../../../shared/authConnectivity.js';
 import { validateLocalEnvironment } from './localSafety.js';

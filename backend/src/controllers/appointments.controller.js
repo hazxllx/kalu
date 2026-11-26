@@ -1,3 +1,4 @@
+// backend/src/controllers/appointments.controller.js
 import * as service from '../services/appointments.service.js';
 import { sendData, sendCreated, sendNoContent } from '../utils/apiResponse.js';
 

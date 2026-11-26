@@ -1,3 +1,4 @@
+// frontend/src/lib/documentBranding.js
 import { useEffect, useState } from 'react';
 import { documentBrandingApi } from '@/services/api/documentBrandingApi';
 

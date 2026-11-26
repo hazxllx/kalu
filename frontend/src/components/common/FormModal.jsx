@@ -1,3 +1,4 @@
+// frontend/src/components/common/FormModal.jsx
 import React, { useId } from "react";
 import { X } from "lucide-react";
 
@@ -6,6 +7,7 @@ const SIZE_CLASSES = {
   large: "max-w-[70rem]",
 };
 
+// Renders or manages FormModalHeader logic.
 export function FormModalHeader({ title, description, onClose, closeDisabled = false, titleId, descriptionId }) {
   const generatedId = useId();
   const resolvedTitleId = titleId || `form-modal-title-${generatedId}`;
@@ -34,6 +36,7 @@ export function FormModalHeader({ title, description, onClose, closeDisabled = f
   );
 }
 
+// Renders or manages FormModal logic.
 export default function FormModal({
   title,
   description,

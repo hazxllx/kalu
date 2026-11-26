@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/FollowUpStatusBadge.jsx
 import React from "react";
 
 /**
@@ -38,6 +39,7 @@ export const STATUS_DOTS = {
   Rejected: "bg-rose-600",
 };
 
+// Renders or manages FollowUpStatusBadge logic.
 export default function FollowUpStatusBadge({ value, showDot = true, className = "" }) {
   const tone = STATUS_TONES[value] || STATUS_TONES.Scheduled;
   const dot = STATUS_DOTS[value] || STATUS_DOTS.Scheduled;

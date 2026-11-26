@@ -1,9 +1,11 @@
+// frontend/src/features/dashboards/pages/PendingResidentLockedFeature.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Lock, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import PageHeader from "@/components/common/PageHeader";
 
+// Renders or manages PendingResidentLockedFeature logic.
 export default function PendingResidentLockedFeature({ title = "Follow-ups" }) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 sm:space-y-5">

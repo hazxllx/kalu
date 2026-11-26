@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/NcdRecords.jsx
 import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import ProgramFormPage from "../components/ProgramFormPage";

@@ -1,3 +1,4 @@
+// frontend/src/features/registration/components/StepIndicatorSixSteps.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { Check } from "lucide-react";
@@ -11,6 +12,7 @@ const STEPS = [
   { num: 6, label: "Submit" },
 ];
 
+// Renders or manages StepIndicator logic.
 export default function StepIndicator({ current, completed = [] }) {
   const total = STEPS.length;
 

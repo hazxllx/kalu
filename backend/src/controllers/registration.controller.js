@@ -1,3 +1,4 @@
+// backend/src/controllers/registration.controller.js
 /**
  * Resident registration and account activation controller.
  *

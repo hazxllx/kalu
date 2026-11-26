@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/TBRecords.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -70,6 +71,7 @@ const formatDateTime = (iso) => {
 
 const mapRecord = mapTbRecord;
 
+// Renders or manages TBRecords logic.
 export default function TBRecords() {
   const { user } = useAuth();
   const scope = getSupervisorScope(user);

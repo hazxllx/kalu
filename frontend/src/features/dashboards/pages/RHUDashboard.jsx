@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/RHUDashboard.jsx
 import React, { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -90,6 +91,7 @@ const localDayStart = (value) => {
   return date.getTime();
 };
 
+// Renders or manages RHUDashboard logic.
 export default function RHUDashboard() {
   const { user } = useAuth();
   const triageStation = canTriage(user);

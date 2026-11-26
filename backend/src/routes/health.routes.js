@@ -1,3 +1,4 @@
+// backend/src/routes/health.routes.js
 /**
  * Public system health check route (`/api/health`).
  *

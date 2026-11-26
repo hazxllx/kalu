@@ -1,3 +1,4 @@
+// frontend/src/features/verification/pages/PendingVerifications.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
@@ -50,6 +51,7 @@ const formatDateTime = (value) => {
   return d.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
+// Renders or manages PendingVerifications logic.
 export default function PendingVerifications({
   embedded = false,
   onPendingCount,

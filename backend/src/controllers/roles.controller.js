@@ -1,3 +1,4 @@
+// backend/src/controllers/roles.controller.js
 /**
  * Role and permission matrix controller (BUG-011).
  *

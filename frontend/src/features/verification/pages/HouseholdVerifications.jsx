@@ -1,3 +1,4 @@
+// frontend/src/features/verification/pages/HouseholdVerifications.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";

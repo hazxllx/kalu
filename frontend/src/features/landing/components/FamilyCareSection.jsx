@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/FamilyCareSection.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { HeartHandshake, HomeIcon, Stethoscope, CheckCircle2 } from "lucide-react";
@@ -23,6 +24,7 @@ const provisions = [
   },
 ];
 
+// Renders or manages FamilyCareSection logic.
 export default function FamilyCareSection() {
   return (
     <section className="bg-paper py-20 md:py-24">

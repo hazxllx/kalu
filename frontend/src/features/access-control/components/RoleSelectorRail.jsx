@@ -1,8 +1,10 @@
+// frontend/src/features/access-control/components/RoleSelectorRail.jsx
 import React from "react";
 import { Lock } from "lucide-react";
 
 import { ALL_PERMISSION_IDS, ROLE_POLICY, countGranted } from "@/lib/permissions";
 
+// Renders or manages RoleSelectorRail logic.
 export default function RoleSelectorRail({ roles, selectedRoleId, dirtyRoleId, permissionsForRole, onSelect }) {
   const total = ALL_PERMISSION_IDS.length;
   const selectedRole = roles.find((role) => role.id === selectedRoleId);

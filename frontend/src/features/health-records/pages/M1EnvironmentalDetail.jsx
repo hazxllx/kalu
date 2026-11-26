@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1EnvironmentalDetail.jsx
 /**
  * M1 Household Environmental Masterlist Program Detail Page
  *

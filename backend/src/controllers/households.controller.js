@@ -1,3 +1,4 @@
+// backend/src/controllers/households.controller.js
 /**
  * Household Profiling, Membership & Home-Visit Controller.
  *

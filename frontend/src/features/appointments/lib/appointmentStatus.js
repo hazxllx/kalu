@@ -1,3 +1,4 @@
+// frontend/src/features/appointments/lib/appointmentStatus.js
 /**
  * Shared vocabulary + formatting for the appointment feature.
  *

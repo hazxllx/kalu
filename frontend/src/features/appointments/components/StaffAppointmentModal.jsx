@@ -1,3 +1,4 @@
+// frontend/src/features/appointments/components/StaffAppointmentModal.jsx
 import React, { useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { Card } from "@/components/common/Card";

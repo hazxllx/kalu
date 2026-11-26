@@ -1,3 +1,4 @@
+// backend/src/services/households.service.js
 /**
  * Household Profiling service (BHW collection -> HS verification -> risk).
  *

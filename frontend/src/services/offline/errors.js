@@ -1,3 +1,4 @@
+// frontend/src/services/offline/errors.js
 /**
  * Error classification for synchronization operations.
  *

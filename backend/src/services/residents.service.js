@@ -1,3 +1,4 @@
+// backend/src/services/residents.service.js
 /**
  * Resident record service (authorized health staff).
  *

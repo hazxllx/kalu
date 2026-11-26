@@ -1,3 +1,4 @@
+// frontend/src/services/notifications/unreadBus.js
 /**
  * Tiny cross-component signal for notification unread-state changes.
  *

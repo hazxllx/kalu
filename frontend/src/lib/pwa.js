@@ -1,3 +1,4 @@
+// frontend/src/lib/pwa.js
 /**
  * Service worker registration + update lifecycle (PWA).
  *

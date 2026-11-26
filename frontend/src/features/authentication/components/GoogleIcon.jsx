@@ -1,5 +1,7 @@
+// frontend/src/features/authentication/components/GoogleIcon.jsx
 import React from "react";
 
+// Renders or manages GoogleIcon logic.
 export default function GoogleIcon({ className = "w-5 h-5" }) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true">

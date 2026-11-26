@@ -1,3 +1,4 @@
+// frontend/src/components/branding/GovSeal.jsx
 import React from "react";
 import { LOGO_URL } from "@/lib/brand";
 
@@ -16,6 +17,7 @@ import { LOGO_URL } from "@/lib/brand";
 /** Intrinsic ratio of src/assets/images/logo.png (500 x 500, square). */
 const LOGO_ASPECT = 500 / 500;
 
+// Renders or manages GovSeal logic.
 export default function GovSeal({
   height = 40,
   className = "",

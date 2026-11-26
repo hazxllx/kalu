@@ -1,3 +1,4 @@
+// frontend/src/services/offline/handlers.js
 import { api } from '@/services/api/apiClient';
 import { MUTATION_TIER } from './mutationPolicy.js';
 import { createConsultationSyncHandler } from './consultationOfflineService.js';

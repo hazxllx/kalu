@@ -1,3 +1,4 @@
+// shared/authConnectivity.js
 export const AUTH_SERVICE_UNAVAILABLE_CODE = 'AUTH_SERVICE_UNAVAILABLE';
 export const AUTH_SERVICE_UNAVAILABLE_MESSAGE =
   'Cannot reach the Supabase authentication service. The project may be paused or unavailable. Contact the administrator or try again after the service is restored.';

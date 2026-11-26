@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/lib/consultationRisk.js
 import { canonicalRiskLevel } from "../../../lib/riskLevel.js";
 import { consultationNumber, savedConsultationAssessment } from "../../../../../shared/consultationClinical.js";
 import { bloodPressureBadgeClassName, classifyBloodPressure as classifyBp } from "../utils/bpClassification.js";

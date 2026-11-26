@@ -1,8 +1,10 @@
+// frontend/src/features/health-records/components/MaternalRecordPrint.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 const display = (value) => value === undefined || value === null || value === "" ? "—" : String(value);
 
+// Renders or manages MaternalRecordDocument logic.
 function MaternalRecordDocument({ record }) {
   const date = new Date().toLocaleDateString();
   const periodEnd = record.deliveryDate || record.edd;
@@ -97,6 +99,7 @@ const PRINT_CSS = `
 .maternal-record-print-portal { display: none; }
 `;
 
+// Renders or manages useMaternalRecordPrint logic.
 export function useMaternalRecordPrint() {
   const [record, setRecord] = useState(null);
 

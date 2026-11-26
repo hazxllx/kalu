@@ -1,3 +1,4 @@
+// frontend/src/components/common/Validation.jsx
 import React from "react";
 import { AlertTriangle } from "lucide-react";
 
@@ -11,6 +12,7 @@ import { AlertTriangle } from "lucide-react";
  * Styling matches the KALUSAGAP danger token used across the app.
  */
 
+// Renders or manages FieldError logic.
 export function FieldError({ id, error, className = "" }) {
   if (!error) return null;
   return (
@@ -20,6 +22,7 @@ export function FieldError({ id, error, className = "" }) {
   );
 }
 
+// Renders or manages ValidationSummary logic.
 export function ValidationSummary({ errors = {}, title = "Please fix the highlighted fields.", onFocusField, className = "" }) {
   const entries = Object.entries(errors).filter(([, message]) => Boolean(message));
   if (entries.length === 0) return null;

@@ -1,3 +1,4 @@
+// frontend/src/components/system/StatusIndicator.jsx
 import React from "react";
 import { TYPE } from "@/lib/designTokens";
 
@@ -38,6 +39,7 @@ const STATUS_TONES = {
   ],
 };
 
+// Handles toneFor logic.
 function toneFor(value) {
   const v = String(value || "").toLowerCase().trim();
   if (STATUS_TONES.green.some((t) => t.toLowerCase() === v)) return "green";
@@ -78,6 +80,7 @@ const TINT = {
   rose: "rgba(179,32,44,0.08)",
 };
 
+// Renders or manages StatusIndicator logic.
 export default function StatusIndicator({ value, tinted = false, size = "sm", className = "", labelClass = "" }) {
   const tone = toneFor(value);
   const isDark = document.documentElement.classList.contains("dark");

@@ -1,3 +1,4 @@
+// backend/src/services/householdWorkflow.js
 /**
  * Household profiling lifecycle: audit trail + notifications.
  *

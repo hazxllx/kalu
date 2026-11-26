@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/LimitedResidentDashboard.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -22,6 +23,7 @@ const LOCKED = [
   { icon: FileHeart, label: "My health records", desc: "Your consultation history and health records." },
 ];
 
+// Renders or manages LimitedResidentDashboard logic.
 export default function LimitedResidentDashboard() {
   const { user } = useAuth();
   const first = (user?.name || "Resident").trim().split(/\s+/)[0];

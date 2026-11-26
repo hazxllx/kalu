@@ -1,3 +1,4 @@
+// frontend/src/features/referrals/lib/referralPdf.js
 import { loadDocumentBranding } from "@/lib/documentBranding";
 import { renderReferralPdf } from "./referralPdfRenderer";
 
@@ -35,6 +36,7 @@ export async function downloadReferralPdf(referral, { residents = [] } = {}) {
   doc.save(referralNo ? `Referral-${referralNo}.pdf` : "Referral-Form.pdf");
 }
 
+// Handles openReferralPdf logic.
 export async function openReferralPdf(referral, { residents = [] } = {}) {
   if (!referral) return null;
   const linked = referral.residentId

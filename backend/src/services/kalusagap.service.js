@@ -1,3 +1,4 @@
+// backend/src/services/kalusagap.service.js
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';

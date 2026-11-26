@@ -1,3 +1,4 @@
+// frontend/src/lib/riskLevel.js
 /**
  * Canonical risk-level vocabulary for household/resident risk.
  *

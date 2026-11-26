@@ -1,3 +1,4 @@
+// frontend/src/layouts/DashboardLayout.jsx
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { Outlet, useLocation, useNavigate, Link, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -48,6 +49,7 @@ import { accountDisplayName } from "@/lib/accountDisplayName";
 const BP_CONFIG_READ_ROLES = new Set(["admin", "mho", "phn", "health_supervisor", "rhu_personnel"]);
 const PERSONNEL_ROLES = new Set(["phn", "bhw", "health_supervisor", "rhu_personnel"]);
 
+// Renders or manages MandatoryPasswordModal logic.
 function MandatoryPasswordModal({ onComplete }) {
   const { session } = useAuth();
   const [password, setPassword] = useState("");

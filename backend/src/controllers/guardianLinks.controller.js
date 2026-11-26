@@ -1,3 +1,4 @@
+// backend/src/controllers/guardianLinks.controller.js
 /**
  * Guardian Link Controller for Minor Residents.
  *

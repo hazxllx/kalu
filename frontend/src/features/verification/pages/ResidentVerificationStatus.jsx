@@ -1,3 +1,4 @@
+// frontend/src/features/verification/pages/ResidentVerificationStatus.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -46,6 +47,7 @@ const statusLabel = (status) =>
     resubmission_required: "Resubmission Required",
   })[status] || "Pending";
 
+// Renders or manages ResidentVerificationStatus logic.
 export default function ResidentVerificationStatus() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);

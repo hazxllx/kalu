@@ -1,7 +1,9 @@
+// frontend/src/hooks/use-mobile.jsx
 import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
 
+// Renders or manages useIsMobile logic.
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState(undefined)
 

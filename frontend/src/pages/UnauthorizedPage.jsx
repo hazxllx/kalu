@@ -1,3 +1,4 @@
+// frontend/src/pages/UnauthorizedPage.jsx
 import { Link } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';

@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1Fhsis.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -50,6 +51,7 @@ const validQuarter = (value, fallback) => {
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 4 ? parsed : fallback;
 };
 
+// Renders or manages M1Fhsis logic.
 export default function M1Fhsis() {
   const { user } = useAuth();
   const { online, lastSyncedAt } = useSyncStatus();

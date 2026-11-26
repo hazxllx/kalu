@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/m1DetailFormatter.js
 /**
  * M1 Detail Formatting Utility
  *

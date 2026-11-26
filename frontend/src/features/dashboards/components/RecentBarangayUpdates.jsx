@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/RecentBarangayUpdates.jsx
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, CalendarClock, ClipboardCheck, FilePlus2, Send } from 'lucide-react';
@@ -5,6 +6,7 @@ import ErrorState from '@/components/common/ErrorState';
 
 const dateFormatter = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
+// Renders or manages RecentBarangayUpdates logic.
 export default function RecentBarangayUpdates({ source, allowed, can = () => false }) {
   return <section className="hs-panel hs-recent-panel" aria-labelledby="recent-barangay-heading">
     <header className="hs-panel-header"><div><h2 id="recent-barangay-heading">Recent Barangay Updates</h2><p>Latest monitoring activities in your assigned barangay.</p></div></header>

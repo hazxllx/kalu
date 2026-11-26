@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/Hero.jsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -12,6 +13,7 @@ const assurances = [
   { icon: Users, title: "Barangay-Linked", copy: "Connected to our three barangays." },
 ];
 
+// Renders or manages Hero logic.
 export default function Hero() {
   const [advisories, setAdvisories] = useState([]);
 

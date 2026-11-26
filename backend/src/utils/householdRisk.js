@@ -1,3 +1,4 @@
+// backend/src/utils/householdRisk.js
 /**
  * @module utils/householdRisk
  * @description Server-authoritative household environmental and socio-demographic risk

@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/m1Report.js
 import { buildM1FhsisModel } from "./m1FhsisFormModel.js";
 import { renderM1FhsisPdf } from "./m1FhsisPdfRenderer.js";
 import { loadDocumentBranding } from "@/lib/documentBranding";

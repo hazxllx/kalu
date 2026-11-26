@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/pregnancyVisibility.js
 // Resident-facing rule for the "Pregnancy Status" field.
 //
 // Policy:

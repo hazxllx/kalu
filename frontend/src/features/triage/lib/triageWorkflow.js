@@ -1,3 +1,4 @@
+// frontend/src/features/triage/lib/triageWorkflow.js
 /**
  * Pure, UI-free helpers for the RHU Triage workflow.
  *

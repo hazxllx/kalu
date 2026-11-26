@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/PhnHealthRecords.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -67,10 +68,12 @@ const compactRiskFindings = (assessment = {}) => {
   return findings;
 };
 
+// Renders or manages Modal logic.
 function Modal({ title, description, onClose, busy = false, footer = null, children, formDesign = false }) {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4"><Card role="dialog" aria-label={title} aria-modal="true" className="flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[92vh]">{formDesign ? <FormModalHeader title={title} description={description} onClose={onClose} closeDisabled={busy} /> : <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-3 sm:px-6"><h2 className="min-w-0 break-words text-base font-semibold text-brand-ink sm:text-lg">{title}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray disabled:opacity-40"><X className="h-5 w-5" /></button></div>}<div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5 ${formDesign ? "bg-white dark:bg-card" : ""}`}>{children}</div>{footer && <div className="shrink-0 border-t border-brand-border bg-white px-4 py-3 sm:px-6">{footer}</div>}</Card></div>;
 }
 
+// Renders or manages PhnHealthRecords logic.
 export default function PhnHealthRecords() {
   const { user } = useAuth();
   const { coverage } = usePhnCoverage();

@@ -1,9 +1,11 @@
+// frontend/src/features/registration/pages/RegistrationSuccess.jsx
 import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { CheckCircle2, ShieldCheck, LogIn, Printer, ArrowLeft } from "lucide-react";
 import { AgencyMark } from "@/components/branding/GovChrome";
 
+// Renders or manages RegistrationSuccess logic.
 export default function RegistrationSuccess() {
   const success = useMemo(() => {
     try {

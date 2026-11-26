@@ -1,3 +1,4 @@
+// frontend/src/features/users/pages/SystemManagementPage.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertCircle, ArrowRight, Download, Filter, KeyRound, Loader2, Search, ShieldCheck } from "lucide-react";
@@ -297,6 +298,7 @@ const SystemLogs = () => {
   );
 };
 
+// Renders or manages SystemManagementPage logic.
 export default function SystemManagementPage({ variant }) {
   if (variant === "roles") return <RolesOverview />;
   return <SystemLogs />;

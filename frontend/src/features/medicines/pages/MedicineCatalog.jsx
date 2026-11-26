@@ -1,3 +1,4 @@
+// frontend/src/features/medicines/pages/MedicineCatalog.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -122,6 +123,7 @@ const formatVerified = (iso) => {
   }
 };
 
+// Renders or manages ConfirmDialog logic.
 function ConfirmDialog({ open, title, description, confirmLabel = "Confirm", onConfirm, onCancel }) {
   if (!open) return null;
   return (
@@ -142,6 +144,7 @@ function ConfirmDialog({ open, title, description, confirmLabel = "Confirm", onC
   );
 }
 
+// Renders or manages MedicineCatalog logic.
 export default function MedicineCatalog() {
   const { toast } = useToast();
   const [activeSection, setActiveSection] = useState("bp");

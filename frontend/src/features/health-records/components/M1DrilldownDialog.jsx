@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/M1DrilldownDialog.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import ErrorState from "@/components/common/ErrorState";
@@ -13,6 +14,7 @@ const recordDate = (record) => record.date || record.service_date || record.comp
   || record.consultation_date || record.enrollment_date || record.next_visit || record.created_at?.slice(0, 10) || "Not recorded";
 const fullName = (record) => record ? [record.firstName || record.first_name, record.middleName || record.middle_name, record.lastName || record.last_name].filter(Boolean).join(" ") : "";
 
+// Renders or manages M1DrilldownDialog logic.
 export default function M1DrilldownDialog({ indicator, periodLabel, records = null, error = null, onRetry, onClose }) {
   const [page, setPage] = useState(1);
   const dialogRef = useRef(null);

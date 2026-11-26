@@ -1,3 +1,4 @@
+// frontend/src/features/registration/components/FormFields.jsx
 import React from "react";
 import { ChevronDown, Asterisk } from "lucide-react";
 
@@ -8,6 +9,7 @@ const baseWrap = (error) =>
     error ? "border-brand-danger" : "border-brand-border focus-within:border-brand-blue"
   }`;
 
+// Renders or manages Label logic.
 function Label({ label, optional = false }) {
   if (!label) return null;
   return (
@@ -19,11 +21,13 @@ function Label({ label, optional = false }) {
   );
 }
 
+// Renders or manages ErrorText logic.
 function ErrorText({ error = "" }) {
   if (!error) return null;
   return <p className="mt-1 text-[11.5px] text-brand-danger">{error}</p>;
 }
 
+// Renders or manages TextField logic.
 export function TextField({ label, icon: Icon = null, optional = false, error = "", ...props }) {
   return (
     <div>
@@ -37,6 +41,7 @@ export function TextField({ label, icon: Icon = null, optional = false, error = 
   );
 }
 
+// Renders or manages SelectField logic.
 export function SelectField({ label, icon: Icon = null, optional = false, error = "", children, ...props }) {
   return (
     <div>
@@ -53,6 +58,7 @@ export function SelectField({ label, icon: Icon = null, optional = false, error 
   );
 }
 
+// Renders or manages TextAreaField logic.
 export function TextAreaField({ label, optional = false, error = "", ...props }) {
   return (
     <div>
@@ -69,6 +75,7 @@ export function TextAreaField({ label, optional = false, error = "", ...props })
   );
 }
 
+// Renders or manages YesNoField logic.
 export function YesNoField({ label, value, onChange }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-dashed border-brand-border py-2.5">
@@ -93,6 +100,7 @@ export function YesNoField({ label, value, onChange }) {
   );
 }
 
+// Renders or manages ChipSelect logic.
 export function ChipSelect({ options, selected, onToggle }) {
   return (
     <div className="flex flex-wrap gap-2">

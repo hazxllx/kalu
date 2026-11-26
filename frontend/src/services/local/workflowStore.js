@@ -1,3 +1,4 @@
+// frontend/src/services/local/workflowStore.js
 import { useSyncExternalStore } from "react";
 import { registerWorkingSetReset } from "./accountWorkingSets";
 import { consultationLocationFor } from "@/lib/consultationLocations";

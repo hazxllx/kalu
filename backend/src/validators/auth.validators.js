@@ -1,3 +1,4 @@
+// backend/src/validators/auth.validators.js
 import { hasControlChars, isEmail, text, invalid, valid } from './common.js';
 
 /**

@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/healthServicesConfig.js
 import {
   Users, HeartPulse, Syringe, Smile, Activity, Droplets, ShieldAlert, FileBarChart2,
 } from "lucide-react";

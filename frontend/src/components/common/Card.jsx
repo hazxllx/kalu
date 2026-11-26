@@ -1,3 +1,4 @@
+// frontend/src/components/common/Card.jsx
 import React from "react";
 
 /**

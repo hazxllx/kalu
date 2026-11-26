@@ -1,5 +1,7 @@
+// frontend/src/features/dashboards/lib/bhwDashboardData.js
 const HOUSEHOLD_PAGE_SIZE = 100;
 
+// Handles bhwDashboardGreeting logic.
 export function bhwDashboardGreeting(date = new Date()) {
   const hour = Number(new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
@@ -11,10 +13,12 @@ export function bhwDashboardGreeting(date = new Date()) {
   return "Good evening";
 }
 
+// Handles bhwProfileFirstName logic.
 export function bhwProfileFirstName(user) {
   return typeof user?.firstName === "string" ? user.firstName.trim() : "";
 }
 
+// Handles fetchBhwHouseholds logic.
 export async function fetchBhwHouseholds(listHouseholds) {
   const firstPage = await listHouseholds({ limit: HOUSEHOLD_PAGE_SIZE, offset: 0 });
   if (
@@ -39,6 +43,7 @@ export async function fetchBhwHouseholds(listHouseholds) {
 
 const severity = { Low: 0, Moderate: 1, Medium: 1, High: 2 };
 
+// Handles householdRiskLevel logic.
 export function householdRiskLevel(household) {
   if (Object.hasOwn(severity, household.riskLevel)) return household.riskLevel;
   const score = Number(household.riskScore);
@@ -48,6 +53,7 @@ export function householdRiskLevel(household) {
   return "Low";
 }
 
+// Handles householdRiskFactors logic.
 function householdRiskFactors(household) {
   const factors = Array.isArray(household.riskFactors)
     ? household.riskFactors.filter((factor) => typeof factor === "string" && factor.trim())
@@ -88,6 +94,7 @@ function householdRiskFactors(household) {
   return [...new Set(factors)];
 }
 
+// Handles summarizeHouseholdConcerns logic.
 export function summarizeHouseholdConcerns(households, limit = 4) {
   const summaries = new Map();
 

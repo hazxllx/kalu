@@ -1,3 +1,4 @@
+// frontend/src/lib/phnScope.js
 import { ROLE } from "@/lib/roles";
 import { BARANGAYS, BARANGAY_FILTERS, isBarangay } from "@/lib/barangays";
 

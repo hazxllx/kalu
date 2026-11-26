@@ -1,3 +1,4 @@
+// backend/src/validators/users.validators.js
 import { hasControlChars, isStrictMobile, isUuid, text, valid, invalid } from './common.js';
 
 /**

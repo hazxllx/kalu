@@ -1,3 +1,4 @@
+// frontend/src/lib/riskRules.js
 /**
  * Front-end risk classification for the RHU → PHN check-up workflow.
  *

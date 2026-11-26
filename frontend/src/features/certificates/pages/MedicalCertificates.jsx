@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/pages/MedicalCertificates.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";

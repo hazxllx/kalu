@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/pages/CertificateComposer.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -103,6 +104,7 @@ const defaultForm = () => ({
   remarks: "",
 });
 
+// Renders or manages CertificateComposer logic.
 export default function CertificateComposer() {
   const { user } = useAuth();
   const meta = useCertificateMeta();
@@ -177,6 +179,7 @@ export default function CertificateComposer() {
   );
 }
 
+// Renders or manages ComposerContent logic.
 function ComposerContent({ base, roleLabel, residents, residentsError, purposes }) {
   const { user } = useAuth();
   // A Triage-station RHU Personnel INITIATES a request only: a single create

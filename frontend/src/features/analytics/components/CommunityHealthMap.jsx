@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/CommunityHealthMap.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
@@ -22,6 +23,7 @@ const BASEMAP_STYLE_URL = import.meta.env?.VITE_MAP_STYLE_URL || DEFAULT_MAP_STY
 const BASEMAP_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a> · <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> · <a href="https://openfreemap.org">OpenFreeMap</a>';
 
+// Handles removeBasemapIcons logic.
 function removeBasemapIcons(style) {
   if (!Array.isArray(style?.layers)) {
     throw new Error("The basemap style did not contain any map layers.");
@@ -43,6 +45,7 @@ function removeBasemapIcons(style) {
   };
 }
 
+// Renders or manages IconFreeBasemap logic.
 function IconFreeBasemap({ onError }) {
   const map = useMap();
 
@@ -117,6 +120,7 @@ const hasValidCoordinates = (point) => {
   );
 };
 
+// Renders or manages FitToMarkers logic.
 function FitToMarkers({ points, smooth = false, reducedMotion = false }) {
   const map = useMap();
   const previous = useRef("");
@@ -170,6 +174,7 @@ function intensityColor(intensity, caseCount) {
   return "#F6C453"; // low
 }
 
+// Renders or manages BoundaryAttribution logic.
 function BoundaryAttribution({ visible }) {
   const map = useMap();
   useEffect(() => {
@@ -181,6 +186,7 @@ function BoundaryAttribution({ visible }) {
   return null;
 }
 
+// Renders or manages CommunityHealthMap logic.
 export default function CommunityHealthMap({
   barangays: barangaysProp = null,
   center: centerProp = null,

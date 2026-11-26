@@ -1,3 +1,4 @@
+// frontend/src/services/api/barangaysApi.js
 import { api } from './apiClient';
 import { memoryCache } from '../../utils/memoryCache';
 

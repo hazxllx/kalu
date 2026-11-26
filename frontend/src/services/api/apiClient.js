@@ -1,3 +1,4 @@
+// frontend/src/services/api/apiClient.js
 import { supabase } from '../../lib/supabase.js';
 import { resolveApiBaseUrl } from './apiBaseUrl.js';
 import { invalidateVerifiedPermissions } from '../accessControl/permissionCache.js';
@@ -66,6 +67,7 @@ class ApiTransportError extends TypeError {
 
 let refreshSessionInFlight = null;
 
+// Handles getAuthIdentity logic.
 async function getAuthIdentity({ refreshIfNeeded = true, forceRefresh = false } = {}) {
   if (!supabase) return { token: null, userId: null, expiresAt: null };
   const { data, error } = await supabase.auth.getSession();

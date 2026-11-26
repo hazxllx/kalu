@@ -1,3 +1,4 @@
+// frontend/src/features/residents/pages/ResidentRiskSummary.jsx
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -73,11 +74,13 @@ const fieldEntries = (value, prefix = '') => {
   return isRecorded(value) ? [[prefix, String(value)]] : [];
 };
 
+// Renders or manages RiskLabel logic.
 function RiskLabel({ value }) {
   const label = value || 'Unassessed';
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${riskTone[label] || riskTone.Unassessed}`}>{label}</span>;
 }
 
+// Renders or manages ScreeningFlags logic.
 function ScreeningFlags({ row }) {
   const neutralTone = 'border-brand-border bg-white text-brand-ink dark:border-border dark:bg-card dark:text-foreground';
   const criticalTone = 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300';
@@ -305,6 +308,7 @@ function ScreeningFlags({ row }) {
   </Dialog.Root>;
 }
 
+// Renders or manages RiskFactors logic.
 function RiskFactors({ details }) {
   const factors = details.riskFactors;
   const entries = Array.isArray(factors) ? factors : factors && typeof factors === 'object'
@@ -330,6 +334,7 @@ function RiskFactors({ details }) {
   </ul>;
 }
 
+// Renders or manages ResidentRiskSummary logic.
 export default function ResidentRiskSummary() {
   const { user } = useAuth();
   const { can } = usePermissions();

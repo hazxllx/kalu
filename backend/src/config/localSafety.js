@@ -1,3 +1,4 @@
+// backend/src/config/localSafety.js
 import { hostedSupabaseProjectRef } from '../../../shared/authConnectivity.js';
 
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);

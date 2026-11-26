@@ -1,3 +1,4 @@
+// backend/src/services/aiProvider/config.js
 /**
  * AI Provider Environment Configuration & Factory Singleton (`services/aiProvider/config.js`).
  *

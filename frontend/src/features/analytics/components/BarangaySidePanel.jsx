@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/BarangaySidePanel.jsx
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Users, Home, Stethoscope, CalendarCheck, CalendarClock, AlertTriangle, Send, HeartPulse, Bell, Activity, UserRound } from "lucide-react";
@@ -18,6 +19,7 @@ const alertDotColor = {
 
 const programColor = (coverage) => coverage >= 85 ? "#28B463" : coverage >= 75 ? "#2A7DE1" : "#E67E22";
 
+// Renders or manages BarangaySidePanel logic.
 export default function BarangaySidePanel({ barangay, onClose }) {
   if (!barangay) return null;
   const p = barangay.panel;

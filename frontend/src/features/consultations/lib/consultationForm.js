@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/lib/consultationForm.js
 const hasText = (value) => value !== null && value !== undefined && String(value).trim() !== "";
 
 export const isMaternalHealthService = (service = {}) =>

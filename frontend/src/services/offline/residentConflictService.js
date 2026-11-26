@@ -1,3 +1,4 @@
+// frontend/src/services/offline/residentConflictService.js
 import { db, safeWrite, captureOwnerGuard, assertCurrentOwner } from './db.js';
 import { encryptJson } from './crypto.js';
 import { getOperation, buildOperation, OUTBOX_STATUS } from './outbox.js';

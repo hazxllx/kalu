@@ -1,3 +1,4 @@
+// frontend/src/features/households/lib/householdLoadError.js
 const errorStatus = (error) => Number(error?.status ?? error?.statusCode) || null;
 
 const errorMessage = (error) =>

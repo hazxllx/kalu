@@ -1,3 +1,4 @@
+// backend/src/services/auditTrail.service.js
 /**
  * Audit Trail Service (`services/auditTrail.service.js`) — real, queryable system activity.
  *

@@ -1,3 +1,4 @@
+// frontend/src/lib/barangayScope.js
 /**
  * Barangay data scope (frontend mirror of `backend/src/config/scope.js`).
  *
@@ -16,6 +17,7 @@ const BARANGAY_SCOPED_ROLES = [ROLE.HEALTH_SUPERVISOR];
  * The signed-in user's assigned barangay, or null for municipality-wide
  * roles (MHO, admin, PHN, ...).
  */
+/** @param {{role?: string|null, barangay?: string|null}|null|undefined} user */
 export const getAssignedBarangay = (user) => {
   if (!user?.role || !BARANGAY_SCOPED_ROLES.includes(user.role)) return null;
   const barangay = String(user.barangay ?? "").trim();

@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/pages/HealthTrends.jsx
 import React, { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -46,6 +47,7 @@ const formatTrendMonth = (value) => {
     : date.toLocaleDateString("en-PH", { month: "short", year: "2-digit" });
 };
 
+// Renders or manages HealthTrends logic.
 export default function HealthTrends() {
   const { user } = useAuth();
   const { resolved } = useTheme();

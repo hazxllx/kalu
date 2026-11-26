@@ -1,3 +1,4 @@
+// frontend/src/lib/brand.js
 export const LOGO_URL = new URL("../assets/images/logo.png", import.meta.url).href;
 
 /**

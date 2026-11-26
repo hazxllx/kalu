@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/ResidentDashboard.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, FileText, HeartPulse, X } from "lucide-react";
@@ -25,6 +26,7 @@ const todayIso = () => manilaDateKey();
 // requirements, schedule and deadline, then register.
 const HEALTH_SERVICES_PATH = "/app/resident/health-services";
 
+// Renders or manages ResidentDashboard logic.
 export default function ResidentDashboard() {
   const { user } = useAuth();
 

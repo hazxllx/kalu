@@ -1,3 +1,4 @@
+// frontend/src/features/barangays/pages/BarangayManagement.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -39,6 +40,7 @@ const formatDate = (iso) => {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 };
 
+// Renders or manages StatusPill logic.
 function StatusPill({ status }) {
   const meta = statusMeta(status);
   return (
@@ -49,6 +51,7 @@ function StatusPill({ status }) {
   );
 }
 
+// Renders or manages Field logic.
 function Field({ label, htmlFor, required = false, hint = null, error = null, children }) {
   return (
     <div>
@@ -91,6 +94,7 @@ const resolvePiliMunicipalityId = (municipalities) => {
   return (pili || municipalities[0])?.id || "";
 };
 
+// Renders or manages BarangayModal logic.
 function BarangayModal({ mode, record, municipalities, onClose, onSaved }) {
   const { toast } = useToast();
   const [form, setForm] = useState(emptyForm);
@@ -256,6 +260,7 @@ function BarangayModal({ mode, record, municipalities, onClose, onSaved }) {
 /* Status change confirmation (replaces delete-based management)             */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages StatusDialog logic.
 function StatusDialog({ record, targetStatus, onClose, onChanged }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
@@ -345,6 +350,7 @@ function StatusDialog({ record, targetStatus, onClose, onChanged }) {
 /* Main page                                                                 */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages BarangayManagement logic.
 export default function BarangayManagement() {
   const { navItem } = /** @type {{ navItem?: { label: string, tabs: Array<{ label: string, icon: string, path: string }> } }} */ (
     useOutletContext() || {}

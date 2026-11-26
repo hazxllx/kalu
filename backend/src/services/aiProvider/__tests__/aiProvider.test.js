@@ -1,3 +1,4 @@
+// backend/src/services/aiProvider/__tests__/aiProvider.test.js
 /**
  * Tests for AI Provider Integration
  * 

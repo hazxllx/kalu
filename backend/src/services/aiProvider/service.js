@@ -1,3 +1,4 @@
+// backend/src/services/aiProvider/service.js
 /**
  * High-Level AI Generation Service (`services/aiProvider/service.js`).
  *

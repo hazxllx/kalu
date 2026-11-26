@@ -1,3 +1,4 @@
+// frontend/src/context/BarangaysContext.jsx
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { barangaysApi } from "@/services/api/barangaysApi";
@@ -33,6 +34,7 @@ const BarangaysContext = createContext(/** @type {any} */ (null));
 
 const EMPTY_RECORDS = Object.freeze([]);
 
+// Renders or manages BarangaysProvider logic.
 export function BarangaysProvider({ children }) {
   const [records, setRecords] = useState(/** @type {BarangayRecord[]} */ (EMPTY_RECORDS));
   const [names, setNames] = useState(() => getBarangays());

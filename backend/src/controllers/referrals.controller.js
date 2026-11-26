@@ -1,3 +1,4 @@
+// backend/src/controllers/referrals.controller.js
 import * as service from '../services/referrals.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 import { isSyncRequest } from '../utils/syncConcurrency.js';

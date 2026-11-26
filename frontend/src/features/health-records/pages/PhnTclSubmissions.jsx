@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/PhnTclSubmissions.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import TablePagination from "@/components/tables/TablePagination";
@@ -118,6 +119,7 @@ const submissionDate = (r) => {
 
 const PAGE_SIZE = 15;
 
+// Renders or manages StatusBadge logic.
 function StatusBadge({ raw }) {
   const label = displayStatus(raw);
   const tone = STATUS_TONE[label] || "bg-slate-100 text-slate-600";
@@ -129,6 +131,7 @@ function StatusBadge({ raw }) {
   );
 }
 
+// Renders or manages PhnTclSubmissions logic.
 export default function PhnTclSubmissions() {
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -138,6 +141,7 @@ export default function PhnTclSubmissions() {
   return <PhnTclInbox key={`${user.id}:${user.municipalityId}`} user={user} />;
 }
 
+// Renders or manages PhnTclInbox logic.
 function PhnTclInbox({ user }) {
   const { barangays } = useBarangays();
 

@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/pages/RiskInterventionSettings.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -203,6 +204,7 @@ function IndicatorEditModal({ indicator, onSave, onClose }) {
   );
 }
 
+// Renders or manages RiskInterventionSettings logic.
 export default function RiskInterventionSettings() {
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") === "intervention"

@@ -1,3 +1,4 @@
+// frontend/src/features/households/lib/householdFeedback.js
 // Presentation validation only; the API remains authoritative.
 export function validateHouseholdField(field, value, { member = false, adding = false } = {}) {
   const text = String(value ?? '').trim();
@@ -21,6 +22,7 @@ export function validateHouseholdField(field, value, { member = false, adding = 
   return '';
 }
 
+// Handles validateHouseholdOption logic.
 export function validateHouseholdOption(field, value, options = []) {
   const text = String(value ?? '').trim();
   if (!text || !options.length) return '';
@@ -29,6 +31,7 @@ export function validateHouseholdOption(field, value, options = []) {
 }
 
 const technical = /postgres|supabase|sql|constraint|stack|relation[ "]|column|schema|ECONN|TypeError|\/src\/|\\src\\/i;
+// Handles safeHouseholdError logic.
 export function safeHouseholdError(error, fallback = 'Could not save. Your entries are unchanged. Please try again.') {
   const status = Number(error?.status);
   const message = error?.message;
@@ -39,6 +42,7 @@ export function safeHouseholdError(error, fallback = 'Could not save. Your entri
   const readable = Array.isArray(details) ? [...new Set(details.filter((item) => typeof item === 'string' && !technical.test(item)))] : [];
   return readable.length ? `${message} ${readable.join('; ')}` : message;
 }
+// Handles householdFieldErrors logic.
 export function householdFieldErrors(error) {
   if (Number(error?.status) >= 500) return {};
   const body = error?.payload?.error;

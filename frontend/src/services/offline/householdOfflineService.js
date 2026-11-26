@@ -1,3 +1,4 @@
+// frontend/src/services/offline/householdOfflineService.js
 import { householdsApi } from '../api/householdsApi.js';
 import { isNavigatorOnline } from './connectivity.js';
 import { classifySyncError, SYNC_ERROR } from './errors.js';

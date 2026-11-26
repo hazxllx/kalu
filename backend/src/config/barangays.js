@@ -1,3 +1,4 @@
+// backend/src/config/barangays.js
 /**
  * KALUSAGAP — canonical barangay allowlist bridge for the backend.
  *

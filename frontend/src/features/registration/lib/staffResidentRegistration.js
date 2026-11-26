@@ -1,3 +1,4 @@
+// frontend/src/features/registration/lib/staffResidentRegistration.js
 import {
   CIVIL_STATUSES,
   NAME_SUFFIXES,

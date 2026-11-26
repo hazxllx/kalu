@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/About.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { FileText, Users, ShieldCheck, HeartPulse, MapPin, Quote } from "lucide-react";
@@ -19,6 +20,7 @@ const ledger = [
   { figure: "R.A. 11223", label: "Universal Health Care Act" },
 ];
 
+// Renders or manages About logic.
 export default function About() {
   return (
     <section id="about" className="border-y border-brand-border bg-white py-20 md:py-24">

@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/MHODashboard.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Map, Users, Stethoscope, Send, ShieldAlert, Activity, RefreshCw, AlertTriangle } from "lucide-react";
@@ -83,6 +84,7 @@ export const reportingYearLabel = ({ from, to }) => {
   return first || last || "All years";
 };
 
+// Renders or manages MHODashboard logic.
 export default function MHODashboard() {
   const [map, setMap] = useState(null);
   const [referrals, setReferrals] = useState(null);

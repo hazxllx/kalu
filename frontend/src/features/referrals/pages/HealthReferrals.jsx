@@ -1,3 +1,4 @@
+// frontend/src/features/referrals/pages/HealthReferrals.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -322,6 +323,7 @@ class ReferralModalErrorBoundary extends React.Component {
   }
 }
 
+// Renders or manages ReferralFormModal logic.
 function ReferralFormModal({ initial, draft, resident, residents, barangays = [], saving, onClose, onSave, onSelectResident, onRegisterGuest, ownerId, assignedBarangay, referringFacilityFallback, referringPersonnelName }) {
   const isEdit = Boolean(initial);
   const consultationLinked = Boolean(draft?.treatmentVisitId || initial?.treatmentVisitId);
@@ -910,6 +912,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
   );
 }
 
+// Renders or manages HealthReferrals logic.
 export default function HealthReferrals() {
   const { user } = useAuth();
   const { online, lastSyncedAt } = useSyncStatus();
@@ -1916,6 +1919,7 @@ export default function HealthReferrals() {
   );
 }
 
+// Renders or manages ResidentReferralScheduleRequestModal logic.
 function ResidentReferralScheduleRequestModal({ target, busy, onClose, onSubmit }) {
   const [dateTime, setDateTime] = useState("");
   const [reason, setReason] = useState("");
@@ -1961,6 +1965,7 @@ function ResidentReferralScheduleRequestModal({ target, busy, onClose, onSubmit 
   );
 }
 
+// Renders or manages DetailField logic.
 function DetailField({ label, value }) {
   return (
     <div className="min-w-0 rounded-btn border border-brand-border px-3 py-2">

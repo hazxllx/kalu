@@ -1,3 +1,4 @@
+// frontend/src/features/verification/pages/VerificationsApprovals.jsx
 import React, { lazy, Suspense, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -16,6 +17,7 @@ const TABS = [
   { id: "personnel", label: "Health Personnel", permission: "accounts.personnel.approve", roles: ["phn", "health_supervisor"] },
 ];
 
+// Renders or manages VerificationsApprovals logic.
 export default function VerificationsApprovals() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { can, matrixLoadState, refreshMatrix } = usePermissions();

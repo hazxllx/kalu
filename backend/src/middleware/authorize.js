@@ -1,3 +1,4 @@
+// backend/src/middleware/authorize.js
 import ApiError from '../utils/apiError.js';
 import { isValidRole } from '../config/roles.js';
 import { hasAllConfiguredPermissions, hasAnyConfiguredPermission } from '../services/roles.service.js';

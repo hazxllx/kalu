@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/TclSkeletons.jsx
 import React from "react";
 import { Skeleton, SkeletonTable } from "@/components/system/Skeleton";
 

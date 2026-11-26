@@ -1,3 +1,4 @@
+// backend/src/services/health.service.js
 /**
  * KALUSAGAP — Backend Liveness Health-Check Service (`health.service.js`).
  *

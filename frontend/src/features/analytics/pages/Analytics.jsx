@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/pages/Analytics.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
@@ -40,6 +41,7 @@ const ChartCard = React.memo(function ChartCard({ title, subtitle, children, dat
   );
 });
 
+// Renders or manages AreaGradients logic.
 function AreaGradients({ idPrefix, names }) {
   return (
     <defs>
@@ -53,6 +55,7 @@ function AreaGradients({ idPrefix, names }) {
   );
 }
 
+// Renders or manages Analytics logic.
 export default function Analytics() {
   const { user } = useAuth();
   const [selected, setSelected] = useState(null);
@@ -273,6 +276,7 @@ export default function Analytics() {
   );
 }
 
+// Renders or manages AuthorizedBarangayPanel logic.
 function AuthorizedBarangayPanel({ barangay, reportingPeriod, onClose }) {
   const load = useCallback(async (options) => {
     const data = await authorizedViewsApi.earlyWarning({ barangay: barangay.name, ...reportingPeriod }, options);

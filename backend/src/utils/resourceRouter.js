@@ -1,3 +1,4 @@
+// backend/src/utils/resourceRouter.js
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';

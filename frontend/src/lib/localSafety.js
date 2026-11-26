@@ -1,3 +1,4 @@
+// frontend/src/lib/localSafety.js
 import { hostedSupabaseProjectRef } from '../../../shared/authConnectivity.js';
 
 export const DEFAULT_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';

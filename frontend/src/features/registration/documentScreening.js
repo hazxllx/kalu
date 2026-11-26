@@ -1,3 +1,4 @@
+// frontend/src/features/registration/documentScreening.js
 /**
  * Pure helpers for the resident registration document-screening UI state.
  *

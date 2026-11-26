@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/healthTrendsUtils.js
 // Health trend derivation for the Health Supervisor dashboard.
 //
 // KALUSAGAP classifies each recorded consultation to a condition on the SERVER

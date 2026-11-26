@@ -1,6 +1,8 @@
+// frontend/src/features/registration/components/StepWrapper.jsx
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
+// Renders or manages StepWrapper logic.
 export default function StepWrapper({ step, children }) {
   return (
     <AnimatePresence mode="wait">

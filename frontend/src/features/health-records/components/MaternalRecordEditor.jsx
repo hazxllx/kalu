@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/MaternalRecordEditor.jsx
 import React, { useState, useEffect } from "react";
 import { X, CheckCircle2, Pencil, Trash2, Printer, Calendar, Baby } from "lucide-react";
 import { Card } from "@/components/common/Card";
@@ -16,6 +17,7 @@ const textareaCls = `${inputCls} resize-none`;
 
 const yesNoLabel = (value) => value == null ? "" : value ? "Yes" : "No";
 
+// Renders or manages DetailRows logic.
 function DetailRows({ rows }) {
   return recordedMaternalRows(rows).map(([label, value]) => (
     <div key={label}>

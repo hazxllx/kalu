@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/Households.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -96,6 +97,7 @@ const ACCOUNT_BADGE = {
   none: { label: "No Account", className: "bg-slate-100 text-slate-500" },
 };
 
+// Renders or manages AccountBadge logic.
 function AccountBadge({ status }) {
   const meta = ACCOUNT_BADGE[status] || ACCOUNT_BADGE.none;
   return (

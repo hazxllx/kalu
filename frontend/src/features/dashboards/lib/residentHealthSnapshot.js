@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/lib/residentHealthSnapshot.js
 import { manilaDateKey } from "../../follow-ups/lib/scheduleDates.js";
 import { getResidentFollowUpPresentation } from "../../follow-ups/lib/residentFollowUpPresentation.js";
 
@@ -12,12 +13,14 @@ export const numericVital = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+// Handles latestConsultation logic.
 export function latestConsultation(consultations = []) {
   return [...consultations].sort((a, b) =>
     dateKey(b?.date).localeCompare(dateKey(a?.date)),
   )[0] || null;
 }
 
+// Handles latestRecordedVitals logic.
 export function latestRecordedVitals(consultations = []) {
   const ordered = [...consultations].sort((a, b) =>
     dateKey(b?.date).localeCompare(dateKey(a?.date)),
@@ -37,6 +40,7 @@ export function latestRecordedVitals(consultations = []) {
   };
 }
 
+// Handles pulseReadings logic.
 export function pulseReadings(consultations = []) {
   return consultations
     .map((item, index) => ({
@@ -49,6 +53,7 @@ export function pulseReadings(consultations = []) {
     .map(({ date, value }) => ({ date, value }));
 }
 
+// Handles visitTrend logic.
 export function visitTrend(consultations = [], followUps = [], now = new Date()) {
   const today = manilaDateKey(now);
   const weeks = ["3w ago", "2w ago", "Last week", "This week", "Next week", "2w ahead", "3w ahead"].map((key) => ({

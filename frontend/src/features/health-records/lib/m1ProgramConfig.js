@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/m1ProgramConfig.js
 /**
  * M1 Program Configuration — Central routing, FHSIS mapping, and indicator definitions.
  *

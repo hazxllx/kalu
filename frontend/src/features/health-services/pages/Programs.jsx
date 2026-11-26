@@ -1,3 +1,4 @@
+// frontend/src/features/health-services/pages/Programs.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
@@ -7,6 +8,7 @@ import { HeartPulse } from "lucide-react";
 
 const programs = [];
 
+// Renders or manages Programs logic.
 export default function Programs() {
   return (
     <>

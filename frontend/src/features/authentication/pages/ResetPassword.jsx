@@ -1,3 +1,4 @@
+// frontend/src/features/authentication/pages/ResetPassword.jsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";

@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/HouseholdRiskOverview.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -44,6 +45,7 @@ const daysAgo = (iso) => {
   return d === null ? "—" : `${d} days ago`;
 };
 
+// Handles householdDetailPath logic.
 function householdDetailPath(id) {
   const raw = typeof window !== "undefined" ? window.location.pathname : "/app/mho/households/risk-overview";
   const parts = raw.split("/").filter(Boolean);
@@ -52,6 +54,7 @@ function householdDetailPath(id) {
   return `/app/${role}/households/${id}`;
 }
 
+// Renders or manages HouseholdRiskOverview logic.
 export default function HouseholdRiskOverview() {
   const { can } = usePermissions();
   const canViewWorkflow = can("followups.view");

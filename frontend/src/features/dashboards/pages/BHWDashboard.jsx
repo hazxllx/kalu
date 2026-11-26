@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/BHWDashboard.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -17,12 +18,14 @@ import {
 } from "../lib/bhwDashboardData";
 import { ChevronRight } from "lucide-react";
 
+// Handles formatDate logic.
 function formatDate(value) {
   if (!value) return "";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
 }
 
+// Renders or manages BHWDashboard logic.
 export default function BHWDashboard() {
   const { user } = useAuth();
   const [households, setHouseholds] = useState([]);

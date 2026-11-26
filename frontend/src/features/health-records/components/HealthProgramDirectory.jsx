@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/HealthProgramDirectory.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { Activity, ArrowRight } from "lucide-react";
@@ -5,6 +6,7 @@ import PageHeader from "@/components/common/PageHeader";
 
 const countFormatter = new Intl.NumberFormat();
 
+// Renders or manages ProgramRecordCount logic.
 function ProgramRecordCount({ count, state }) {
   if (state === "loading") {
     return <span className="text-xs text-brand-gray dark:text-muted-foreground">Loading count</span>;
@@ -24,6 +26,7 @@ function ProgramRecordCount({ count, state }) {
   );
 }
 
+// Renders or manages ProgramCard logic.
 function ProgramCard({ program }) {
   const Icon = program.icon || Activity;
   const name = program.name || program.title;
@@ -83,6 +86,7 @@ function ProgramCard({ program }) {
   );
 }
 
+// Renders or manages HealthProgramDirectory logic.
 export default function HealthProgramDirectory({
   programs = [],
   title = "Health Program Directory",

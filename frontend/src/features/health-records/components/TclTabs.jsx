@@ -1,5 +1,7 @@
+// frontend/src/features/health-records/components/TclTabs.jsx
 import React, { useId } from "react";
 
+// Renders or manages TclTabs logic.
 export default function TclTabs({ tabs, active, onChange, label = "TCL sections", className = "", idPrefix, panelId }) {
   const generatedId = useId().replace(/:/g, "");
   const prefix = idPrefix || `tcl-tabs-${generatedId}`;

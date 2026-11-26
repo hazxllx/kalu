@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1SectionDetail.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Card } from "@/components/common/Card";
@@ -39,6 +40,7 @@ const validYear = (value, fallback) => {
   return Number.isInteger(parsed) && parsed >= 2000 && parsed <= 2100 ? parsed : fallback;
 };
 
+// Renders or manages M1SectionDetail logic.
 export default function M1SectionDetail() {
   const route = useParams();
   const section = String(route.section || "").toUpperCase();

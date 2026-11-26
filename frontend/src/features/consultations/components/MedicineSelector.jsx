@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/components/MedicineSelector.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Plus, Trash2, Pill, ChevronDown, ChevronUp } from "lucide-react";
 import { medicinesApi } from "@/services/api";

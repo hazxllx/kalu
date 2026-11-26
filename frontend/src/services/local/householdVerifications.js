@@ -1,3 +1,4 @@
+// frontend/src/services/local/householdVerifications.js
 /**
  * Local (non-demo) pending household verification records.
  *

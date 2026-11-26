@@ -1,3 +1,4 @@
+// frontend/src/services/local/verifications.js
 /**
  * Local (non-demo) pending resident verifications.
  *

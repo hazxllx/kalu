@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/pages/Barangays.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -18,6 +19,7 @@ import { MapPin, Plus, X, RefreshCw } from "lucide-react";
 const blank = () => ({ name: "", municipalityId: "", captain: "", contact: "", healthStationName: "", latitude: "", longitude: "", status: "Active" });
 const input = "w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue";
 
+// Renders or manages Barangays logic.
 export default function Barangays() {
   const { user } = useAuth();
   const admin = user?.role === "admin";

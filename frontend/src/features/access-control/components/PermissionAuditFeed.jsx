@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/PermissionAuditFeed.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { format, isValid, parseISO } from "date-fns";
@@ -24,6 +25,7 @@ const ValuePill = ({ value }) => (
   </span>
 );
 
+// Renders or manages PermissionAuditFeed logic.
 export default function PermissionAuditFeed({ entries = [], limit = 6, viewAllTo = null }) {
   const visible = entries.slice(0, limit);
 

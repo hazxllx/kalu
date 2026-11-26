@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/CTASection.jsx
 ﻿import React from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, IdCard, Camera, UserCheck } from "lucide-react";
@@ -9,6 +10,7 @@ const requirements = [
   { icon: UserCheck, label: "Confirmation by your Barangay Health Worker" },
 ];
 
+// Renders or manages CTASection logic.
 export default function CTASection() {
   return (
     <section className="border-y border-brand-border bg-paper py-16 md:py-20">

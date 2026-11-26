@@ -1,3 +1,4 @@
+// backend/src/routes/documentBranding.routes.js
 /**
  * Official document branding routes (`/api/document-branding`).
  *

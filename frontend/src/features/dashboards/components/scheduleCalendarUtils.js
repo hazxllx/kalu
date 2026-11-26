@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/scheduleCalendarUtils.js
 export function toDateKey(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
   const y = date.getFullYear();
@@ -6,6 +7,7 @@ export function toDateKey(date) {
   return `${y}-${m}-${d}`;
 }
 
+// Handles parseCalendarDate logic.
 export function parseCalendarDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const [year, month, day] = value.split("-").map(Number);
@@ -13,6 +15,7 @@ export function parseCalendarDate(value) {
   return toDateKey(date) === value ? date : null;
 }
 
+// Handles monthRange logic.
 export function monthRange(date) {
   const first = new Date(date.getFullYear(), date.getMonth(), 1);
   const last = new Date(date.getFullYear(), date.getMonth() + 1, 0);
@@ -22,6 +25,7 @@ export function monthRange(date) {
   };
 }
 
+// Handles buildMonthGrid logic.
 export function buildMonthGrid(date) {
   const first = new Date(date.getFullYear(), date.getMonth(), 1);
   const start = new Date(first);
@@ -58,6 +62,7 @@ export function calendarVisibleRange(date, view = "month") {
   return { from: key, to: key };
 }
 
+// Handles stepCalendarDate logic.
 export function stepCalendarDate(date, view, direction) {
   const next = new Date(date);
   if (view === "month" || view === "agenda") {
@@ -74,6 +79,7 @@ export function stepCalendarDate(date, view, direction) {
 
 export const calendarEventKey = (event) => `${event.type}-${event.id}`;
 
+// Handles formatCalendarStatus logic.
 export function formatCalendarStatus(status) {
   const value = String(status || "").trim();
   return value ? value.replace(/[_-]+/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "Not recorded";
@@ -86,6 +92,7 @@ export function isCalendarEventInBarangay(event, assignedBarangay) {
   return Boolean(assigned && residentBarangay && assigned === residentBarangay);
 }
 
+// Handles readCalendarRows logic.
 export function readCalendarRows(response, source = "Schedule") {
   const rows = Array.isArray(response) ? response : response?.rows;
   if (!Array.isArray(rows)) throw new Error(`${source} returned an invalid record list.`);
@@ -103,6 +110,7 @@ export function readCalendarRows(response, source = "Schedule") {
   return rows;
 }
 
+// Handles buildDayMap logic.
 export function buildDayMap(events = []) {
   const map = {};
 
@@ -129,6 +137,7 @@ export function buildDayMap(events = []) {
   return map;
 }
 
+// Handles mapFollowUpEvent logic.
 export function mapFollowUpEvent(row) {
   if (!row) return null;
   const resident = row.resident && typeof row.resident === "object"
@@ -179,6 +188,7 @@ export function mapFollowUpEvent(row) {
   };
 }
 
+// Handles mapHealthServiceEvent logic.
 export function mapHealthServiceEvent(row) {
   if (!row) return null;
 

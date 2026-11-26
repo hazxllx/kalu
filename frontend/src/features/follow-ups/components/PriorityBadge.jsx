@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/PriorityBadge.jsx
 import React from "react";
 
 /**
@@ -23,6 +24,7 @@ export const PRIORITY_DOTS = {
   High: "bg-rose-600",
 };
 
+// Renders or manages PriorityBadge logic.
 export default function PriorityBadge({ value, showDot = true, className = "" }) {
   const tone = PRIORITY_TONES[value] || PRIORITY_TONES.Medium;
   const dot = PRIORITY_DOTS[value] || PRIORITY_DOTS.Medium;

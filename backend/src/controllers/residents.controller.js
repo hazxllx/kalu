@@ -1,3 +1,4 @@
+// backend/src/controllers/residents.controller.js
 /**
  * Resident directory, health record, and self-service profile controller.
  *

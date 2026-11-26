@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/M1IndicatorTable.jsx
 import React, { useMemo, useState } from "react";
 import { Eye, Search } from "lucide-react";
 import DataTable from "@/components/tables/DataTable";

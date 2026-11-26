@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/ResidentHealthSnapshot.jsx
 import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -19,6 +20,7 @@ const ACTIVITY_TONES = {
   referral: { dot: "bg-white/45", label: "text-white/65" },
 };
 
+// Renders or manages CompactMetric logic.
 function CompactMetric({ label, value, unit, title }) {
   const hasValue = value !== null && value !== undefined && value !== "";
   return (
@@ -32,6 +34,7 @@ function CompactMetric({ label, value, unit, title }) {
   );
 }
 
+// Renders or manages ResidentHealthSnapshot logic.
 export default function ResidentHealthSnapshot({
   health,
   healthError = "",
@@ -155,6 +158,7 @@ export default function ResidentHealthSnapshot({
   );
 }
 
+// Handles formatShortDate logic.
 function formatShortDate(value) {
   if (!value) return "Date not recorded";
   const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
@@ -162,6 +166,7 @@ function formatShortDate(value) {
   return date.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 }
 
+// Handles formatSnapshotDate logic.
 function formatSnapshotDate(value) {
   if (!value) return "";
   const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);

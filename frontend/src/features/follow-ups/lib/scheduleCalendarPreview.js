@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/lib/scheduleCalendarPreview.js
 /**
  * Isolated UI preview dataset for the Health Supervisor Schedule Calendar.
  *

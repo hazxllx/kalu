@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/AddHouseholdPage.jsx
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -89,6 +90,7 @@ const emptyMember = () => ({
   contact: "",
 });
 
+// Handles ageFromBirthday logic.
 function ageFromBirthday(birthday) {
   if (!birthday) return "";
   const b = new Date(birthday);
@@ -145,6 +147,7 @@ function Field({ label, htmlFor, required, error, hint, children, className = ""
   );
 }
 
+// Renders or manages RadioRow logic.
 function RadioRow({ name, value, options, onChange }) {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
@@ -486,6 +489,7 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
   );
 }
 
+// Renders or manages Section logic.
 function Section({ index, title, subtitle = "", right = null, className = "", children }) {
   return (
     <Card className={`overflow-hidden ${className}`}>

@@ -1,5 +1,7 @@
+// frontend/src/features/landing/components/WhyKALUSAGAP.jsx
 ﻿import React from "react";
 
+// Renders or manages WhyKALUSAGAP logic.
 export default function WhyKALUSAGAP() {
   return (
     <section className="bg-brand-bg py-24">

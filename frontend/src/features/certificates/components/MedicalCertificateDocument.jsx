@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/components/MedicalCertificateDocument.jsx
 import React from "react";
 
 /**
@@ -91,6 +92,7 @@ function RuledText({ value, lines = 3 }) {
   );
 }
 
+// Renders or manages MedicalCertificateDocument logic.
 export default function MedicalCertificateDocument({ certificate, signatoryName, branding }) {
   const c = certificate || {};
   const org = branding?.organization || {};

@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/components/ResidentHealthHistory.jsx
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { consultationsApi, residentsApi } from "@/services/api";
 import { loadServerRows } from "@/lib/serverRows";
@@ -37,6 +38,7 @@ const listEntries = (value) => {
   return listEntryLabel(value).split(/[,;]|\r?\n/).map((entry) => entry.trim()).filter(Boolean);
 };
 
+// Renders or manages SummaryField logic.
 function SummaryField({ label, value }) {
   return <div className="min-w-0">
     <dt className="text-[11px] font-medium text-brand-gray">{label}</dt>
@@ -44,6 +46,7 @@ function SummaryField({ label, value }) {
   </div>;
 }
 
+// Renders or manages VitalField logic.
 function VitalField({ label, value }) {
   return <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-x-2 border-b border-brand-border/70 py-1 last:border-b-0 dark:border-border">
     <dt className="whitespace-nowrap text-[11px] text-brand-gray">{label}</dt>
@@ -51,6 +54,7 @@ function VitalField({ label, value }) {
   </div>;
 }
 
+// Renders or manages HistoryList logic.
 function HistoryList({ value, noun, onViewAll }) {
   const entries = listEntries(value);
   const expandable = entries.length > 2;
@@ -78,6 +82,7 @@ const consultationDateTime = (row) => {
   return [day(date), time].filter(Boolean).join(" · ");
 };
 
+// Renders or manages ConsultationEntry logic.
 function ConsultationEntry({ row, onView }) {
   const rawDate = row.consultationDate || row.consultationDetails?.consultationDate || row.visitDate || row.date || "";
   const dateTime = [formatLongDate(rawDate) || day(rawDate), row.consultationTime || row.consultationDetails?.consultationTime || row.time || ""].filter(Boolean).join(" · ");
@@ -104,6 +109,7 @@ function ConsultationEntry({ row, onView }) {
   </li>;
 }
 
+// Renders or manages ResidentHealthHistory logic.
 export default function ResidentHealthHistory({ residentId, residentName = "", bloodType = "", ownerId, scopeKey, revision, consultationId = "", onViewConsultation = null }) {
   const [history, setHistory] = useState(null);
   const [error, setError] = useState(false);

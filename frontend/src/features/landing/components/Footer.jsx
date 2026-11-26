@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/Footer.jsx
 ﻿import React from "react";
 import { Link } from "react-router-dom";
 import { Mail, MapPin, Phone, Clock, ArrowUpRight } from "lucide-react";
@@ -19,6 +20,7 @@ const govLinks = [
   { label: "GOV.PH", href: "https://www.gov.ph" },
 ];
 
+// Renders or manages Footer logic.
 export default function Footer() {
   return (
     <footer id="contact" className="bg-brand-deep text-white">

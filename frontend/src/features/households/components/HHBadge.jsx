@@ -1,3 +1,4 @@
+// frontend/src/features/households/components/HHBadge.jsx
 import React from "react";
 import { hhBadgeTone } from "../lib/householdOptions";
 import RiskBadge from "../../../components/common/RiskBadge";

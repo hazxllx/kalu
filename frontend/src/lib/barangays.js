@@ -1,3 +1,4 @@
+// frontend/src/lib/barangays.js
 import { APPROVED_BARANGAYS } from "../../../shared/barangays.js";
 
 /**

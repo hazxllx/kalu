@@ -1,3 +1,4 @@
+// frontend/src/lib/navConfig.js
 /**
  * Sidebar navigation per role.
  *

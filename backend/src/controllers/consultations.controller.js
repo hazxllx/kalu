@@ -1,3 +1,4 @@
+// backend/src/controllers/consultations.controller.js
 /**
  * Consultation endpoints for authorized health staff.
  *

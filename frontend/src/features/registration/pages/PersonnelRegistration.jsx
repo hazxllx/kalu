@@ -1,8 +1,10 @@
+// frontend/src/features/registration/pages/PersonnelRegistration.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { ShieldCheck, Mail, ArrowLeft } from "lucide-react";
 import GovSeal from "@/components/branding/GovSeal";
 
+// Renders or manages PersonnelRegistration logic.
 export default function PersonnelRegistration() {
   return (
     <div className="min-h-dvh gov-navy-panel flex items-center justify-center px-4 py-8">

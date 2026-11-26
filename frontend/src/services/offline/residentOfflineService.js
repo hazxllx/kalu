@@ -1,3 +1,4 @@
+// frontend/src/services/offline/residentOfflineService.js
 import { residentsApi } from '../api/residentsApi.js';
 import { cacheRecord, getCachedRecord, listCachedRecords } from './records.js';
 import { queueCreate, queueUpdate } from './queue.js';

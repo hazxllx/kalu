@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/HowItWorks.jsx
 ﻿import React from "react";
 import { motion } from "framer-motion";
 import { BadgeCheck, CalendarCheck, FileText, Stethoscope, UserPlus } from "lucide-react";
@@ -36,6 +37,7 @@ const steps = [
   },
 ];
 
+// Renders or manages HowItWorks logic.
 export default function HowItWorks() {
   return (
     <section id="how-it-works" className="gov-landing-panel gov-landing-guilloche relative py-20 text-white md:py-24">

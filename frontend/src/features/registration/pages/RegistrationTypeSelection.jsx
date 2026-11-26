@@ -1,3 +1,4 @@
+// frontend/src/features/registration/pages/RegistrationTypeSelection.jsx
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -109,6 +110,7 @@ function FormDetails({ form, tone = "light", className = "" }) {
   );
 }
 
+// Renders or manages RegistrationTypeSelection logic.
 export default function RegistrationTypeSelection() {
   const [selected, setSelected] = useState("resident");
   const active = options.find((o) => o.key === selected);

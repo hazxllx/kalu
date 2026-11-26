@@ -1,3 +1,4 @@
+// frontend/src/components/common/StatCard.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link } from "react-router-dom";
@@ -247,6 +248,7 @@ export default function StatCard({
   );
 }
 
+// Renders or manages MetricValue logic.
 function MetricValue({ value }) {
   const reducedMotion = useReducedMotion();
   const lastTarget = useRef(null);

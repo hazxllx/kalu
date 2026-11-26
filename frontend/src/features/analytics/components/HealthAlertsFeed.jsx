@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/HealthAlertsFeed.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import Icon from "@/components/common/Icon";
@@ -8,6 +9,7 @@ const LEVEL_COLOR = {
   info: { bg: "bg-brand-blue/10 text-brand-blue", dot: "bg-brand-blue" },
 };
 
+// Renders or manages HealthAlertsFeed logic.
 export default function HealthAlertsFeed({ alerts }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-card p-6">

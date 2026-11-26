@@ -1,3 +1,4 @@
+// frontend/src/services/accessControl/permissionAccess.js
 export const hasValidPermissionSnapshot = (state, userId, role, now = Date.now()) =>
   Boolean(
     userId &&

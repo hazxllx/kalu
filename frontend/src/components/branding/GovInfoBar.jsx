@@ -1,5 +1,7 @@
+// frontend/src/components/branding/GovInfoBar.jsx
 ﻿import React from "react";
 
+// Renders or manages GovInfoBar logic.
 export default function GovInfoBar() {
   return (
     <section className="bg-brand-blue/5 py-10">

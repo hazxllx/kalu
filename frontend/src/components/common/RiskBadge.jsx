@@ -1,3 +1,4 @@
+// frontend/src/components/common/RiskBadge.jsx
 import React from "react";
 import { canonicalRiskLevel, RISK_PRESENTATION } from "@/lib/riskLevel";
 

@@ -1,3 +1,4 @@
+// frontend/src/features/certificates/components/MedicalCertificateModal.jsx
 import React, { useEffect, useState } from "react";
 import { Card } from "@/components/common/Card";
 import { FormModalHeader } from "@/components/common/FormModal";
@@ -30,6 +31,7 @@ const statusTone = {
   Cancelled: "bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-400",
 };
 
+// Renders or manages CertificateStatusBadge logic.
 export function CertificateStatusBadge({ value }) {
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${statusTone[value] || statusTone.Draft}`}>

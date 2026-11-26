@@ -1,3 +1,4 @@
+// frontend/src/features/settings/pages/SettingsPage.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -23,6 +24,7 @@ const formatAccountDate = (iso) => {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 };
 
+// Handles checkPasswordStrength logic.
 function checkPasswordStrength(pw) {
   const checks = [
     { label: "Minimum 8 characters", pass: pw.length >= 8 },
@@ -35,6 +37,7 @@ function checkPasswordStrength(pw) {
   return { checks, score };
 }
 
+// Renders or manages SettingsPage logic.
 export default function SettingsPage({ roleKey = "resident" }) {
   const location = useLocation();
   const isProfileRoute = location.pathname.endsWith("/profile");

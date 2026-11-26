@@ -1,3 +1,4 @@
+// backend/src/services/laboratory.service.js
 import { randomUUID } from 'node:crypto';
 import { getServiceClient, getUserClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';

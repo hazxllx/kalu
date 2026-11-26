@@ -1,3 +1,4 @@
+// backend/src/controllers/residentFollowups.controller.js
 import * as service from '../services/residentFollowups.service.js';
 import scheduleRequests from '../services/scheduleRequests.service.js';
 import referrals from '../services/referrals.service.js';

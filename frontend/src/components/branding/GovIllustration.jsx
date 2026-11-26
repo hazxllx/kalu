@@ -1,5 +1,7 @@
+// frontend/src/components/branding/GovIllustration.jsx
 import React from "react";
 
+// Renders or manages GovIllustration logic.
 export default function GovIllustration({ variant = "hero" }) {
   const isAbout = variant === "about";
 

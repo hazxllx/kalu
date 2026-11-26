@@ -1,3 +1,4 @@
+// frontend/src/features/households/components/MemberHealthModal.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, HeartPulse, NotebookPen, Lock, CheckCircle2 } from "lucide-react";
 import HouseholdDialog from "./HouseholdDialog";
@@ -65,6 +66,7 @@ const roField = (label, value) => (
   </div>
 );
 
+// Renders or manages MemberHealthModal logic.
 export default function MemberHealthModal({ householdId, member, verificationStatus, currentRole, onClose }) {
   const { can } = usePermissions();
   const { user } = useAuth();

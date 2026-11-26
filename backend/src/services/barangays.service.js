@@ -1,3 +1,4 @@
+// backend/src/services/barangays.service.js
 import ApiError from '../utils/apiError.js';
 import { getServiceClient } from '../config/supabase.js';
 

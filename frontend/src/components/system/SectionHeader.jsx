@@ -1,3 +1,4 @@
+// frontend/src/components/system/SectionHeader.jsx
 import React from "react";
 import { TYPE } from "@/lib/designTokens";
 

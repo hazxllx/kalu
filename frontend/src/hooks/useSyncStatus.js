@@ -1,3 +1,4 @@
+// frontend/src/hooks/useSyncStatus.js
 import { useSyncExternalStore } from 'react';
 
 import { getSnapshot, subscribe } from '@/services/offline/syncEngine';

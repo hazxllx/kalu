@@ -1,3 +1,4 @@
+// frontend/src/features/households/lib/riskDetailAccess.js
 /**
  * Access and data-loading separation for HouseholdRiskDetail.
  *
@@ -7,6 +8,7 @@
  * `GET /households/:id/risk-workflow`.
  */
 
+// Handles getHouseholdDetailAccess logic.
 export function getHouseholdDetailAccess({ user, can }) {
   const canViewWorkflow = Boolean(can?.('followups.view'));
   const canEditWorkflow = Boolean(can?.('followups.edit'));
@@ -21,6 +23,7 @@ export function getHouseholdDetailAccess({ user, can }) {
   };
 }
 
+// Handles loadHouseholdDetailData logic.
 export async function loadHouseholdDetailData({
   id,
   access,

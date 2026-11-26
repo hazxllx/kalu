@@ -1,3 +1,4 @@
+// frontend/src/features/settings/components/SubmittedRequests.jsx
 import React, { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Card } from "@/components/common/Card";
@@ -39,6 +40,7 @@ const dateLabel = (value) => {
   return `${datePart} · ${timePart}`;
 };
 
+// Renders or manages SubmittedRequests logic.
 export default function SubmittedRequests() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();

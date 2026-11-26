@@ -1,3 +1,4 @@
+// frontend/src/features/appointments/components/ServiceRoster.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Users, Loader2, Search, X, CalendarCheck } from "lucide-react";
 import StatusBadge from "@/components/common/StatusBadge";

@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/pages/RolePermissionsPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
   RotateCcw,

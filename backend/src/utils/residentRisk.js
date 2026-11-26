@@ -1,3 +1,4 @@
+// backend/src/utils/residentRisk.js
 /**
  * @module utils/residentRisk
  * @description KALUSAGAP RESIDENT risk engine — the SINGLE authoritative, rule-based risk

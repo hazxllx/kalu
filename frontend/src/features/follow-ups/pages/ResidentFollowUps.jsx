@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/pages/ResidentFollowUps.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
@@ -62,6 +63,7 @@ const mapToSchedule = (row) => {
   };
 };
 
+// Renders or manages FollowUpStat logic.
 function FollowUpStat({ label, value, hint, tone }) {
   const accent = {
     amber: "border-b-brand-gold",
@@ -79,6 +81,7 @@ function FollowUpStat({ label, value, hint, tone }) {
   );
 }
 
+// Renders or manages ResidentFollowUps logic.
 export default function ResidentFollowUps() {
   const [rows, setRows] = useState([]);
   const [referrals, setReferrals] = useState([]);
@@ -410,6 +413,7 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
   );
 }
 
+// Renders or manages RescheduleModal logic.
 function RescheduleModal({ value, setValue, busy, onClose, onSubmit }) {
   const [error, setError] = useState("");
   const minDateTime = (() => { const date = new Date(Date.now() + 60_000); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); })();

@@ -1,3 +1,4 @@
+// frontend/src/lib/legacyAnalytics.js
 export const metricValue = (value) => Number.isFinite(value) ? value.toLocaleString() : 'Unavailable';
 const activityMetrics = {
   followUpCompletion: { monthly: true, numerator: ['followUps', 'completed'], denominator: ['followUps', 'scheduled'] },

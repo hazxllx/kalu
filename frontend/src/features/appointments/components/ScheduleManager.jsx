@@ -1,3 +1,4 @@
+// frontend/src/features/appointments/components/ScheduleManager.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { Trash2, Plus, Loader2, CalendarRange, Ban } from "lucide-react";
 import DatePicker from "@/components/common/DatePicker";

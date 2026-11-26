@@ -1,3 +1,4 @@
+// frontend/src/features/triage/pages/IncomingReferrals.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -17,6 +18,7 @@ import { AlertCircle, RefreshCw, Search, Stethoscope } from "lucide-react";
 const nameOf = (resident = {}) => [resident.first_name, resident.middle_name, resident.last_name].filter(Boolean).join(" ") || "Unnamed resident";
 const dateTime = (value) => value ? new Date(value).toLocaleString() : "Not scheduled";
 
+// Renders or manages IncomingReferrals logic.
 export default function IncomingReferrals() {
   const navigate = useNavigate();
   const { user } = useAuth();

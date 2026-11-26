@@ -1,3 +1,4 @@
+// backend/src/controllers/recentActivities.controller.js
 import * as recentActivitiesService from '../services/recentActivities.service.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import ApiError from '../utils/apiError.js';

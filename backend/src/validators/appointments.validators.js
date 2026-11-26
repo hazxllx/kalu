@@ -1,3 +1,4 @@
+// backend/src/validators/appointments.validators.js
 /**
  * @file Appointment booking & clinic schedule validators (server-authoritative).
  *

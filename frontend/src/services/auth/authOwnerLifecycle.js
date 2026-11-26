@@ -1,3 +1,4 @@
+// frontend/src/services/auth/authOwnerLifecycle.js
 /** Authentication boundaries invalidate late work, not encrypted pending data. */
 export const createAuthOwnerLifecycle = ({ bindOwner, clearCache, resetStores, stopSync, now = Date.now }) => {
   let ownerId = null;

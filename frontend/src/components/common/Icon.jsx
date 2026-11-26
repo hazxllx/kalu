@@ -1,3 +1,4 @@
+// frontend/src/components/common/Icon.jsx
 import React from "react";
 import {
   Activity, HeartPulse, Home, FileHeart, CalendarClock, RefreshCw, Stethoscope,
@@ -19,6 +20,7 @@ const MAP = {
   Droplets, MapPin, Pill, Inbox, ArrowUpRight,
 };
 
+// Renders or manages Icon logic.
 export default function Icon({ name, ...props }) {
   const Cmp = MAP[name] || Activity;
   return <Cmp {...props} />;

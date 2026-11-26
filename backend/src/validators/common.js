@@ -1,3 +1,4 @@
+// backend/src/validators/common.js
 /**
  * @file Shared validation primitives and result envelopes (server-authoritative).
  *

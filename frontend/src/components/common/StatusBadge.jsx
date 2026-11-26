@@ -1,3 +1,4 @@
+// frontend/src/components/common/StatusBadge.jsx
 import React from "react";
 
 const TONES = {
@@ -34,6 +35,7 @@ const TONES = {
   rejected: "bg-rose-50 text-rose-700",
 };
 
+// Renders or manages StatusBadge logic.
 export default function StatusBadge({ value, className = "" }) {
   const tone = TONES[value] || "bg-slate-100 text-slate-600";
   return (

@@ -1,3 +1,4 @@
+// frontend/src/features/health-services/components/TimePicker.jsx
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Clock, Check } from "lucide-react";
@@ -81,6 +82,7 @@ export const parseTypedTime = (raw) => {
 
 const INVALID_MESSAGE = "Enter a valid time (e.g. 8:30 AM).";
 
+// Renders or manages TimePicker logic.
 export default function TimePicker({
   value = "",
   onChange,

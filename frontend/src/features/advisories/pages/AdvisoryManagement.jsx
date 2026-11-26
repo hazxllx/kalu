@@ -1,3 +1,4 @@
+// frontend/src/features/advisories/pages/AdvisoryManagement.jsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { Edit2, Megaphone, Plus, Trash2 } from 'lucide-react';
 import PageHeader from '@/components/common/PageHeader';

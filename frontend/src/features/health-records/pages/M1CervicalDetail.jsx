@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1CervicalDetail.jsx
 /**
  * M1 Cervical Cancer and Breast Mass Program Detail Page
  *

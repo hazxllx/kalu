@@ -1,3 +1,4 @@
+// frontend/src/components/system/ButtonSelectGroup.jsx
 import React, { useRef } from "react";
 
 /**
@@ -61,6 +62,7 @@ const VARIANTS = {
   },
 };
 
+// Renders or manages ButtonSelectGroup logic.
 export default function ButtonSelectGroup({
   options,
   value,

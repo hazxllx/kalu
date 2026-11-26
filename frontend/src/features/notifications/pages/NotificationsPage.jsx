@@ -1,3 +1,4 @@
+// frontend/src/features/notifications/pages/NotificationsPage.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
@@ -252,6 +253,7 @@ export default function NotificationsPage() {
   const getCategoryColor = (notification) => hasPriority(notification)
     ? "border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626] dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
     : CATEGORIES[notification.category]?.color || "bg-slate-100 text-slate-700 dark:bg-slate-700/50 dark:text-slate-200";
+  // Handles getCategoryLabel logic.
   function getCategoryLabel(category) {
     return CATEGORIES[category]?.label || category
       .split(/[_-]+/)

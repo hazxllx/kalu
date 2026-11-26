@@ -1,8 +1,10 @@
+// frontend/src/features/registration/components/FaceVerification.jsx
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera, RotateCcw, Upload, CheckCircle2, X, AlertCircle, ShieldCheck } from "lucide-react";
 import { btnPrimary, btnSecondary } from "@/features/registration/components/RegistrationDesign";
 
+// Renders or manages FaceVerification logic.
 export default function FaceVerification({ captured, onCapture, onRemove, error }) {
   const [mode, setMode] = useState(captured ? "preview" : "idle");
   const [cameraError, setCameraError] = useState("");

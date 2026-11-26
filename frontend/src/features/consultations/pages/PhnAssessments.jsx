@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/pages/PhnAssessments.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -80,6 +81,7 @@ const buildDraftBase = (patient) => ({
   visitDate: patient?.visitDate || "",
 });
 
+// Renders or manages PhnCheckups logic.
 export default function PhnCheckups() {
   const { user } = useAuth();
   const { coverage } = usePhnCoverage();

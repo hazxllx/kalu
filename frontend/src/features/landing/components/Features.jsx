@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/Features.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { Activity, ShieldAlert, Syringe, HeartPulse, Apple, Sun } from "lucide-react";
@@ -48,6 +49,7 @@ const programs = [
   },
 ];
 
+// Renders or manages Features logic.
 export default function Features() {
   return (
     <section id="programs" className="bg-paper py-20 md:py-24">

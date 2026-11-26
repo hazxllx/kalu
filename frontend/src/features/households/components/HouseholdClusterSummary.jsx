@@ -1,3 +1,4 @@
+// frontend/src/features/households/components/HouseholdClusterSummary.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Card } from "@/components/common/Card";
@@ -19,6 +20,7 @@ const tones = {
   [RISK_LEVELS.UNASSESSED]: "bg-slate-400",
 };
 
+// Renders or manages HouseholdClusterSummary logic.
 export default function HouseholdClusterSummary() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");

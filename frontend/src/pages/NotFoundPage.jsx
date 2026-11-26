@@ -1,7 +1,9 @@
+// frontend/src/pages/NotFoundPage.jsx
 import { useLocation } from 'react-router-dom';
 
 import { useQuery } from '@tanstack/react-query';
 
+// Renders or manages NotFoundPage logic.
 export default function NotFoundPage() {
     const location = useLocation();
     const pageName = location.pathname.substring(1);

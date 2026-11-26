@@ -1,3 +1,4 @@
+// backend/src/services/appointments.service.js
 /**
  * Resident Appointment Booking & Clinic Schedule Service (`services/appointments.service.js`).
  *
@@ -965,6 +966,7 @@ async function audit(supabase, user, action, entityId, row) {
     .then(() => {}, () => {});
 }
 
+// Handles notifyResidentOf logic.
 async function notifyResidentOf(supabase, row, { title, message }) {
   const authUserId = await residentAuthUser(supabase, row.resident_id).catch(() => null);
   if (!authUserId) return;
@@ -978,6 +980,7 @@ async function notifyResidentOf(supabase, row, { title, message }) {
   }).catch(() => {});
 }
 
+// Handles notifyDecider logic.
 async function notifyDecider(supabase, row, message) {
   if (!row.decided_by) return;
   await notifyResident({

@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/TopHealthTrends.jsx
 import React from "react";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
@@ -34,6 +35,7 @@ export default function TopHealthTrends({ trends = [], loading = false, error = 
   );
 }
 
+// Renders or manages TrendIndicator logic.
 function TrendIndicator({ trend }) {
   if (!trend.direction || !Number.isFinite(trend.previousValue)) return null;
   const glyph = trend.direction === "up" ? "+" : trend.direction === "down" ? "-" : "=";

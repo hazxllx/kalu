@@ -1,3 +1,4 @@
+// frontend/src/features/reports/pages/RhuIncomingReports.jsx
 import React from "react";
 import PageHeader from "@/components/common/PageHeader";
 import IncomingReports from "@/features/reports/components/IncomingReports";

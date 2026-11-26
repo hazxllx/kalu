@@ -1,3 +1,4 @@
+// frontend/src/services/api/permissionLoadError.js
 export const permissionLoadErrorMessage = (error) => {
   const status = Number(error?.status || error?.statusCode);
   const message = String(error?.message || '');

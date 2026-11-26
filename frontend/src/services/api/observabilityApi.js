@@ -1,3 +1,4 @@
+// frontend/src/services/api/observabilityApi.js
 import { api } from './apiClient';
 
 /**

@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/HealthStatusSummary.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck, Activity, AlertCircle, TrendingUp, TrendingDown } from "lucide-react";
@@ -42,6 +43,7 @@ const STATUS_BAR = {
   "Needs Attention": "bg-brand-yellow",
 };
 
+// Renders or manages HealthStatusSummary logic.
 export default function HealthStatusSummary({ summary }) {
   return (
     <div className="grid sm:grid-cols-3 gap-5">

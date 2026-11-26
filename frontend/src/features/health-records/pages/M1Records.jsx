@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1Records.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import TclPageHeader from "@/features/health-records/components/TclPageHeader";
@@ -278,6 +279,7 @@ const YES_NO = [
  * table and all existing fields. Data is still persisted to the same endpoints.
  */
 
+// Renders or manages M1Records logic.
 export default function M1Records() {
   const { user } = useAuth();
   const { online, lastSyncedAt } = useSyncStatus();

@@ -1,3 +1,4 @@
+// backend/src/utils/apiResponse.js
 /**
  * @module utils/apiResponse
  * @description Standard HTTP JSON response envelope helpers for KALUSAGAP controllers.

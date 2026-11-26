@@ -1,3 +1,4 @@
+// frontend/src/lib/accountDisplayName.js
 // Presentation-only account labels. Role ids, profile names, Auth metadata,
 // permissions, and email addresses remain unchanged.
 const ACCOUNT_DISPLAY_NAMES = Object.freeze({

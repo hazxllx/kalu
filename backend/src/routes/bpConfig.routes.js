@@ -1,3 +1,4 @@
+// backend/src/routes/bpConfig.routes.js
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';

@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/pages/ResidentFollowUpCalendar.jsx
 import React, { useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -36,6 +37,7 @@ const mapToSchedule = (row) => ({
   requiresResidentResponse: row.requiresResidentResponse,
 });
 
+// Renders or manages ResidentFollowUpCalendar logic.
 export default function ResidentFollowUpCalendar() {
   const { user } = useAuth();
   const [schedules, setSchedules] = useState([]);
@@ -91,6 +93,7 @@ export default function ResidentFollowUpCalendar() {
   return <ResidentCalendarContent schedules={schedules} loaded={loaded} loadError={loadError} reload={reload} />;
 }
 
+// Renders or manages ResidentCalendarContent logic.
 function ResidentCalendarContent({ schedules, loaded, loadError, reload }) {
   const [view, setView] = useState("month");
   const [cursor, setCursor] = useState(() => new Date());

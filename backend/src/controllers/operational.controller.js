@@ -1,3 +1,4 @@
+// backend/src/controllers/operational.controller.js
 /**
  * Operational tracking controller (visit plans, queue items, notifications, and related operational kinds).
  *

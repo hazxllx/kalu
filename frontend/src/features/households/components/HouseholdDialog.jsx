@@ -1,5 +1,7 @@
+// frontend/src/features/households/components/HouseholdDialog.jsx
 import React, { useLayoutEffect, useRef } from "react";
 
+// Renders or manages HouseholdDialog logic.
 export default function HouseholdDialog({ label, onClose, className = "max-w-4xl", children }) {
   const ref = useRef(null);
 

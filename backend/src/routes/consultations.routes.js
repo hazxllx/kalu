@@ -1,3 +1,4 @@
+// backend/src/routes/consultations.routes.js
 /**
  * Clinical consultation and visit record routes (`/api/consultations` and `/api/health-records`).
  *

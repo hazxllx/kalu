@@ -1,5 +1,7 @@
+// frontend/src/features/authentication/personnelPasswordSetup.js
 export const isManagedPersonnelSession = (session) => session?.user?.app_metadata?.personnel_managed === true;
 
+// Handles resolvePasswordSetup logic.
 export async function resolvePasswordSetup(session, loadStatus, { knownRequired = false } = {}) {
   if (!session?.user?.id || !session.access_token) throw new Error("Your password-reset session is missing or expired.");
   let requiresSetup = knownRequired;
@@ -38,6 +40,7 @@ export const personnelPasswordRequirements = (password = "") => {
   ];
 };
 
+// Handles personnelPasswordError logic.
 export function personnelPasswordError(password) {
   if (personnelPasswordRequirements(password).some(({ valid }) => !valid)) {
     return "Use 8 to 200 characters with uppercase, lowercase, a number, a special character, and no whitespace.";
@@ -45,6 +48,7 @@ export function personnelPasswordError(password) {
   return "";
 }
 
+// Handles personnelSetupOutcome logic.
 export function personnelSetupOutcome(result) {
   if (result?.passwordSaved !== true || result?.setupComplete !== true || typeof result.active !== "boolean"
     || !["pending", "approved", "rejected"].includes(result.approvalStatus) || typeof result.activationRequested !== "boolean"
@@ -61,6 +65,7 @@ export function personnelSetupOutcome(result) {
   return { title: "Password Setup Complete", message: "Your password has been saved, but your account is not active. An administrator must review its approval or activation before you can sign in." };
 }
 
+// Handles saveResetPassword logic.
 export async function saveResetPassword({ session, password, setupStatus, passwordPreviouslySaved = false, recoverySecret = null, auth, personnelSetup, activateResident }) {
   if (!session?.user?.id || (!session.access_token && !recoverySecret)) throw new Error("Your password-reset session is missing or expired.");
   if (setupStatus?.setupRequired === true) {

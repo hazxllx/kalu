@@ -1,3 +1,4 @@
+// frontend/src/sw.js
 /**
  * KALUSAGAP service worker (custom, injectManifest).
  *

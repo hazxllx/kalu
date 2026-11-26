@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/ScheduleCalendarViews.jsx
 import React from "react";
 import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
@@ -73,6 +74,7 @@ function EventIndicator({ event, onOpenEvent, onSelectDay, variant = "supervisor
   );
 }
 
+// Renders or manages ActivityPagination logic.
 function ActivityPagination({ page, total, pageSize, onChange }) {
   const pages = Math.ceil(total / pageSize);
   if (pages <= 1) return null;
@@ -89,6 +91,7 @@ function ActivityPagination({ page, total, pageSize, onChange }) {
   );
 }
 
+// Renders or manages ActivityEmpty logic.
 function ActivityEmpty({ loading = false, incomplete = false, title = "Nothing scheduled", description = "Activities added for this date will appear here.", incompleteMessage = "Some activities could not be loaded.", onRetry = undefined, onAction = undefined, actionLabel = "Add Activity" }) {
   if (loading || incomplete) return (
     <div role="status" className="flex items-center gap-2 px-3 py-2 text-caption text-brand-gray">
@@ -174,6 +177,7 @@ const chipTone = (s) => {
 
 /* --------------------------------- Month --------------------------------- */
 
+// Renders or manages MonthView logic.
 export function MonthView({ cursor, today, byDay, variant = "supervisor", presentation = "default", selectedDay = null, onOpenEvent, onSelectDay }) {
   if (presentation === "supervisor") {
     const selectedKey = toDateKey(selectedDay);
@@ -287,6 +291,7 @@ export function MonthView({ cursor, today, byDay, variant = "supervisor", presen
 
 /* ---------------------------------- Week ---------------------------------- */
 
+// Renders or manages WeekView logic.
 export function WeekView({ cursor, today, byDay, variant = "supervisor", presentation = "default", selectedDay = null, onOpenEvent, onSelectDay }) {
   if (presentation === "supervisor") {
     return (
@@ -359,6 +364,7 @@ export function WeekView({ cursor, today, byDay, variant = "supervisor", present
 
 /* ----------------------------------- Day ----------------------------------- */
 
+// Renders or manages DayView logic.
 export function DayView({ cursor, byDay, variant = "supervisor", presentation = "default", loading = false, incomplete = false, incompleteMessage = undefined, onRetry = undefined, filtersActive = false, onClearFilters = undefined, onOpenEvent, onAddActivity = undefined, canAddActivity = false }) {
   if (presentation === "supervisor") return <SupervisorDayView cursor={cursor} byDay={byDay} loading={loading} incomplete={incomplete} incompleteMessage={incompleteMessage} onRetry={onRetry} filtersActive={filtersActive} onClearFilters={onClearFilters} onOpenEvent={onOpenEvent} onAddActivity={onAddActivity} canAddActivity={canAddActivity} />;
   const list = byDay[toKey(cursor)] || [];
@@ -401,6 +407,7 @@ export function DayView({ cursor, byDay, variant = "supervisor", presentation = 
   );
 }
 
+// Renders or manages SupervisorDayView logic.
 function SupervisorDayView({ cursor, byDay, loading, incomplete, incompleteMessage, onRetry, filtersActive, onClearFilters, onOpenEvent, onAddActivity, canAddActivity }) {
   const key = toDateKey(cursor);
   const list = byDay[key] || [];
@@ -432,6 +439,7 @@ function SupervisorDayView({ cursor, byDay, loading, incomplete, incompleteMessa
   );
 }
 
+// Renders or manages AgendaView logic.
 export function AgendaView({ events, selectedDay, loading = false, incomplete = false, onRetry = undefined, onSelectDay, onOpenEvent }) {
   const selectedKey = toDateKey(selectedDay);
   const index = events.findIndex((event) => event.date >= selectedKey);

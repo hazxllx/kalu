@@ -1,3 +1,4 @@
+// frontend/src/services/offline/verifiedProfileCache.js
 import { ALL_ROLES, ROLE } from '../../lib/roles.js';
 import { APPROVED_BARANGAYS } from '../../../../shared/barangays.js';
 import { PERMISSION_CACHE_TTL_MS, readVerifiedPermissions } from '../accessControl/permissionCache.js';

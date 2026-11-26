@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/HouseholdRiskDetail.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
@@ -113,6 +114,7 @@ const environmentalFieldLabels = {
   remarks: "Remarks",
 };
 
+// Renders or manages AssessmentDetails logic.
 function AssessmentDetails({ household, visits, assessmentRecords }) {
   const latestVisit = visits?.[0] || null;
   const snapshot = normalizeHouseholdSnapshot(household?.assessmentProfile || latestVisit?.profileSnapshot || household || null);
@@ -255,6 +257,7 @@ function AssessmentDetails({ household, visits, assessmentRecords }) {
   );
 }
 
+// Renders or manages HouseholdRiskDetail logic.
 export default function HouseholdRiskDetail() {
   const { id } = useParams();
   const { user } = useAuth();

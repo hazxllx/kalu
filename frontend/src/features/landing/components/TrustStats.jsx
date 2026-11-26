@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/TrustStats.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck, Database, Users, Activity } from "lucide-react";
@@ -33,6 +34,7 @@ const POINTS = [
   },
 ];
 
+// Renders or manages TrustStats logic.
 export default function TrustStats() {
   return (
     <section className="bg-white py-24">

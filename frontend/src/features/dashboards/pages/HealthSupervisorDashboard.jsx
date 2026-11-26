@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/HealthSupervisorDashboard.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "framer-motion";
@@ -48,11 +49,13 @@ const dateLabel = (value, options = {}) => {
   return Number.isNaN(date.getTime()) ? "Date not recorded" : new Intl.DateTimeFormat("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", ...options }).format(date);
 };
 
+// Renders or manages SourceErrors logic.
 function SourceErrors({ errors }) {
   if (!errors.length) return null;
   return <div className="hs-source-errors" role="alert">{errors.map(({ label, message, retry }) => <div key={label}><p><strong>{label}: </strong>{message}</p><button type="button" onClick={retry} aria-label={`Retry ${label.toLowerCase()}`}>Retry</button></div>)}</div>;
 }
 
+// Renders or manages HealthSupervisorDashboard logic.
 export default function HealthSupervisorDashboard() {
   const { user, refreshProfile } = useAuth();
   const { can } = usePermissions();

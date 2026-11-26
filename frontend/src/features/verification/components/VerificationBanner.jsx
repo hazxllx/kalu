@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/VerificationBanner.jsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { AlertTriangle, BadgeCheck, Clock, Loader2, RefreshCw, RotateCcw, ShieldAlert, UploadCloud, X } from "lucide-react";
@@ -75,6 +76,7 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 };
 
+// Renders or manages VerificationBanner logic.
 export default function VerificationBanner({ showVerificationMethod = false, compact = false, refreshKey = 0 }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);

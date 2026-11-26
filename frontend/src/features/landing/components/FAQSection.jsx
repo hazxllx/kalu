@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/FAQSection.jsx
 import React, { useState } from "react";
 import { Minus, Plus, Mail, Phone } from "lucide-react";
 import { SectionHeading } from "@/components/branding/GovChrome";
@@ -30,6 +31,7 @@ const faqs = [
   },
 ];
 
+// Renders or manages FAQSection logic.
 export default function FAQSection() {
   const [openIndex, setOpenIndex] = useState(0);
 

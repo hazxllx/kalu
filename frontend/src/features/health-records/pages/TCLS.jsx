@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/TCLS.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
@@ -51,6 +52,7 @@ const formatDate = (iso) => {
 };
 const TCL_PAGE_SIZE = 12;
 
+// Renders or manages TclCard logic.
 function TclCard({ record, onView }) {
   const Icon = programIconMap[record.program] || Stethoscope;
   return (
@@ -73,6 +75,7 @@ function TclCard({ record, onView }) {
   );
 }
 
+// Renders or manages CategorySection logic.
 function CategorySection({ category, programs, rowsByProgram, onViewRecord }) {
   // Collect all records for this category's programs
   const categoryRecords = programs.flatMap((prog) => rowsByProgram.get(prog) || []);
@@ -108,6 +111,7 @@ function CategorySection({ category, programs, rowsByProgram, onViewRecord }) {
   );
 }
 
+// Renders or manages ModalShell logic.
 function ModalShell({ title, subtitle, onClose, children, formDesign = false, footer = null }) {
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -143,6 +147,7 @@ function ModalShell({ title, subtitle, onClose, children, formDesign = false, fo
   );
 }
 
+// Renders or manages TCLS logic.
 export default function TCLS() {
   const { user } = useAuth();
   if (!user?.municipalityId || (user.role === "health_supervisor" && !user.barangayId)) {
@@ -151,6 +156,7 @@ export default function TCLS() {
   return <TclRegister key={`${user.id}:${user.role}:${user.municipalityId}:${user.barangayId || ""}`} user={user} />;
 }
 
+// Renders or manages TclRegister logic.
 function TclRegister({ user }) {
   const { online, lastSyncedAt } = useSyncStatus();
   const directory = useHouseholdWorkers();

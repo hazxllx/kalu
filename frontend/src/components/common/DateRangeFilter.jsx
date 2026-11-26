@@ -1,3 +1,4 @@
+// frontend/src/components/common/DateRangeFilter.jsx
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
@@ -27,6 +28,7 @@ const formatDate = (value, options = { month: "short", day: "numeric", year: "nu
   return date ? date.toLocaleDateString("en-PH", options) : "";
 };
 
+// Renders or manages DateRangeFilter logic.
 export default function DateRangeFilter({ from, to, onFromChange, onToChange, className = "", portal = false }) {
   const active = Boolean(from || to);
   const [open, setOpen] = useState(false);

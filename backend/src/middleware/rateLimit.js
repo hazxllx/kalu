@@ -1,3 +1,4 @@
+// backend/src/middleware/rateLimit.js
 import rateLimitLib, { ipKeyGenerator } from 'express-rate-limit';
 
 /**

@@ -1,3 +1,4 @@
+// frontend/src/features/households/lib/riskClusterAdapter.js
 /**
  * Household risk-cluster adapter.
  *

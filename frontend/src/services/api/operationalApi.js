@@ -1,3 +1,4 @@
+// frontend/src/services/api/operationalApi.js
 import { api } from './apiClient';
 
 const resource = (kind) => ({

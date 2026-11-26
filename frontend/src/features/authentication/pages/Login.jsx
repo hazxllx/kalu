@@ -1,3 +1,4 @@
+// frontend/src/features/authentication/pages/Login.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -8,6 +9,7 @@ import GovSeal from "@/components/branding/GovSeal";
 import { email as validateEmail, required, validateFields, firstErrorField } from "@/utils/validation";
 import { FieldError, ValidationSummary } from "@/components/common/Validation";
 
+// Renders or manages Login logic.
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();

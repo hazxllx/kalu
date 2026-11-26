@@ -1,3 +1,4 @@
+// backend/src/middleware/errorHandler.js
 import env from '../config/env.js';
 
 /**

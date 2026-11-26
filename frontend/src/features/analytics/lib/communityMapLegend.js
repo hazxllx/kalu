@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/lib/communityMapLegend.js
 const CONDITION_COLORS = {
   Tuberculosis: '#7C3AED', Dengue: '#BE185D', Malaria: '#A16207',
   Hypertension: '#DC2626', Diabetes: '#2563EB', Respiratory: '#0891B2',
@@ -6,6 +7,7 @@ const CONDITION_COLORS = {
 
 export const conditionColor = (name) => CONDITION_COLORS[name] || '#475569';
 
+// Handles mapLegend logic.
 export function mapLegend(metric, markers, hasBoundaries) {
   const conditions = metric.startsWith('Common Conditions');
   const color = conditions ? '#0891B2' : /high-risk/i.test(metric) ? '#B3202C' : /pending follow-ups/i.test(metric) ? '#B78320' : '#2563A6';

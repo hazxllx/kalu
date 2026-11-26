@@ -1,3 +1,4 @@
+// backend/src/services/riskConfig.service.js
 /**
  * Risk configuration service — the ONE place the resident risk CRITERIA and
  * THRESHOLDS are resolved and (for the System Administrator) edited.

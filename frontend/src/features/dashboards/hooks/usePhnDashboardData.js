@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/hooks/usePhnDashboardData.js
 import { useCallback } from "react";
 
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
@@ -19,6 +20,7 @@ import useAuthorizedData from '@/hooks/useAuthorizedData';
  * `reload()` so a retry button repeats exactly the failed request.
  */
 
+// Renders or manages useRowsSource logic.
 function useRowsSource(loader, endpoint, requireHighRisk = false) {
   const load = useCallback(async (options) => {
     try {
@@ -41,6 +43,7 @@ function useRowsSource(loader, endpoint, requireHighRisk = false) {
     loading: source.loading, error: source.error, reload: source.refresh };
 }
 
+// Renders or manages usePhnDashboardData logic.
 export function usePhnDashboardData() {
   const workflow = usePhnWorkflow({ source: "queue" });
 

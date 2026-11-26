@@ -1,9 +1,11 @@
+// frontend/src/components/system/Skeleton.jsx
 import React from "react";
 
 /**
  * Skeleton loading primitives matching the final layout.
  */
 
+// Renders or manages Skeleton logic.
 export function Skeleton({ className = "", style = undefined }) {
   return (
     <div
@@ -15,6 +17,7 @@ export function Skeleton({ className = "", style = undefined }) {
   );
 }
 
+// Renders or manages SkeletonRow logic.
 export function SkeletonRow({ variant = "default" }) {
   if (variant === "compact") {
     return (
@@ -40,6 +43,7 @@ export function SkeletonRow({ variant = "default" }) {
   );
 }
 
+// Renders or manages SkeletonList logic.
 export function SkeletonList({ rows = 5, variant = "default", className = "" }) {
   return (
     <div role="status" aria-label="Loading" className={`space-y-3 ${className}`}>
@@ -50,6 +54,7 @@ export function SkeletonList({ rows = 5, variant = "default", className = "" }) 
   );
 }
 
+// Renders or manages SkeletonCard logic.
 export function SkeletonCard({ className = "" }) {
   return (
     <div role="status" aria-label="Loading" className={`space-y-3 ${className}`}>
@@ -60,6 +65,7 @@ export function SkeletonCard({ className = "" }) {
   );
 }
 
+// Renders or manages SkeletonTable logic.
 export function SkeletonTable({ rows = 5, cols = 4, className = "" }) {
   return (
     <div role="status" aria-label="Loading" className={`overflow-hidden rounded-[8px] border border-[#D6DEE8] dark:border-[#2A3645] ${className}`}>
@@ -84,6 +90,7 @@ export function SkeletonTable({ rows = 5, cols = 4, className = "" }) {
   );
 }
 
+// Renders or manages SkeletonStatGrid logic.
 export function SkeletonStatGrid({ count = 4, className = "" }) {
   return (
     <div
@@ -101,6 +108,7 @@ export function SkeletonStatGrid({ count = 4, className = "" }) {
   );
 }
 
+// Renders or manages SkeletonCardGrid logic.
 export function SkeletonCardGrid({ count = 6, className = "" }) {
   return (
     <div
@@ -117,6 +125,7 @@ export function SkeletonCardGrid({ count = 6, className = "" }) {
   );
 }
 
+// Renders or manages SkeletonChart logic.
 export function SkeletonChart({ className = "" }) {
   return (
     <div role="status" aria-label="Loading" className={`rounded-[8px] border border-[#D6DEE8] bg-white p-4 dark:border-[#2A3645] dark:bg-[#131E2C] ${className}`}>
@@ -131,6 +140,7 @@ export function SkeletonChart({ className = "" }) {
   );
 }
 
+// Renders or manages PageSkeleton logic.
 export function PageSkeleton({ compact = false }) {
   return (
     <div role="status" aria-label="Loading" className="mx-auto w-full max-w-[1240px] space-y-5">
@@ -148,6 +158,7 @@ export function PageSkeleton({ compact = false }) {
   );
 }
 
+// Renders or manages FullPageSkeleton logic.
 export function FullPageSkeleton() {
   return (
     <div

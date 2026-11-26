@@ -1,3 +1,4 @@
+// backend/src/services/registration.service.js
 import ApiError from '../utils/apiError.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import repository from '../repositories/index.js';

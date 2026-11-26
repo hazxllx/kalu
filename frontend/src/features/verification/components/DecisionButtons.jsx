@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/DecisionButtons.jsx
 import React from "react";
 import { CheckCircle2, XCircle, FileWarning, Loader2 } from "lucide-react";
 

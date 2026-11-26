@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/TclWorkspace.jsx
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
@@ -86,6 +87,7 @@ const COUNT_FETCHERS = {
     listTclOffline({ ownerId, fetchFn: () => tclApi.list(), online }),
 };
 
+// Renders or manages TclWorkspace logic.
 export default function TclWorkspace() {
   const { user } = useAuth();
   const { online, lastSyncedAt } = useSyncStatus();

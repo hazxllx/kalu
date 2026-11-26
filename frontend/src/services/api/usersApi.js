@@ -1,3 +1,4 @@
+// frontend/src/services/api/usersApi.js
 import { api } from './apiClient';
 
 /**

@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/pages/RhuConsultation.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -56,6 +57,7 @@ const formatTime = (iso) => {
   return formatted.date === "—" ? "" : `${formatted.date}${formatted.time === "—" ? "" : ` · ${formatted.time}`}`;
 };
 
+// Renders or manages RhuConsultation logic.
 export default function RhuConsultation() {
   const { patients, loading, error, refresh, startCheckup, completeCheckup } = usePhnWorkflow({ source: "queue" });
 

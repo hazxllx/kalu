@@ -1,3 +1,4 @@
+// frontend/src/services/offline/crypto.js
 import { db } from './db.js';
 
 /**

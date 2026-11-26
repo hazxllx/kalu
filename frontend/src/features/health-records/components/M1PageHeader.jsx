@@ -1,8 +1,10 @@
+// frontend/src/features/health-records/components/M1PageHeader.jsx
 import React from "react";
 import HealthSupervisorPageHeader from "@/features/dashboards/components/HealthSupervisorPageHeader";
 import TclPageHeader from "./TclPageHeader";
 import M1BackButton from "./M1BackButton";
 
+// Renders or manages M1PageHeader logic.
 export default function M1PageHeader({
   variant = "detail",
   eyebrow = "M1 Health Programs",

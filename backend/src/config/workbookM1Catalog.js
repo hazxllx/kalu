@@ -1,3 +1,4 @@
+// backend/src/config/workbookM1Catalog.js
 import workbookCatalog from './m1WorkbookCatalog.json' with { type: 'json' };
 
 /**

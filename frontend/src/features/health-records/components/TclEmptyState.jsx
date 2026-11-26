@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/TclEmptyState.jsx
 import React from "react";
 import { SearchX, ClipboardList } from "lucide-react";
 

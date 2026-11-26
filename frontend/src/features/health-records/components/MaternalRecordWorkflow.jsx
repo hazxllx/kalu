@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/MaternalRecordWorkflow.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2, Baby, Calendar } from "lucide-react";
 import { Card } from "@/components/common/Card";
@@ -792,6 +793,7 @@ function RecordEncounterForm({
   );
 }
 
+// Renders or manages ResidentSummary logic.
 function ResidentSummary({ resident, initialRecord, residents, onSelectResident, errors }) {
   if (initialRecord) {
     return (
@@ -812,6 +814,7 @@ function ResidentSummary({ resident, initialRecord, residents, onSelectResident,
   );
 }
 
+// Renders or manages DeliveryRecordForm logic.
 function DeliveryRecordForm({ resident, residents, initialRecord = null, saving, onClose, onSave, onSelectResident }) {
   const submissionKey = useRef(null);
   const [form, setForm] = useState({
@@ -915,6 +918,7 @@ function DeliveryRecordForm({ resident, residents, initialRecord = null, saving,
   );
 }
 
+// Renders or manages PostpartumFollowUpForm logic.
 function PostpartumFollowUpForm({ resident, residents, initialRecord = null, saving, onClose, onSave, onSelectResident }) {
   const submissionKey = useRef(null);
   const [form, setForm] = useState({

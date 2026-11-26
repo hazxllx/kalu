@@ -1,3 +1,4 @@
+// frontend/src/lib/rhuStations.js
 /**
  * RHU station assignment helpers (frontend mirror of
  * `backend/src/config/rhuStations.js`).

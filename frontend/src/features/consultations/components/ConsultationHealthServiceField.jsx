@@ -1,9 +1,11 @@
+// frontend/src/features/consultations/components/ConsultationHealthServiceField.jsx
 import React from "react";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { consultationHealthServiceLabel } from "@/features/consultations/lib/consultationRisk";
 
 const GENERAL_CONSULTATION_OPTION = "__general_consultation__";
 
+// Renders or manages ConsultationHealthServiceField logic.
 export default function ConsultationHealthServiceField({
   value = "",
   onChange,

@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/ModulePermissionCard.jsx
 import React from "react";
 import { CheckCheck, Lock, ShieldAlert, XSquare } from "lucide-react";
 
@@ -9,6 +10,7 @@ import {
   permissionLockReason,
 } from "@/lib/permissions";
 
+// Renders or manages ModulePermissionCard logic.
 export default function ModulePermissionCard({ module, role, permissions, onToggle, onBulk }) {
   const fullModule = getModule(module.id) || module;
   const filtered = module.permissions.length !== fullModule.permissions.length;

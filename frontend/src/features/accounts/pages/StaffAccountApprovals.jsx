@@ -1,3 +1,4 @@
+// frontend/src/features/accounts/pages/StaffAccountApprovals.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import ReviewModal, { ModalSection, InfoGrid, InfoItem } from "@/features/users/components/ReviewModal";
@@ -39,6 +40,7 @@ const ROLE_LABELS = {
   mho: "Municipal Health Officer",
 };
 
+// Renders or manages StatusBadge logic.
 function StatusBadge({ value }) {
   const meta = STATUS_META[value] || STATUS_META.pending;
   return (

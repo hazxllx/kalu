@@ -1,3 +1,4 @@
+// frontend/src/services/offline/ids.js
 /**
  * Stable local identifiers for offline records and synchronization operations.
  *

@@ -1,3 +1,4 @@
+// frontend/src/features/analytics/components/RiskOverview.jsx
 import React from "react";
 import { normalizeRiskDistribution, RISK_PRESENTATION } from "@/lib/riskLevel";
 
@@ -5,6 +6,7 @@ const RISK_ROWS = [
   "High", "Moderate", "Low", "Unassessed",
 ];
 
+// Renders or manages RiskOverview logic.
 export default function RiskOverview({
   distribution = [],
   compact = false,

@@ -1,3 +1,4 @@
+// backend/src/config/riskConfig.js
 /**
  * Rule-based RESIDENT health-risk configuration — the DEFAULT (seed) criteria
  * and thresholds for the single authoritative risk engine

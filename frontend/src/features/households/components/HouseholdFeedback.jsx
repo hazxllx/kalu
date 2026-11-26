@@ -1,6 +1,8 @@
+// frontend/src/features/households/components/HouseholdFeedback.jsx
 import React, { useEffect } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 
+// Renders or manages HouseholdFeedback logic.
 export default function HouseholdFeedback({ message, tone = 'success', onDismiss }) {
   useEffect(() => {
     if (!message || tone !== 'success' || !onDismiss) return undefined;

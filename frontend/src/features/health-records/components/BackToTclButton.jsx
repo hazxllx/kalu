@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/BackToTclButton.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
@@ -10,6 +11,7 @@ import { ArrowLeft } from "lucide-react";
  */
 export const TCL_BACK_BUTTON_CLASS = "inline-flex min-h-10 items-center gap-2 rounded-btn border border-white/25 bg-white/5 px-3.5 text-sm font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50";
 
+// Renders or manages BackToTclButton logic.
 export default function BackToTclButton({ to = "../tcls" }) {
   return (
     <Link

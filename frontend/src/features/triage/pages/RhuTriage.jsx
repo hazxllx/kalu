@@ -1,3 +1,4 @@
+// frontend/src/features/triage/pages/RhuTriage.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -75,6 +76,7 @@ const inputCls = (error) =>
 const metaLine = (age, sex, barangay) =>
   [isRecorded(age) ? `${age} years old` : "Age not recorded", sex || "Sex not recorded", barangay || "Barangay not recorded"].join(" • ");
 
+// Renders or manages RhuTriage logic.
 export default function RhuTriage() {
   const { user } = useAuth();
   const location = useLocation();

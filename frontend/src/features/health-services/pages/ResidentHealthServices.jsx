@@ -1,3 +1,4 @@
+// frontend/src/features/health-services/pages/ResidentHealthServices.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, FileText, HeartPulse, Loader2, RotateCcw, X, ZoomIn } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
@@ -467,6 +468,7 @@ export function ServiceCard({ service, readOnly = false, onViewDetails, onPrevie
   );
 }
 
+// Renders or manages ServiceDetailsDialog logic.
 export function ServiceDetailsDialog({ service, readOnly = false, onClose, onRegister, onCancel, onPreviewMemo }) {
   if (!service) return null;
   const availability = availabilityLine(service);
@@ -582,6 +584,7 @@ export function ServiceDetailsDialog({ service, readOnly = false, onClose, onReg
   );
 }
 
+// Handles formatFullDate logic.
 function formatFullDate(value) {
   const date = formatPlanDate(value);
   return date ? `${date} ${String(value).slice(0, 4)}` : "";

@@ -1,3 +1,4 @@
+// backend/src/config/documentBranding.js
 /**
  * KALUSAGAP — official document header & logo branding configuration.
  *

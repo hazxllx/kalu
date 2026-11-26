@@ -1,9 +1,11 @@
+// frontend/src/features/dashboards/components/supervisorDashboardData.js
 export const OPEN_REFERRAL_STATUSES = new Set(["Pending", "Accepted", "In Progress"]);
 export const OPEN_CONSULTATION_STATUSES = ["draft", "submitted", "received", "in_review", "referred"];
 const OPEN_FOLLOW_UPS = new Set(["scheduled", "pending", "today", "upcoming", "ongoing"]);
 const CONSULTATION_LABELS = { draft: "Draft", submitted: "Submitted", received: "Received", in_review: "In Review", referred: "Referred" };
 const BASE = "/app/health_supervisor";
 
+// Handles requireDashboardRows logic.
 export function requireDashboardRows(response, source) {
   const rows = Array.isArray(response) ? response : response?.rows;
   if (!Array.isArray(rows) || rows.some((row) => !row || !row.id)) {
@@ -12,6 +14,7 @@ export function requireDashboardRows(response, source) {
   return rows;
 }
 
+// Handles residentDisplayName logic.
 export function residentDisplayName(resident) {
   if (typeof resident === "string") return resident.trim() || "Resident name unavailable";
   return resident?.name || [
@@ -21,16 +24,19 @@ export function residentDisplayName(resident) {
   ].filter(Boolean).join(" ") || "Resident name unavailable";
 }
 
+// Handles recordsForBarangay logic.
 export function recordsForBarangay(rows, barangay) {
   if (!barangay || !Array.isArray(rows)) return [];
   const assigned = String(barangay).trim().toLowerCase();
   return rows.filter((row) => String(row.resident?.barangay || row.residentBarangay || row.barangay || "").trim().toLowerCase() === assigned);
 }
 
+// Handles isOpenFollowUp logic.
 export function isOpenFollowUp(row) {
   return OPEN_FOLLOW_UPS.has(String(row?.status || "").toLowerCase()) && row?.resident_decision !== "rejected";
 }
 
+// Handles isOverdueFollowUp logic.
 export function isOverdueFollowUp(row, today) {
   if (!isOpenFollowUp(row)) return false;
   if (typeof row.is_overdue === "boolean") return row.is_overdue;
@@ -96,10 +102,12 @@ export function buildMonitoringPriorities({ residents = [], referrals = [], foll
   return [...records.values()].sort((a, b) => a.rank - b.rank || a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
 }
 
+// Handles matchesMonitoringFilter logic.
 export function matchesMonitoringFilter(item, filter) {
   return filter === "all" || item.filters.includes(filter);
 }
 
+// Handles upcomingActivities logic.
 export function upcomingActivities(events, from, to, limit = 5) {
   return events.filter((event) => event?.id && event.dateKey >= from && event.dateKey <= to &&
     (event.type === "follow-up" ? isOpenFollowUp(event) : String(event.status || "").toLowerCase() === "scheduled"))
@@ -107,6 +115,7 @@ export function upcomingActivities(events, from, to, limit = 5) {
     .slice(0, limit);
 }
 
+// Handles requireSupervisorMap logic.
 export function requireSupervisorMap(data, barangay) {
   if (!barangay || data?.scope !== "barangay" || data.scopeComplete !== true || !Array.isArray(data.barangays) ||
       data.barangays.some((row) => row.name !== barangay || !Array.isArray(row.conditions) ||
@@ -118,6 +127,7 @@ export function requireSupervisorMap(data, barangay) {
   return data;
 }
 
+// Handles riskDistributionRows logic.
 export function riskDistributionRows(rows) {
   if (!Array.isArray(rows)) return null;
   const labels = ["Low Risk", "Moderate Risk", "High Risk", "Unassessed"];
@@ -125,6 +135,7 @@ export function riskDistributionRows(rows) {
   return result.every((row) => row && Number.isSafeInteger(row.value) && row.value >= 0) ? result : null;
 }
 
+// Handles dashboardGreeting logic.
 export function dashboardGreeting(date = new Date()) {
   const hour = date.getHours();
   if (hour >= 5 && hour < 12) return "Good morning";
@@ -145,6 +156,7 @@ export function previousFourMonths(year, month) {
   });
 }
 
+// Handles enrichMonitoringCases logic.
 export function enrichMonitoringCases(items, { residents = [], referrals = [], followUps = [], consultations = [] }) {
   const people = new Map(residents.map((row) => [row.id, row]));
   const sources = new Map();
@@ -179,6 +191,7 @@ export function enrichMonitoringCases(items, { residents = [], referrals = [], f
   });
 }
 
+// Handles openedCaseSeries logic.
 export function openedCaseSeries(rows, months) {
   if (!Array.isArray(rows)) throw new Error("Consultation creation records are unavailable.");
   const counts = new Map(months.map((month) => [month.key, 0]));
@@ -198,6 +211,7 @@ export function openedCaseSeries(rows, months) {
   return months.map((month) => ({ ...month, opened: counts.get(month.key) }));
 }
 
+// Handles highRiskCaseSeries logic.
 export function highRiskCaseSeries(responses, months, barangay) {
   const labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const values = new Map();
@@ -220,6 +234,7 @@ export function highRiskCaseSeries(responses, months, barangay) {
   });
 }
 
+// Handles followUpPerformance logic.
 export function followUpPerformance(rows, range, today) {
   if (!Array.isArray(rows)) return null;
   const cohort = rows.filter((row) => row.scheduled_date >= range.from && String(row.scheduled_date).slice(0, 10) <= range.to);

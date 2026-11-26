@@ -1,3 +1,4 @@
+// frontend/src/services/api/advisoriesApi.js
 import { api } from './apiClient';
 
 export const advisoriesApi = {

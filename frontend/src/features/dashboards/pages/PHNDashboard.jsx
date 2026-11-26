@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/PHNDashboard.jsx
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -91,6 +92,7 @@ const welcomeFor = (user) => {
 
 /* ------------------------------- Primitives ------------------------------- */
 
+// Renders or manages Pill logic.
 function Pill({ value, tones, noWrap = false }) {
   const tone = tones[value] || "bg-slate-100 text-slate-600";
   return (
@@ -101,6 +103,7 @@ function Pill({ value, tones, noWrap = false }) {
   );
 }
 
+// Renders or manages SectionHeader logic.
 function SectionHeader({ title, subtitle, action = null, icon: Icon = null }) {
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
@@ -156,6 +159,7 @@ function WorkSection({ title, subtitle, icon, onViewAll, loading, error, onRetry
 
 /* -------------------------------- Dashboard ------------------------------- */
 
+// Renders or manages PHNDashboard logic.
 export default function PHNDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();

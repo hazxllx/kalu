@@ -1,3 +1,4 @@
+// frontend/src/components/ui/use-toast.jsx
 // Inspired by react-hot-toast library
 import { useState, useEffect } from "react";
 
@@ -13,6 +14,7 @@ const actionTypes = {
 
 let count = 0;
 
+// Handles genId logic.
 function genId() {
   count = (count + 1) % Number.MAX_VALUE;
   return count.toString();
@@ -104,6 +106,7 @@ const listeners = [];
 
 let memoryState = { toasts: [] };
 
+// Handles dispatch logic.
 function dispatch(action) {
   memoryState = reducer(memoryState, action);
   listeners.forEach((listener) => {
@@ -111,6 +114,7 @@ function dispatch(action) {
   });
 }
 
+// Handles dismissToast logic.
 function dismissToast(toastId) {
   if (toastId === undefined) {
     for (const timeout of autoDismissTimeouts.values()) clearTimeout(timeout);
@@ -166,6 +170,7 @@ function toast({ ...props }) {
   };
 }
 
+// Renders or manages useToast logic.
 function useToast() {
   const [state, setState] = useState(memoryState);
 

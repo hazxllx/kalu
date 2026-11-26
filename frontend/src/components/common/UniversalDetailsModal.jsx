@@ -1,7 +1,9 @@
+// frontend/src/components/common/UniversalDetailsModal.jsx
 import React, { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
+// Handles hasContent logic.
 function hasContent(value) {
   if (value === null || value === undefined || value === false) return false;
   if (typeof value === "string") return Boolean(value.trim());
@@ -9,6 +11,7 @@ function hasContent(value) {
   return true;
 }
 
+// Renders or manages UniversalDetailsModal logic.
 export default function UniversalDetailsModal({
   open,
   record,

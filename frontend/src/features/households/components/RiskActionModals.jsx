@@ -1,3 +1,4 @@
+// frontend/src/features/households/components/RiskActionModals.jsx
 import React, { useState } from "react";
 import FormModal from "@/components/common/FormModal";
 import { PhoneCall, UserPlus, ArrowUpRight } from "lucide-react";
@@ -11,6 +12,7 @@ const inputCls = (error) =>
     error ? "border-brand-danger" : "border-slate-200 dark:border-border"
   }`;
 
+// Renders or manages ModalShell logic.
 function ModalShell({ title, subtitle, onClose, busy = false, children, footer }) {
   return <FormModal title={title} description={subtitle} onClose={onClose} closeDisabled={busy} footer={footer}>{children}</FormModal>;
 }

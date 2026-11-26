@@ -1,3 +1,4 @@
+// backend/src/services/medicines.service.js
 /**
  * Medicine catalog service — generic-first, admin-managed catalog plus the
  * shared normalizer for medications recorded on a consultation.

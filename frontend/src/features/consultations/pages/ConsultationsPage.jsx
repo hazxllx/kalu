@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/pages/ConsultationsPage.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";

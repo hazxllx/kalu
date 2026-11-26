@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/pages/FollowUpCalendar.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -53,6 +54,7 @@ const mapCalendarActivity = (row, residents = [], assignedBarangay = "") => {
   };
 };
 
+// Renders or manages Field logic.
 function Field({ label, required = false, error = "", children }) {
   return (
     <div>
@@ -65,6 +67,7 @@ function Field({ label, required = false, error = "", children }) {
   );
 }
 
+// Renders or manages ScheduleFormModal logic.
 function ScheduleFormModal({ initial, date, residents, residentsLoading, residentsError, onRetryResidents, providers, locations, canComplete, saving, error, onClose, onSave }) {
   const [form, setForm] = useState(() => initial ? { ...initial } : {
     residentId: "", residentName: "", purpose: "", date, time: "", location: "", provider: "",
@@ -169,6 +172,7 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
   );
 }
 
+// Renders or manages ActivityFormModal logic.
 function ActivityFormModal({ initial, date, residents, residentsLoading, residentsError, onRetryResidents, saving, error, onClose, onSave }) {
   const [form, setForm] = useState(() => ({
     title: initial?.label || "",
@@ -258,6 +262,7 @@ function ActivityFormModal({ initial, date, residents, residentsLoading, residen
   );
 }
 
+// Renders or manages FollowUpCalendar logic.
 export default function FollowUpCalendar() {
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -281,6 +286,7 @@ export default function FollowUpCalendar() {
   return <FollowUpCalendarContent key={`${user.id}:${assignedBarangay}:${access.join(":")}`} user={user} assignedBarangay={assignedBarangay} />;
 }
 
+// Renders or manages FollowUpCalendarContent logic.
 function FollowUpCalendarContent({ user, assignedBarangay }) {
   const { can } = usePermissions();
   const canViewFollowUps = can("followups.view");

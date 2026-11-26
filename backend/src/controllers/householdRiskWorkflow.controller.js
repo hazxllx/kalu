@@ -1,3 +1,4 @@
+// backend/src/controllers/householdRiskWorkflow.controller.js
 /**
  * Household Risk-Cluster Workflow Controller (BUG-009).
  *

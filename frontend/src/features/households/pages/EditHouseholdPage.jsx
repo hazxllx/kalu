@@ -1,3 +1,4 @@
+// frontend/src/features/households/pages/EditHouseholdPage.jsx
 import React, { createContext, useContext, useId, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, RotateCcw, ChevronDown } from 'lucide-react';
@@ -88,6 +89,7 @@ const ageFromBirthday = (value) => {
 const FeedbackContext = createContext(null);
 const FIELD_NAMES = Object.fromEntries([...SECTIONS.flatMap((section) => section.fields), ...MEMBER_FIELDS, ...LEGACY_FIELDS].map(([field, label]) => [label, field]));
 Object.assign(FIELD_NAMES, { 'Full name': 'name', 'Relationship to household head': 'relationship', 'Contact number': 'contact', PhilHealth: 'philhealth', 'Visit date': 'visitDate', 'Visit reason': 'visitReason' });
+// Renders or manages Field logic.
 function Field({ field, scope = 'household', ...props }) {
   const context = useContext(FeedbackContext);
   const id = useId();
@@ -96,7 +98,7 @@ function Field({ field, scope = 'household', ...props }) {
   const key = `${scope}.${name}`;
   const error = context?.errors[key] || '';
   const validate = (value) => validateHouseholdField(name, value, { member: scope !== 'household' && scope !== 'visit', adding: scope === 'newMember' });
-  return <div className={`min-w-0 ${error ? '[&_input]:border-red-400 [&_select]:border-red-400 [&_textarea]:border-red-400 [&_fieldset]:rounded [&_fieldset]:ring-1 [&_fieldset]:ring-red-300' : ''}`}
+  return <div className={`min-w-0 ${error ? 'rounded-lg p-1 -m-1 ring-1 ring-red-300 [&_input]:border-red-400 [&_select]:border-red-400 [&_textarea]:border-red-400' : ''}`}
     onFocus={() => context?.clearNotice()}
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) { setTouched(true); if (!error) context?.setFieldError(key, validate(props.value)); } }}>
     <InputField {...props} controlProps={{ 'aria-invalid': Boolean(error), 'aria-describedby': error ? id : undefined, disabled: context?.pending }}
@@ -105,6 +107,7 @@ function Field({ field, scope = 'household', ...props }) {
   </div>;
 }
 
+// Renders or manages InputField logic.
 function InputField({ label, type = 'text', value, options = [], onChange, controlProps = {} }) {
   if (type === 'boolean') {
     const checked = value === true || ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase());
@@ -157,6 +160,7 @@ function InputField({ label, type = 'text', value, options = [], onChange, contr
   </label>;
 }
 
+// Renders or manages EditHouseholdPage logic.
 export default function EditHouseholdPage() {
   const { householdId } = useParams();
   const navigate = useNavigate();
@@ -403,7 +407,9 @@ export default function EditHouseholdPage() {
     const optionFields = new Map(SECTIONS.flatMap((section) => section.fields.map(([field, , type, options]) => [field, options || []])));
     SECTIONS.forEach((section) => section.fields.forEach(([field, label]) => {
       let message = validateHouseholdField(field, form[field], { member: false });
-      message ||= validateHouseholdOption(field, form[field], optionFields.get(field));
+      // Boolean radio fields are stored as booleans, while their display
+      // labels are strings. Do not validate those against the label list.
+      if (field !== 'philhealthMember') message ||= validateHouseholdOption(field, form[field], optionFields.get(field));
       if (field === 'philhealthMember' && !['Yes', 'No', true, false, 'yes', 'no'].includes(form[field])) message = 'Select Yes or No.';
       if (field === 'nhts' && form[field] && !['NHTS-4Ps', 'NHTS Non-4Ps', 'Non-NHTS'].includes(form[field])) message = 'Select a valid NHTS status.';
       if (field === 'ip' && form[field] && !['IP', 'Non-IP'].includes(form[field])) message = 'Select a valid Indigenous People status.';

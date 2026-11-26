@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/pages/MidwifeFollowUp.jsx
 // @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -199,6 +200,7 @@ const FOLLOW_UP_STATUS_FILTERS = [
   "Rejected",
 ];
 
+// Renders or manages MidwifeFollowUp logic.
 export default function MidwifeFollowUp() {
   const { user } = useAuth();
   const location = useLocation();

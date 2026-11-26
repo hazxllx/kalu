@@ -1,3 +1,4 @@
+// frontend/src/features/health-services/components/HealthServicesManager.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -216,6 +217,7 @@ const deadlineSummary = (schedule) => {
   return time && time !== "00:00" ? `${datePart}, ${formatTime(time)}` : datePart;
 };
 
+// Renders or manages HealthServicesManager logic.
 export default function HealthServicesManager({ subtitle }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -2038,6 +2040,7 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
   );
 }
 
+// Renders or manages ServiceDeliveryModal logic.
 function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) {
   const previous = registration.attendance || {};
   const previousImmunization = previous.immunization || {};
@@ -2129,6 +2132,7 @@ function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) 
   );
 }
 
+// Renders or manages AttendanceCorrectionModal logic.
 function AttendanceCorrectionModal({ registration, wasMissed, busy, onClose, onSave }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
@@ -2152,6 +2156,7 @@ function AttendanceCorrectionModal({ registration, wasMissed, busy, onClose, onS
   );
 }
 
+// Renders or manages DeliveryField logic.
 function DeliveryField({ label, required = false, children }) {
   return <label className="block space-y-1.5 text-sm font-medium text-brand-ink">{label}{required && <span className="ml-1 text-brand-danger">*</span>}{children}</label>;
 }

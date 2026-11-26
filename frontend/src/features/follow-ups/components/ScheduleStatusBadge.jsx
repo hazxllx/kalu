@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/ScheduleStatusBadge.jsx
 import React from "react";
 
 /**
@@ -36,6 +37,7 @@ export const STATUS_DOTS = {
   Rejected: "bg-brand-danger",
 };
 
+// Renders or manages ScheduleStatusBadge logic.
 export default function ScheduleStatusBadge({ value, compact = false }) {
   const tone = STATUS_TONES[value] || (compact ? "bg-brand-bg text-brand-gray" : STATUS_TONES.Scheduled);
   const dot = STATUS_DOTS[value] || STATUS_DOTS.Scheduled;
@@ -65,6 +67,7 @@ export const CONFIRMATION_DOTS = {
   Rejected: "bg-brand-danger",
 };
 
+// Renders or manages ConfirmationBadge logic.
 export function ConfirmationBadge({ value }) {
   const tone = CONFIRMATION_TONES[value] || CONFIRMATION_TONES["Awaiting Confirmation"];
   const dot = CONFIRMATION_DOTS[value] || CONFIRMATION_DOTS["Awaiting Confirmation"];

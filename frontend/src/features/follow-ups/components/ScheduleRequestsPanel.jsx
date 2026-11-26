@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/components/ScheduleRequestsPanel.jsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Clock3, RefreshCw, XCircle } from 'lucide-react';
 import { Card } from '@/components/common/Card';
@@ -6,6 +7,7 @@ import { residentFollowUpsApi } from '@/services/api';
 const nameOf = (resident = {}) => [resident.first_name, resident.middle_name, resident.last_name].filter(Boolean).join(' ') || 'Resident';
 const when = (value) => value ? new Date(value).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }) : 'Not scheduled';
 
+// Renders or manages ScheduleRequestsPanel logic.
 export default function ScheduleRequestsPanel({ title = 'Resident schedule requests' }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

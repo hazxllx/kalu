@@ -1,3 +1,4 @@
+// backend/src/services/auth.service.js
 import { getServiceClient, createAuthClient } from '../config/supabase.js';
 import { loadSessionProfile, profileToSessionUser } from './profile.service.js';
 import ApiError from '../utils/apiError.js';

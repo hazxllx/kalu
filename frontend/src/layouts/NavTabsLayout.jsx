@@ -1,3 +1,4 @@
+// frontend/src/layouts/NavTabsLayout.jsx
 import React, { useMemo } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import Icon from "@/components/common/Icon";
@@ -5,6 +6,7 @@ import { NAV, filterNavByPermission, navItemIsActive } from "@/lib/navConfig";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 
+// Renders or manages NavTabs logic.
 export function NavTabs({ item, compact = false, showIcons = !compact }) {
   const location = useLocation();
 

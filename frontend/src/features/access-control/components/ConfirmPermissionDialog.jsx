@@ -1,3 +1,4 @@
+// frontend/src/features/access-control/components/ConfirmPermissionDialog.jsx
 import React from "react";
 import { AlertTriangle, ShieldCheck, Undo2 } from "lucide-react";
 
@@ -40,6 +41,7 @@ const TONES = {
   },
 };
 
+// Renders or manages ConfirmPermissionDialog logic.
 export default function ConfirmPermissionDialog({ request, onCancel, onConfirm }) {
   const tone = TONES[request?.tone] || TONES.grant;
   const ToneIcon = tone.icon;

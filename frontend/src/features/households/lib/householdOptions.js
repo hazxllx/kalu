@@ -1,3 +1,4 @@
+// frontend/src/features/households/lib/householdOptions.js
 /**
  * Household Profiling — shared option lists, badge styling and risk computation.
  *
@@ -235,6 +236,7 @@ export function riskFromScore(score) {
   return "Low";
 }
 
+// Handles isCriticalSanitationRisk logic.
 export function isCriticalSanitationRisk({ waterSource, toilet, sanitationAccess } = {}) {
   return waterSource === "unimproved"
     || toilet === "none"

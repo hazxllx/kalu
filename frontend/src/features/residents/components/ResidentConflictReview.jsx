@@ -1,3 +1,4 @@
+// frontend/src/features/residents/components/ResidentConflictReview.jsx
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -7,6 +8,7 @@ import { reviewResidentConflict, resolveResidentConflict } from '@/services/offl
 const displayValue = (value) => value === null || value === undefined || value === '' ? '(empty)' : String(value);
 const fieldLabel = (field) => field.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase());
 
+// Renders or manages ResidentConflictReview logic.
 export default function ResidentConflictReview({ onResolved }) {
   const { user } = useAuth();
   const sync = useSyncStatus();

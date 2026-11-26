@@ -1,3 +1,4 @@
+// frontend/src/services/offline/db.js
 import Dexie from 'dexie';
 
 /**

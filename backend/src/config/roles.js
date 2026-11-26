@@ -1,3 +1,4 @@
+// backend/src/config/roles.js
 /**
  * KALUSAGAP canonical application roles (single source of truth for the API).
  *

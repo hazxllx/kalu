@@ -1,3 +1,4 @@
+// frontend/src/context/AuthContext.jsx
 import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 
 import { supabase, isSupabaseConfigured, clearPersistedSupabaseSession } from '@/lib/supabase';

@@ -1,3 +1,4 @@
+// shared/bloodPressure.js
 // KALUSAGAP screening categories shared by entry, server validation and saved snapshots.
 export const DEFAULT_BP_THRESHOLDS = Object.freeze({
   // Retained for the legacy settings payload; low readings use the Normal
@@ -60,6 +61,7 @@ export const setBloodPressureConfig = ({ thresholds = {}, source = 'configured' 
   return true;
 };
 
+// Handles parseBloodPressure logic.
 export function parseBloodPressure(value) {
   if (value !== null && typeof value === 'object') {
     if (Array.isArray(value)) return null;
@@ -88,6 +90,7 @@ export const BP_EMERGENCY_SYMPTOMS = Object.freeze({
   acuteNeurologicalSymptoms: /\b(?:unconscious|unresponsive|altered (?:mental status|consciousness)|seizures?|convulsions?)\b/g,
 });
 
+// Handles bloodPressureSymptomsFromText logic.
 export function bloodPressureSymptomsFromText(value = '') {
   const symptoms = {};
   // Carry negation across lists ("denies chest pain and shortness of breath").
@@ -107,6 +110,7 @@ export function bloodPressureSymptomsFromText(value = '') {
   return symptoms;
 }
 
+// Handles classifyBloodPressure logic.
 export function classifyBloodPressure(reading, context = {}, thresholdConfig = null) {
   if (!thresholdConfig && context && typeof context === 'object'
     && Object.keys(DEFAULT_BP_THRESHOLDS).some((key) => Object.prototype.hasOwnProperty.call(context, key))) {

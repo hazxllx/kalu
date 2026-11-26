@@ -1,3 +1,4 @@
+// frontend/src/services/local/auditStore.js
 import React, { useSyncExternalStore } from "react";
 import { registerWorkingSetReset } from "./accountWorkingSets";
 

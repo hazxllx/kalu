@@ -1,3 +1,4 @@
+// backend/src/services/reports.service.js
 /**
  * Reports service — role-routed report submission (real, persisted).
  *

@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/lib/consultationQueue.js
 /**
  * Pure, UI-free helpers for the RHU Consultation queue.
  *

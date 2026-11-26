@@ -1,3 +1,4 @@
+// backend/src/controllers/documentBranding.controller.js
 /**
  * Official Document Branding Controller (municipal/health-office logos for certificates, referrals, etc.).
  *

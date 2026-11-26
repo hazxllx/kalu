@@ -1,3 +1,4 @@
+// frontend/src/features/offline/components/OfflineCacheNotice.jsx
 import React from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 

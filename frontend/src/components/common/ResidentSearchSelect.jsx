@@ -1,3 +1,4 @@
+// frontend/src/components/common/ResidentSearchSelect.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X, User, Check } from "lucide-react";
 

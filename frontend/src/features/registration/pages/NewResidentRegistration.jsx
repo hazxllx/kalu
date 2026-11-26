@@ -1,3 +1,4 @@
+// frontend/src/features/registration/pages/NewResidentRegistration.jsx
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -120,6 +121,7 @@ const screeningRequestErrorMessage = (error, pair = false) => {
 // of Residency OTP (a custom 4-digit backend code). See features/registration/otp.js.
 const OTP_LENGTH = REGISTRATION_OTP_LENGTH;
 
+// Handles calcAge logic.
 function calcAge(dob) {
   const age = ageFromDateOnly(dob);
   return !dateOfBirth(dob) && age !== null ? String(age) : "";
@@ -130,6 +132,7 @@ const passwordError = (value) => !value
   : checkStrength(value).score === 5 ? ""
     : "Use at least 8 characters with uppercase, lowercase, a number, and a special character.";
 
+// Handles checkStrength logic.
 function checkStrength(pw) {
   const checks = [
     { label: "At least 8 characters", pass: pw.length >= 8 },
@@ -204,6 +207,7 @@ function ReviewDocRow({ label, slot, fileName }) {
   );
 }
 
+// Renders or manages NewResidentRegistration logic.
 export default function NewResidentRegistration() {
   const navigate = useNavigate();
   const { refreshProfile } = useAuth();

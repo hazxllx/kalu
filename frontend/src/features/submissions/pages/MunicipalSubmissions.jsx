@@ -1,3 +1,4 @@
+// frontend/src/features/submissions/pages/MunicipalSubmissions.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -22,6 +23,7 @@ const formatDate = (value) => {
 const input = "rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue";
 const Badge = ({ status }) => <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status === "Reviewed" ? "bg-brand-green/10 text-brand-green" : status === "Rejected" ? "bg-brand-danger/10 text-brand-danger" : status === "Needs Revision" ? "bg-amber-50 text-amber-700" : "bg-brand-blue/10 text-brand-blue"}`}>{status || "Status not recorded"}</span>;
 
+// Renders or manages MunicipalSubmissions logic.
 export default function MunicipalSubmissions() {
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -31,6 +33,7 @@ export default function MunicipalSubmissions() {
   return <MunicipalReportInbox key={`${user.id}:${user.municipalityId}`} user={user} can={can} />;
 }
 
+// Renders or manages MunicipalReportInbox logic.
 function MunicipalReportInbox({ user, can }) {
   const load = useCallback(async (options) => {
     const [reports, meta] = await Promise.all([reportsApi.listAll({ box: "incoming" }, options), reportsApi.meta(options)]);

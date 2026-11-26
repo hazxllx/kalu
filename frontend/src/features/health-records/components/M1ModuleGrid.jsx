@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/M1ModuleGrid.jsx
 import React from "react";
 import { Activity, Baby, Eye, Heart, Home, Smile, Users } from "lucide-react";
 import HealthProgramDirectory from "./HealthProgramDirectory";
@@ -18,6 +19,7 @@ const MODULES = getAllPrograms().map((program) => ({
   icon: iconMap[program.icon] || Activity,
 }));
 
+// Renders or manages M1ModuleGrid logic.
 function M1ModuleGrid({ countsByModule, loading, countError, query = "", ...directoryProps }) {
   const programs = MODULES.map((module) => {
     const recordCount = countsByModule?.[module.id];

@@ -1,3 +1,4 @@
+// frontend/src/features/follow-ups/lib/residentFollowUpPresentation.js
 import { manilaDateKey } from "./scheduleDates.js";
 
 const ACTIVE_STATUSES = new Set(["pending", "scheduled", "today", "upcoming", "ongoing"]);
@@ -9,6 +10,7 @@ const dateKey = (value) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
 };
 
+// Handles getResidentFollowUpPresentation logic.
 export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
   const status = normalized(row.status);
   const confirmation = normalized(row.scheduleResponseStatus || row.confirmationStatus);
@@ -81,6 +83,7 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
   };
 }
 
+// Handles summarizeResidentFollowUps logic.
 export function summarizeResidentFollowUps(rows = [], now = new Date()) {
   return rows.reduce((counts, row) => {
     const category = getResidentFollowUpPresentation(row, now).category;

@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/m1FhsisPdfRenderer.js
 import { jsPDF } from "jspdf";
 
 export const PAGE_W = 792;
@@ -18,18 +19,22 @@ export const CELL_H = 14;
 export const PAD = 3;
 export const LINE_H = 7;
 
+// Handles rf logic.
 function rf(doc, rgb) {
   doc.setFillColor(rgb[0], rgb[1], rgb[2]);
 }
 
+// Handles rt logic.
 function rt(doc, rgb) {
   doc.setTextColor(rgb[0], rgb[1], rgb[2]);
 }
 
+// Handles rd logic.
 function rd(doc, rgb) {
   doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
 }
 
+// Handles withX logic.
 function withX(parts) {
   let x = MARGIN;
   return parts.map((w) => {
@@ -39,6 +44,7 @@ function withX(parts) {
   });
 }
 
+// Handles drawCell logic.
 function drawCell(doc, x, y, w, h, text, options = {}) {
   const { align = "left", bold = false, size = 7, fill = false, fillColor = WHITE, textColor = INK } = options;
   if (fill) {
@@ -60,6 +66,7 @@ function drawCell(doc, x, y, w, h, text, options = {}) {
   doc.text(String(text), textX, textY, { align: align === "right" ? "right" : align === "center" ? "center" : "left" });
 }
 
+// Handles drawRow logic.
 function drawRow(doc, y, cols, data, options = {}) {
   const { heights = CELL_H, bold = false, size = 7, fill = false, fillColor = WHITE, textColor = INK, alignments = [] } = options;
   let x = MARGIN;
@@ -73,6 +80,7 @@ function drawRow(doc, y, cols, data, options = {}) {
   return y + heights;
 }
 
+// Handles drawSectionHeader logic.
 function drawSectionHeader(doc, y, text) {
   rf(doc, BLUE);
   doc.setFillColor(BLUE[0], BLUE[1], BLUE[2]);
@@ -84,6 +92,7 @@ function drawSectionHeader(doc, y, text) {
   return y + 14;
 }
 
+// Handles drawSubHeader logic.
 function drawSubHeader(doc, y, text) {
   rf(doc, SUBBAR);
   doc.setFillColor(SUBBAR[0], SUBBAR[1], SUBBAR[2]);
@@ -95,6 +104,7 @@ function drawSubHeader(doc, y, text) {
   return y + 10;
 }
 
+// Handles drawHeader logic.
 function drawHeader(doc, model, branding) {
   rf(doc, BLUE);
   doc.rect(0, 0, PAGE_W, 28, "F");
@@ -138,6 +148,7 @@ function drawHeader(doc, model, branding) {
   return y + 10;
 }
 
+// Handles drawFooter logic.
 function drawFooter(doc, pageNum, totalPages) {
   const y = PAGE_H - 20;
   rd(doc, BORDER);
@@ -152,11 +163,13 @@ function drawFooter(doc, pageNum, totalPages) {
   }
 }
 
+// Handles gv logic.
 function gv(model, code) {
   const v = model.getValue ? model.getValue(code) : 0;
   return v === undefined || v === null ? 0 : v;
 }
 
+// Handles ga logic.
 function ga(model, code, key) {
   const d = model.getByAge ? model.getByAge(code) : null;
   if (!d) return 0;
@@ -164,6 +177,7 @@ function ga(model, code, key) {
   return v === undefined || v === null ? 0 : v;
 }
 
+// Handles gs logic.
 function gs(model, code, key) {
   const d = model.getBySex ? model.getBySex(code) : null;
   if (!d) return 0;
@@ -171,6 +185,7 @@ function gs(model, code, key) {
   return v === undefined || v === null ? 0 : v;
 }
 
+// Handles subBar logic.
 function subBar(doc, y, text) {
   rf(doc, SUBBAR);
   doc.rect(MARGIN, y, CONTENT_W, 10, "F");
@@ -181,6 +196,7 @@ function subBar(doc, y, text) {
   return y + 10;
 }
 
+// Handles headerRow logic.
 function headerRow(doc, y, cols, labels) {
   let x = MARGIN;
   for (let i = 0; i < cols.length; i++) {
@@ -190,6 +206,7 @@ function headerRow(doc, y, cols, labels) {
   return y + 10;
 }
 
+// Handles indicatorRow logic.
 function indicatorRow(doc, y, cols, label, values, opts) {
   const o = opts || {};
   let x = MARGIN;
@@ -202,6 +219,7 @@ function indicatorRow(doc, y, cols, label, values, opts) {
   return y + 10;
 }
 
+// Handles renderM1FhsisPdf logic.
 export function renderM1FhsisPdf(model, branding = null) {
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: [PAGE_W, PAGE_H] });
   const TOTAL_PAGES = 9;

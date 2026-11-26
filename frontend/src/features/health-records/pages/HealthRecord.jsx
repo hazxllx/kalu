@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/HealthRecord.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -41,6 +42,7 @@ const referralDisplayValue = (value) => {
   return String(value);
 };
 
+// Renders or manages ServiceRecordDetail logic.
 function ServiceRecordDetail({ label, value }) {
   if (value === null || value === undefined || value === "") return null;
   return (
@@ -139,6 +141,7 @@ const dateRangeError = (from, to) => {
   return "";
 };
 
+// Renders or manages HealthRecord logic.
 export default function HealthRecord() {
   const { user } = useAuth();
   const [resident, setResident] = useState(null);

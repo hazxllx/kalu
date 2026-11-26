@@ -1,3 +1,4 @@
+// backend/src/middleware/uploadOfficialLogo.js
 import multer from 'multer';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';

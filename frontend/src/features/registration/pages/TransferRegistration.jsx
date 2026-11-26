@@ -1,3 +1,4 @@
+// frontend/src/features/registration/pages/TransferRegistration.jsx
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -58,6 +59,7 @@ const formatBytes = (bytes) => {
   return `${Math.max(1, Math.round(n / 1024))} KB`;
 };
 
+// Renders or manages TransferRegistration logic.
 export default function TransferRegistration() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);

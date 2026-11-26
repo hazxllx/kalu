@@ -1,3 +1,4 @@
+// backend/src/controllers/advisories.controller.js
 import * as advisories from '../services/advisories.service.js';
 import { sendCreated, sendData, sendNoContent } from '../utils/apiResponse.js';
 

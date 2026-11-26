@@ -1,6 +1,8 @@
+// frontend/src/features/verification/components/VerificationPagination.jsx
 import React from "react";
 import TablePagination from "@/components/tables/TablePagination";
 
+// Renders or manages VerificationPagination logic.
 export default function VerificationPagination({ page, pageCount, total, onPageChange }) {
   if (pageCount <= 1) return null;
 

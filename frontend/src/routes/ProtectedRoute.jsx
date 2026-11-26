@@ -1,3 +1,4 @@
+// frontend/src/routes/ProtectedRoute.jsx
 import { matchPath, Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';
@@ -14,6 +15,7 @@ const submittedReportPaths = [
   '/app/health_supervisor/reports',
 ];
 
+// Renders or manages ReportAccess logic.
 function ReportAccess({ user }) {
   const { can, matrixLoadState } = usePermissions();
   if (!user?.municipalityId || (user.role === 'health_supervisor' && !user.barangayId)) {

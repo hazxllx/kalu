@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1ProgramDetailTemplate.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Card } from "@/components/common/Card";
@@ -42,6 +43,7 @@ const quarterFromQuery = (value, fallback) => {
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 4 ? parsed : fallback;
 };
 
+// Handles createM1ProgramDetailPage logic.
 export function createM1ProgramDetailPage(programId, apiClients = {}) {
   return function M1ProgramDetail() {
     const { user } = useAuth();

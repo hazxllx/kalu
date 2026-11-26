@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/M1DataEntryModal.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Save, ClipboardList } from "lucide-react";
 import FormModal from "@/components/common/FormModal";
@@ -60,6 +61,7 @@ const bucketKey = (b) => `${b.age_group}|${b.sex}`;
 const inputCls =
   "mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue";
 
+// Renders or manages M1DataEntryModal logic.
 export default function M1DataEntryModal({ onClose, onSaved, initialSection, initialYear, initialMonth }) {
   const now = new Date();
   const [year, setYear] = useState(initialYear || now.getFullYear());

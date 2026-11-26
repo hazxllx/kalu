@@ -1,3 +1,4 @@
+// backend/src/repositories/fileStore.js
 /**
  * JSON-file data store backing `fileRepository.js` for local development and
  * automated tests when Supabase is not configured (`route -> authenticate ->

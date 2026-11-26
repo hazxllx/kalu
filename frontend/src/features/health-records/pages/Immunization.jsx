@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/Immunization.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -100,6 +101,7 @@ const EMPTY_FORM = () => ({
   notes: "",
 });
 
+// Renders or manages ImmunizationFormModal logic.
 function ImmunizationFormModal({ initial, resident, residents, saving, onClose, onSave, onSelectResident, followUpId = "" }) {
   const isEdit = Boolean(initial);
   const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (
@@ -269,6 +271,7 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
   );
 }
 
+// Renders or manages Immunization logic.
 export default function Immunization() {
   const { user } = useAuth();
   const location = useLocation();

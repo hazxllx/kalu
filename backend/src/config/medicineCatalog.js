@@ -1,3 +1,4 @@
+// backend/src/config/medicineCatalog.js
 /**
  * Default medicine catalog: the generic-first seed list for the isolated file
  * repository. Supabase reads its own migrated public.medicines table and does

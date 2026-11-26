@@ -1,3 +1,4 @@
+// frontend/src/components/ui/toaster.jsx
 import { useToast } from "@/components/ui/use-toast";
 import {
   Toast,
@@ -8,6 +9,7 @@ import {
   ToastViewport,
 } from "@/components/ui/toast";
 
+// Renders or manages Toaster logic.
 export function Toaster() {
   const { toasts, dismiss } = useToast();
 

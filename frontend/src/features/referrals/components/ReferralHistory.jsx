@@ -1,5 +1,7 @@
+// frontend/src/features/referrals/components/ReferralHistory.jsx
 import React from "react";
 
+// Renders or manages ReferralHistory logic.
 export default function ReferralHistory({ history = [] }) {
   return (
     <section aria-label="Referral history" className="space-y-2">

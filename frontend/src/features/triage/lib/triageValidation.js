@@ -1,3 +1,4 @@
+// frontend/src/features/triage/lib/triageValidation.js
 import { classifyBloodPressure, parseBloodPressure } from '../../../../../shared/bloodPressure.js';
 
 // Entry safeguards, not diagnostic or age-specific normal ranges.
@@ -17,6 +18,7 @@ export const isRecorded = (value) => text(value) !== "";
 export const optionalReading = (value) => isRecorded(value) ? text(value) : null;
 export const emptyVitals = () => Object.fromEntries([...VITAL_FIELDS.map(({ key }) => [key, ""]), ["bloodPressure", ""]]);
 
+// Handles ageFromBirthDate logic.
 export function ageFromBirthDate(value, today = new Date()) {
   if (!value) return "";
   const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/.exec(String(value));
@@ -30,6 +32,7 @@ export function ageFromBirthDate(value, today = new Date()) {
   return age;
 }
 
+// Handles residentIdentity logic.
 export function residentIdentity(resident) {
   if (!resident) return null;
   return {
@@ -41,6 +44,7 @@ export function residentIdentity(resident) {
   };
 }
 
+// Handles validateDemographics logic.
 export function validateDemographics(patient, barangays) {
   const errors = {};
   const name = text(patient?.name);
@@ -53,6 +57,7 @@ export function validateDemographics(patient, barangays) {
   return errors;
 }
 
+// Handles validateRegisteredPatient logic.
 export function validateRegisteredPatient(selected, loaded, loading, barangays) {
   if (loading) return { patient: "Wait for the patient record to finish loading." };
   if (!selected?.id || !loaded?.id || String(selected.id) !== String(loaded.id)) return { patient: "Select and load an existing patient record before continuing." };
@@ -60,6 +65,7 @@ export function validateRegisteredPatient(selected, loaded, loading, barangays) 
   return missing.length ? { patient: `The registered record has missing or invalid ${missing.join(", ")}. Update the patient record before triage.` } : {};
 }
 
+// Handles validateVisitDetails logic.
 export function validateVisitDetails(vitals, reason, reasonDetail, notes = "") {
   const errors = {};
   for (const { key, label, min, max, integer } of VITAL_FIELDS) {
@@ -89,6 +95,7 @@ export function previewBmi(vitals) {
   return (Math.round(Number(vitals.weightKg) / ((Number(vitals.heightCm) / 100) ** 2) * 10) / 10).toFixed(1);
 }
 
+// Handles reviewFlags logic.
 export function reviewFlags(vitals, context = {}) {
   const invalid = validateVisitDetails(vitals, "Check-up", "");
   const flags = [];
@@ -114,6 +121,7 @@ const FIELD_ALIASES = {
   chiefComplaint: "reasonDetail", firstName: "name", lastName: "name", middleName: "name", residentId: "patient", referralId: "patient",
 };
 
+// Handles mapTriageFieldErrors logic.
 export function mapTriageFieldErrors(error) {
   const source = error?.payload?.error?.errors || error?.payload?.error?.details?.errors || error?.payload?.error?.details || error?.fieldErrors || {};
   const mapped = {};
@@ -125,6 +133,7 @@ export function mapTriageFieldErrors(error) {
   return mapped;
 }
 
+// Handles errorStep logic.
 export function errorStep(errors) {
   return ["patient", "name", "age", "sex", "barangay"].some((key) => errors[key]) ? "patient" : "details";
 }

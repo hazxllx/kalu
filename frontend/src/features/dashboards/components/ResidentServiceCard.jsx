@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/components/ResidentServiceCard.jsx
 import React from "react";
 import { Link } from "react-router-dom";
 import {
@@ -25,6 +26,7 @@ const STATUS_STYLES = {
   Closed: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
 };
 
+// Handles getServiceStatus logic.
 function getServiceStatus(service) {
   if (service?.plan?.status) return service.plan.status;
   if (!service?.availability && service?.active === true) return "Available";
@@ -34,6 +36,7 @@ function getServiceStatus(service) {
   return startDate && startDate > manilaDateKey() ? "Upcoming" : "Available";
 }
 
+// Handles getScheduleSummary logic.
 function getScheduleSummary(service) {
   const datedSchedule = formatServiceSchedule(service?.schedule);
   if (datedSchedule) return datedSchedule;

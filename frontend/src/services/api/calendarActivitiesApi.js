@@ -1,3 +1,4 @@
+// frontend/src/services/api/calendarActivitiesApi.js
 import { api } from './apiClient';
 
 export const calendarActivitiesApi = {

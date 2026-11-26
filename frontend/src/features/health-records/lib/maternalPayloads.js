@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/maternalPayloads.js
 export function computeEddFromLmp(lmpValue) {
   if (!lmpValue) return null;
   const parsed = new Date(lmpValue);
@@ -6,6 +7,7 @@ export function computeEddFromLmp(lmpValue) {
   return edd.toISOString().split("T")[0];
 }
 
+// Handles normalizeOptionalNumber logic.
 function normalizeOptionalNumber(value) {
   if (value === "" || value === null || value === undefined) return null;
   const parsed = Number(value);

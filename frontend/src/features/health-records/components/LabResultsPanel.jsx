@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/LabResultsPanel.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { FileText, FlaskConical, Loader2, Upload } from "lucide-react";
 import { api } from "@/services/api";
@@ -13,12 +14,14 @@ const categories = [
 const categoryLabels = Object.fromEntries(categories);
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString() : "Date not recorded";
 
+// Renders or manages LabResultsPanel logic.
 export default function LabResultsPanel(props) {
   const { user } = useAuth();
   if (!user?.id) return null;
   return <LaboratoryContent key={`${user.id}:${user.role || ""}:${user.barangayId || user.barangay_id || ""}:${user.municipalityId || user.municipality_id || ""}:${props.residentId || "own"}:${props.consultationId || ""}`} {...props} ownerId={user.id} />;
 }
 
+// Renders or manages LaboratoryContent logic.
 function LaboratoryContent({ ownerId, residentId, consultationId, canUpload = false, compact = false, hideHeading = false }) {
   const { can } = usePermissions();
   const mounted = useRef(true);

@@ -1,3 +1,4 @@
+// frontend/src/features/users/pages/UserManagement.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -75,6 +76,7 @@ const formatTimestamp = (value) => {
 const stationsLabel = (stations, options = []) => Array.isArray(stations) && stations.length
   ? stations.map((id) => options.find((station) => station.id === id)?.name || id.replace(/_/g, " ")).join(" + ") : "None assigned";
 
+// Renders or manages LifecyclePill logic.
 function LifecyclePill({ account }) {
   const state = personnelState(account);
   const lifecycleMeta = state ? PERSONNEL_STATE_META[state] : null;
@@ -94,6 +96,7 @@ function LifecyclePill({ account }) {
   );
 }
 
+// Renders or manages AccountDialog logic.
 function AccountDialog({ title, description, busy = false, onClose, children, wide = false, header = null, formDesign = false }) {
   const returnFocus = useRef(typeof document !== "undefined" ? document.activeElement : null);
   return (
@@ -133,6 +136,7 @@ function AccountDialog({ title, description, busy = false, onClose, children, wi
   );
 }
 
+// Renders or manages Field logic.
 function Field({ label, htmlFor, required = false, hint = "", error = "", children }) {
   return (
     <div>
@@ -162,6 +166,7 @@ const PERSONNEL_SUMMARY_CARDS = [
   { key: null, label: "Requires Attention", metrics: ["pendingApproval", "awaitingSetup", "approvedInactive", "suspended"], icon: Clock, tone: "text-amber-700 bg-amber-50" },
 ];
 
+// Renders or manages SummaryCards logic.
 function SummaryCards({ summary, loading, error, activeStatus, onPick, personnelOnly }) {
   const cards = personnelOnly ? PERSONNEL_SUMMARY_CARDS : SUMMARY_CARDS;
   return (
@@ -201,6 +206,7 @@ function SummaryCards({ summary, loading, error, activeStatus, onPick, personnel
 /* Actions dropdown menu                                                     */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages ActionsMenu logic.
 function ActionsMenu({ items, buttonLabel = "Account actions" }) {
   const available = items.filter(Boolean);
   if (available.length === 0) return <span className="text-xs text-brand-gray">-</span>;
@@ -230,6 +236,7 @@ function ActionsMenu({ items, buttonLabel = "Account actions" }) {
 /* Confirm dialog (deactivate / reactivate / reset access)                   */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages ConfirmDialog logic.
 function ConfirmDialog({ title, message, confirmLabel, busy, onConfirm, onClose }) {
   return (
     <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/50 p-4" role="presentation">
@@ -260,6 +267,7 @@ function ConfirmDialog({ title, message, confirmLabel, busy, onConfirm, onClose 
 /* Delete confirmation dialog (type-to-confirm)                              */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages DeleteDialog logic.
 function DeleteDialog({ target, busy, error, onConfirm, onClose }) {
   const [typed, setTyped] = useState("");
   const matches = typed.trim().toLowerCase() === String(target.email || "").trim().toLowerCase();
@@ -345,6 +353,7 @@ function DeleteDialog({ target, busy, error, onConfirm, onClose }) {
 /* View details modal                                                        */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages DetailRow logic.
 function DetailRow({ label, value }) {
   return (
     <div className="grid min-w-0 gap-0.5 py-2 first:pt-0 last:pb-0 sm:grid-cols-[minmax(9rem,0.38fr)_minmax(0,1fr)] sm:items-baseline sm:gap-4">
@@ -361,6 +370,7 @@ const initialsOf = (name) => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
+// Renders or manages InitialsAvatar logic.
 function InitialsAvatar({ name, size = "md" }) {
   const dims = size === "lg" ? "h-11 w-11 text-[15px]" : "h-10 w-10 text-sm";
   return (
@@ -373,6 +383,7 @@ function InitialsAvatar({ name, size = "md" }) {
   );
 }
 
+// Renders or manages CopyEmailButton logic.
 function CopyEmailButton({ email, notify }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef(null);
@@ -403,6 +414,7 @@ function CopyEmailButton({ email, notify }) {
   );
 }
 
+// Renders or manages InfoSection logic.
 function InfoSection({ title, children }) {
   return (
     <section className="mt-5 first:mt-0" aria-label={title}>
@@ -412,6 +424,7 @@ function InfoSection({ title, children }) {
   );
 }
 
+// Renders or manages EmailDiagnostics logic.
 function EmailDiagnostics({ notifications }) {
   return (
     <details className="group mt-1">
@@ -437,6 +450,7 @@ function EmailDiagnostics({ notifications }) {
   );
 }
 
+// Renders or manages DetailsModal logic.
 function DetailsModal({ target: initialTarget, options, onClose, notify }) {
   const [target, setTarget] = useState(initialTarget);
   const [loading, setLoading] = useState(true);
@@ -659,6 +673,7 @@ const LIFECYCLE_ACTIONS = {
   retry_email: { title: "Retry failed email", label: "Retry failed email", icon: RotateCcw },
 };
 
+// Renders or manages LifecycleDialog logic.
 function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onClose }) {
   const [reason, setReason] = useState("");
   const [activate, setActivate] = useState(canActivate);
@@ -729,6 +744,7 @@ function LifecycleDialog({ target, action, busy, error, canActivate, onSave, onC
 /* Invite / edit account modal                                               */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages AccountModal logic.
 function AccountModal({ initial, options, busy, error, actorId, canManageRoles, canEdit, personnelOnly, delegated = false, allowedRoles = [], fixedRole = null, fixedMunicipalityId = null, fixedBarangayId = null, onClose, onSave }) {
   const isNew = !initial;
   const [form, setForm] = useState(() => ({
@@ -999,6 +1015,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
 /* Account identity cell (shared desktop + mobile)                           */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages AccountIdentity logic.
 function AccountIdentity({ row }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
@@ -1013,6 +1030,7 @@ function AccountIdentity({ row }) {
   );
 }
 
+// Renders or manages EmptyDirectory logic.
 function EmptyDirectory({ hasActiveFilters, onReset }) {
   return (
     <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
@@ -1026,6 +1044,7 @@ function EmptyDirectory({ hasActiveFilters, onReset }) {
   );
 }
 
+// Renders or manages AccountDirectory logic.
 function AccountDirectory({
   rows,
   loading,
@@ -1118,6 +1137,7 @@ function AccountDirectory({
 /* Page                                                                      */
 /* ------------------------------------------------------------------------- */
 
+// Renders or manages UserManagement logic.
 export default function UserManagement({ personnelOnly = false, delegated = false, embedded = false }) {
   const { toast: notify } = useToast();
   const { navItem } = /** @type {{ navItem?: { label: string, tabs: Array<{ label: string, icon: string, path: string }> } }} */ (

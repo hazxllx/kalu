@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/Navbar.jsx
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Menu, X, ChevronDown } from "lucide-react";
@@ -12,6 +13,7 @@ const links = [
   { label: "Contact", href: "#contact" },
 ];
 
+// Renders or manages Navbar logic.
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);

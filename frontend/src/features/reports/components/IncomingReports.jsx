@@ -1,3 +1,4 @@
+// frontend/src/features/reports/components/IncomingReports.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/common/Card";
 import { Inbox, RefreshCw, CheckCircle2, X } from "lucide-react";
@@ -43,6 +44,7 @@ const formatDateTime = (iso) => {
   return d.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
+// Renders or manages IncomingReports logic.
 export default function IncomingReports() {
   const { can } = usePermissions();
   const { user } = useAuth();
@@ -53,6 +55,7 @@ export default function IncomingReports() {
   return <AuthorizedInbox key={`${user.id}:${user.role}:${user.municipalityId}:${user.facilityId || ""}:${user.barangayId || ""}`} user={user} />;
 }
 
+// Renders or manages AuthorizedInbox logic.
 function AuthorizedInbox({ user }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

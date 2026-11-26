@@ -1,3 +1,4 @@
+// backend/src/middleware/authenticate.js
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
 import { loadSessionProfile, profileToSessionUser } from '../services/profile.service.js';

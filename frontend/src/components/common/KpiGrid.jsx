@@ -1,3 +1,4 @@
+// frontend/src/components/common/KpiGrid.jsx
 import React from "react";
 
 /**

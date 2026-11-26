@@ -1,3 +1,4 @@
+// frontend/src/features/consultations/pages/TreatmentConsultation.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -196,6 +197,7 @@ const initialsOf = (name) =>
     .join("")
     .toUpperCase() || "—";
 
+// Renders or manages TreatmentConsultation logic.
 export default function TreatmentConsultation() {
   const { user } = useAuth();
   const navigate = useNavigate();

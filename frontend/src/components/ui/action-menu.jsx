@@ -1,3 +1,4 @@
+// frontend/src/components/ui/action-menu.jsx
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { MoreVertical } from "lucide-react";
 
@@ -10,10 +11,12 @@ const contentClassName =
 const itemClassName =
   "flex min-h-9 w-full cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm leading-5 outline-none transition-colors data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark data-[disabled]:pointer-events-none data-[disabled]:opacity-50 dark:data-[highlighted]:bg-hover";
 
+// Renders or manages ActionMenu logic.
 export function ActionMenu({ children, ...props }) {
   return <DropdownMenu.Root modal={false} {...props}>{children}</DropdownMenu.Root>;
 }
 
+// Renders or manages ActionMenuTrigger logic.
 export function ActionMenuTrigger({
   children = <MoreVertical className="h-4 w-4" aria-hidden="true" />,
   label = "Actions",
@@ -34,6 +37,7 @@ export function ActionMenuTrigger({
   );
 }
 
+// Renders or manages ActionMenuContent logic.
 export function ActionMenuContent({ children, className = "", ...props }) {
   return (
     <DropdownMenu.Portal>
@@ -52,6 +56,7 @@ export function ActionMenuContent({ children, className = "", ...props }) {
   );
 }
 
+// Renders or manages ActionMenuItem logic.
 export function ActionMenuItem({ children, icon: Icon, danger = false, onSelect, className = "", ...props }) {
   return (
     <DropdownMenu.Item
@@ -65,6 +70,7 @@ export function ActionMenuItem({ children, icon: Icon, danger = false, onSelect,
   );
 }
 
+// Renders or manages ActionMenuMessage logic.
 export function ActionMenuMessage({ children, className = "" }) {
   return <p className={`px-2.5 py-2 text-xs leading-snug text-brand-gray ${className}`.trim()}>{children}</p>;
 }

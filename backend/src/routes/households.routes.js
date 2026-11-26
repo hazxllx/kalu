@@ -1,3 +1,4 @@
+// backend/src/routes/households.routes.js
 /**
  * Household Profiling, Home Visits, Member Health, and Risk-Cluster Workflow routes (`/api/households`).
  *

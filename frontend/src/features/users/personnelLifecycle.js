@@ -1,3 +1,4 @@
+// frontend/src/features/users/personnelLifecycle.js
 export const PERSONNEL_ROLES = Object.freeze([
   "mho", "phn", "health_supervisor", "rhu_personnel", "bhw",
 ]);
@@ -14,6 +15,7 @@ export const PERSONNEL_STATE_META = Object.freeze({
   unknown: { label: "Lifecycle unavailable", tone: "slate", description: "The server has not supplied a verified personnel lifecycle. No access change is inferred." },
 });
 
+// Handles personnelState logic.
 export function personnelState(account) {
   const role = account?.roleId || account?.role;
   if (!isPersonnelRole(role) && (role !== "admin" || !["pending", "approved", "rejected"].includes(account?.approvalStatus))) return null;
@@ -28,6 +30,7 @@ export function personnelState(account) {
   return "approved_inactive";
 }
 
+// Handles notificationMeta logic.
 export function notificationMeta(notification) {
   const states = {
     pending: { label: "Email queued", tone: "amber", message: "Email is queued and has not yet been accepted by the mail server." },
@@ -44,6 +47,7 @@ export function notificationMeta(notification) {
 
 export const canRetryPersonnelEmail = (account) => account?.notification?.status === "failed";
 
+// Handles personnelActions logic.
 export function personnelActions(account, { isAdmin = false, isDelegate = false, isSelf = false, canApprove = false, canDeactivate = false, canResetAccess = false } = {}) {
   if (!isAdmin && !isDelegate) return [];
   const state = personnelState(account);
@@ -72,6 +76,7 @@ export function personnelActions(account, { isAdmin = false, isDelegate = false,
   return actions;
 }
 
+// Handles personnelActionMessage logic.
 export function personnelActionMessage(action, account) {
   if (action === "create" && account?.notification?.status === "sent" && account?.setupRequired === true) {
     return "Account created. Awaiting password setup. Email accepted by the mail server; inbox delivery isn't confirmed.";
@@ -91,6 +96,7 @@ export function personnelActionMessage(action, account) {
   return `${prefix} ${PERSONNEL_STATE_META[state || "unknown"].description}${activation} ${notificationMeta(account.notification).message}`;
 }
 
+// Handles personnelActionFailureMessage logic.
 export function personnelActionFailureMessage(action, error) {
   if (action !== "invite") return error?.message || "The personnel action could not be completed.";
 
@@ -107,6 +113,7 @@ export function personnelActionFailureMessage(action, error) {
   return "Unable to send the password setup email. Please try again.";
 }
 
+// Handles legacyApprovalMessage logic.
 export function legacyApprovalMessage(name, result) {
   if (result?.active === true && result.profileStatus === "active") return `${name} approved. Verified account access is active; existing credentials are unchanged.`;
   if (result?.active === false && result.profileStatus !== "active") return `${name} approved. The account remains inactive; approval does not confirm password setup or activation.`;
@@ -125,6 +132,7 @@ export function personnelOperation(previous, payload) {
   return { signature, id: globalThis.crypto.randomUUID() };
 }
 
+// Handles personnelCreationOperation logic.
 export async function personnelCreationOperation(previous, payload, actorId, { storage = undefined, crypto = globalThis.crypto } = {}) {
   if (typeof actorId !== "string" || !actorId.trim()) throw new Error("The administrator identity has not been verified. Sign in again before creating an account.");
   const owner = actorId.trim().toLowerCase();
@@ -152,6 +160,7 @@ export async function personnelCreationOperation(previous, payload, actorId, { s
   }
 }
 
+// Handles clearPersonnelCreationOperation logic.
 export function clearPersonnelCreationOperation(operation, { storage = undefined } = {}) {
   if (!operation?.storageKey) return false;
   try {
@@ -163,6 +172,7 @@ export function clearPersonnelCreationOperation(operation, { storage = undefined
   }
 }
 
+// Handles stationAssignmentPatch logic.
 export function stationAssignmentPatch(role, stations, initial) {
   const selected = [...stations].sort();
   const existing = Array.isArray(initial?.rhuStations) ? [...initial.rhuStations].sort() : [];
@@ -170,11 +180,13 @@ export function stationAssignmentPatch(role, stations, initial) {
   return { rhuStations: role === "rhu_personnel" || role === "health_supervisor" ? selected : [] };
 }
 
+// Handles coverageAssignmentPatch logic.
 export function coverageAssignmentPatch(role, details, initial) {
   if (!initial || role !== initial.roleId) return details;
   return Object.fromEntries(Object.entries(details).filter(([key, value]) => value !== (initial[key] || null)));
 }
 
+// Handles stationAssignmentError logic.
 export function stationAssignmentError(role, stations, choices, initial) {
   if (!Object.hasOwn(stationAssignmentPatch(role, stations, initial), "rhuStations")) return "";
   if (role !== "rhu_personnel" && role !== "health_supervisor") return "";
@@ -183,6 +195,7 @@ export function stationAssignmentError(role, stations, choices, initial) {
   return "";
 }
 
+// Handles lifecyclePayload logic.
 export function lifecyclePayload(action, { reason = "", activate = true } = {}) {
   if (!["approve", "reject", "suspend", "reactivate", "invite", "retry_email"].includes(action)) throw new Error("Choose a supported personnel action.");
   const trimmed = reason.trim();

@@ -1,3 +1,4 @@
+// frontend/src/lib/serverRows.js
 /** Read every explicit server page; never silently treat a capped page as all records. */
 export const loadServerRows = async (list, pageSize = 100) => {
   const result = new Map();

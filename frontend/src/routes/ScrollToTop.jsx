@@ -1,3 +1,4 @@
+// frontend/src/routes/ScrollToTop.jsx
 import { useEffect } from "react";
 import { useLocation, useNavigationType } from "react-router-dom";
 
@@ -11,6 +12,7 @@ const getHashId = (hash) => {
   }
 };
 
+// Renders or manages ScrollToTop logic.
 export default function ScrollToTop() {
   const { pathname, hash } = useLocation();
   const navigationType = useNavigationType();

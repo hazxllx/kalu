@@ -1,3 +1,4 @@
+// frontend/src/features/authentication/pages/ChangeTemporaryPassword.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Check, CheckCircle2, Circle, Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
@@ -6,6 +7,7 @@ import { authApi } from "@/services/api";
 import { homeForRole, landingFor } from "@/lib/roles";
 import { personnelPasswordError, personnelPasswordRequirements } from "@/features/authentication/personnelPasswordSetup";
 
+// Renders or manages ChangeTemporaryPassword logic.
 export default function ChangeTemporaryPassword() {
   const navigate = useNavigate();
   const {

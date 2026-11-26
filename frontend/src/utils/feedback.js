@@ -1,3 +1,4 @@
+// frontend/src/utils/feedback.js
 /** Shared feedback wording and API-error normalization for data workflows. */
 export const feedbackMessages = Object.freeze({
   created: "Created successfully.",

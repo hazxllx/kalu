@@ -1,3 +1,4 @@
+// backend/src/validators/calendarActivities.validators.js
 import { invalid, isUuid, parseDateOnly, text, valid } from './common.js';
 
 const ACTIVITY_TYPES = Object.freeze([

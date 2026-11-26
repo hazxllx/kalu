@@ -1,3 +1,4 @@
+// frontend/src/features/landing/components/ServicesSection.jsx
 ﻿import React from "react";
 import { motion } from "framer-motion";
 import { ArrowUpRight, Baby, HeartPulse, ShieldCheck, Stethoscope, Syringe, Users, Droplets } from "lucide-react";
@@ -55,6 +56,7 @@ const services = [
   },
 ];
 
+// Renders or manages ServicesSection logic.
 export default function ServicesSection() {
   return (
     <section id="services" className="border-y border-brand-border bg-white py-20 md:py-24">

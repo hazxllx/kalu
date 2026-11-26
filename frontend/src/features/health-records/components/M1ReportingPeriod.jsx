@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/M1ReportingPeriod.jsx
 import React from "react";
 import { Calendar } from "lucide-react";
 import TclTabs from "./TclTabs";
@@ -14,6 +15,7 @@ const PERIOD_TABS = PERIOD_TYPES.map((value) => ({
   label: value[0].toUpperCase() + value.slice(1),
 }));
 
+// Renders or manages M1ReportingPeriod logic.
 export default function M1ReportingPeriod({
   period,
   year,

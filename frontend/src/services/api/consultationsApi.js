@@ -1,3 +1,4 @@
+// frontend/src/services/api/consultationsApi.js
 import { api } from './apiClient.js';
 
 /**

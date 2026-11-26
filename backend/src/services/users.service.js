@@ -1,3 +1,4 @@
+// backend/src/services/users.service.js
 /**
  * User and personnel account management service.
  *

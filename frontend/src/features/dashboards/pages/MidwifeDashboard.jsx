@@ -1,3 +1,4 @@
+// frontend/src/features/dashboards/pages/MidwifeDashboard.jsx
 import React, { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -23,6 +24,7 @@ const actions = [
   { icon: Send, label: "Refer Patient" },
 ];
 
+// Renders or manages MidwifeDashboard logic.
 export default function MidwifeDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();

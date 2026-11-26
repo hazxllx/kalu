@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/OralHealthRecords.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import ProgramFormPage from "../components/ProgramFormPage";
 import TclPageHeader from "../components/TclPageHeader";
@@ -15,6 +16,7 @@ import TclTabs from "../components/TclTabs";
 
 const inputCls = "mt-1.5 w-full bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue";
 
+// Renders or manages Statistics logic.
 function Statistics() {
   const { user } = useAuth();
   const { online, lastSyncedAt } = useSyncStatus();

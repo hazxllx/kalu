@@ -1,3 +1,4 @@
+// backend/src/utils/bmi.js
 /**
  * @module utils/bmi
  * @description Server-authoritative BMI calculation, vital-sign validation, blood-pressure

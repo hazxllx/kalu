@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/pages/M1VisualDetail.jsx
 /**
  * M1 Visual Acuity and PPV Program Detail Page
  *

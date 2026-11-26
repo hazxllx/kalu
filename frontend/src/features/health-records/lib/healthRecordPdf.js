@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/lib/healthRecordPdf.js
 import { jsPDF } from "jspdf";
 import { shouldShowPregnancyStatus } from "./pregnancyVisibility.js";
 import { consultationRiskLevel, consultationRiskReasons } from "../../consultations/lib/consultationRisk.js";
@@ -119,6 +120,7 @@ function formatBmi(value) {
   return n.toFixed(2);
 }
 
+// Handles downloadHealthRecordPdf logic.
 export async function downloadHealthRecordPdf(data = {}, meta = {}) {
   const resident = data.resident || {};
   const consultations = Array.isArray(data.consultations) ? data.consultations : [];

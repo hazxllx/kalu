@@ -1,3 +1,4 @@
+// backend/src/config/staffApprovals.js
 /**
  * Operational account-approval authority (single source of truth for the API).
  *

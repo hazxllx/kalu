@@ -1,3 +1,4 @@
+// frontend/src/features/verification/components/TransferStatusBanner.jsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -48,6 +49,7 @@ const formatDate = (iso) => {
     : d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 };
 
+// Renders or manages TransferStatusBanner logic.
 export default function TransferStatusBanner() {
   const [transfer, setTransfer] = useState(null);
   const [loading, setLoading] = useState(true);

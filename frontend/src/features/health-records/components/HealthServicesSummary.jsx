@@ -1,3 +1,4 @@
+// frontend/src/features/health-records/components/HealthServicesSummary.jsx
 import React from "react";
 import { Info, RefreshCw, ArrowRight } from "lucide-react";
 import { Skeleton } from "@/components/common/Skeleton";

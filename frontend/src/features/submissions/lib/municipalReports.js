@@ -1,3 +1,4 @@
+// frontend/src/features/submissions/lib/municipalReports.js
 export const reportGroup = (type) => /\btcl\b|target client/i.test(type || '') ? 'TCL' : /\bm1\b|maternal/i.test(type || '') ? 'M1' : 'Other';
 
 export const submissionFromReport = (report) => {

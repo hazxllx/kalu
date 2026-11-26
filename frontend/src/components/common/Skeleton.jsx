@@ -1,3 +1,4 @@
+// frontend/src/components/common/Skeleton.jsx
 import React from "react";
 
 /**
@@ -29,6 +30,7 @@ export function Skeleton({ className = "", style = undefined }) {
   );
 }
 
+// Renders or manages SkeletonRow logic.
 export function SkeletonRow() {
   return (
     <div className="flex items-center gap-4">
@@ -42,6 +44,7 @@ export function SkeletonRow() {
   );
 }
 
+// Renders or manages SkeletonList logic.
 export function SkeletonList({ rows = 5, className = "" }) {
   return (
     <div role="status" aria-label="Loading" className={`space-y-4 ${className}`}>
@@ -52,6 +55,7 @@ export function SkeletonList({ rows = 5, className = "" }) {
   );
 }
 
+// Renders or manages SkeletonCard logic.
 export function SkeletonCard({ className = "" }) {
   return (
     <div role="status" aria-label="Loading" className={`space-y-4 ${className}`}>

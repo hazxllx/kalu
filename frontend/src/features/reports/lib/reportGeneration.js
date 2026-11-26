@@ -1,3 +1,4 @@
+// frontend/src/features/reports/lib/reportGeneration.js
 import { recordDate } from "./reportSnapshot.js";
 
 /** Normalize supported API response envelopes without inventing an empty result. */
