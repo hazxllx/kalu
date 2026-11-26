@@ -384,11 +384,11 @@ export const processPersonnelNotifications = ({
             return;
           }
           const type = authUser.email_confirmed_at ? 'recovery' : 'invite';
-          // Keep the redirect target on the already configured reset URL. The
-          // token-hash email itself points to the clearer setup-password route.
-          const redirectTo = `${origin}/reset-password`;
+          // The email uses KALUSAGAP's own token-hash URL below. The Supabase
+          // action_link is never sent, so generating it with redirectTo would
+          // unnecessarily require the deployed frontend on Supabase's allowlist.
           const { data: generated, error: linkError } = await client.auth.admin.generateLink({
-            type, email: authUser.email, options: { redirectTo },
+            type, email: authUser.email,
           });
           if (linkError) throw failure('AUTH_LINK_GENERATION_FAILED');
           if (generated?.user?.id !== job.account_id || emailOf(generated?.user?.email) !== emailOf(authUser.email)) {

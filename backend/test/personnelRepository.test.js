@@ -41,6 +41,37 @@ const withTransport = async (handler, run) => {
   try { return await run(); } finally { transport = null; }
 };
 
+test('invitation recovery RPC sends the auth timestamp and preserves its claim metadata', async () => {
+  const authUpdatedAt = '2026-11-20T09:00:00.000Z';
+  const expected = {
+    claimId: OPERATION,
+    leaseId: '44444444-4444-4444-8444-444444444444',
+    attempt: 1,
+    authUpdatedAtBefore: authUpdatedAt,
+    allowAuthUpdate: true,
+  };
+  await withTransport(async (url, request) => {
+    assert.equal(url.pathname, '/rest/v1/rpc/begin_personnel_invitation_recovery');
+    assert.equal(request.method, 'POST');
+    assert.equal(request.headers.get('authorization'), `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`);
+    assert.deepEqual(JSON.parse(request.body), {
+      p_target_id: TARGET,
+      p_token_digest: 'a'.repeat(64),
+      p_password_digest: 'b'.repeat(64),
+      p_auth_updated_at: authUpdatedAt,
+    });
+    return respond(expected);
+  }, async () => {
+    const result = await repository.beginPersonnelInvitationRecovery({
+      id: TARGET,
+      tokenDigest: 'a'.repeat(64),
+      passwordDigest: 'b'.repeat(64),
+      authUpdatedAt,
+    });
+    assert.deepEqual(result, expected);
+  });
+});
+
 test('personnel list sends exact filters and pagination through real Supabase query builder', async () => {
   await withTransport(async (url, request) => {
     assert.equal(url.pathname, '/rest/v1/profiles');

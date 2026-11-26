@@ -46,6 +46,13 @@ const metadataUser = (user) => ({
   status: null,
 });
 
+export const buildPasswordActionUrl = ({ frontendUrl, tokenHash, type }) => {
+  const resetUrl = new URL('/reset-password', new URL(frontendUrl).origin);
+  resetUrl.searchParams.set('token_hash', tokenHash);
+  resetUrl.searchParams.set('type', type);
+  return resetUrl.href;
+};
+
 const residentRegistrationProjection = async (profileUser) => {
   if (!profileUser || !['resident', 'resident-limited'].includes(profileUser.role)) {
     return profileUser;
@@ -268,16 +275,16 @@ export const requestPasswordReset = async ({ email } = {}) => {
     isInitialPersonnelSetup = true;
   }
 
-  const frontendUrl = env.clientUrl || env.clientUrls?.[0];
+  const frontendUrl = env.clientUrl;
   if (!frontendUrl) throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
-  const passwordPath = '/reset-password';
-  // The generated token hash is verified on our app route, so preserve the
-  // previously configured Supabase redirect target for compatibility.
-  const redirectTo = `${new URL(frontendUrl).origin}/reset-password`;
+  // KALUSAGAP sends its own token-hash URL and verifies it with verifyOtp.
+  // Do not pass redirectTo to generateLink: that would require every deployed
+  // frontend origin to be added to the Supabase redirect allowlist even though
+  // the generated Supabase action_link is never sent to the user.
   let generated;
   try {
     generated = await supabase.auth.admin.generateLink({
-      type: actionType, email: authUser.email, options: { redirectTo },
+      type: actionType, email: authUser.email,
     });
   } catch {
     throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
@@ -288,9 +295,7 @@ export const requestPasswordReset = async ({ email } = {}) => {
     throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
   }
 
-  const resetUrl = new URL(passwordPath, new URL(frontendUrl).origin);
-  resetUrl.searchParams.set('token_hash', tokenHash);
-  resetUrl.searchParams.set('type', actionType);
+  const resetUrl = buildPasswordActionUrl({ frontendUrl, tokenHash, type: actionType });
   try {
     if (isInitialPersonnelSetup) await sendPasswordSetupEmail({ email: authUser.email, setupUrl: resetUrl.href });
     else await sendPasswordResetEmail({ email: authUser.email, resetUrl: resetUrl.href });
@@ -299,7 +304,8 @@ export const requestPasswordReset = async ({ email } = {}) => {
       operation: isInitialPersonnelSetup ? 'personnel_password_setup' : 'password_reset',
       ...getSmtpFailureDetails(error),
     });
-    throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+    throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.')
+      .withCode('EMAIL_DELIVERY_UNAVAILABLE');
   }
   return { accepted: true };
 };
@@ -450,21 +456,42 @@ export const setupPersonnelPassword = async ({ accessToken, password, recoverySe
       throw new ApiError(503, 'Invitation recovery is temporarily unavailable. Contact an administrator to retry.');
     }
     try {
-      recovery = await repository.beginPersonnelInvitationRecovery({ id: owner.id, tokenDigest, passwordDigest });
+      const started = await repository.beginPersonnelInvitationRecovery({
+        id: owner.id,
+        tokenDigest,
+        passwordDigest,
+        authUpdatedAt: owner.updated_at ?? null,
+      });
+      recovery = typeof started === 'string' ? { claimId: started, allowAuthUpdate: true } : started;
     } catch {
       throw new ApiError(503, 'Invitation recovery could not be verified. Request a fresh invitation and retry.');
     }
-    if (!recovery) throw ApiError.forbidden('The invitation recovery proof is invalid, expired, or already used. Request a new invitation.');
+    if (!recovery?.claimId) throw ApiError.forbidden('The invitation recovery proof is invalid, expired, or already used. Request a new invitation.');
   } else if (recoverySecret !== undefined) {
     throw ApiError.forbidden('The invitation recovery proof does not match an outstanding password setup.');
   }
   let result;
-  try {
-    result = recovery
-      ? await getServiceClient().auth.admin.updateUserById(owner.id, { password: validation.value.password })
-      : await repository.updatePersonnelOwnPassword({ accessToken, password: validation.value.password });
-  } catch {
-    throw new ApiError(503, 'The password change could not be confirmed. Please retry without signing out.');
+  if (recovery && recovery.allowAuthUpdate === false) {
+    let latest;
+    try { latest = await getServiceClient().auth.admin.getUserById(owner.id); }
+    catch { throw new ApiError(503, 'The password change could not be confirmed. Please retry without signing out.'); }
+    const latestUser = latest?.data?.user;
+    const previousUpdatedAt = Date.parse(recovery.authUpdatedAtBefore || '');
+    const latestUpdatedAt = Date.parse(latestUser?.updated_at || '');
+    if (latest?.error || latestUser?.id !== owner.id
+      || !Number.isFinite(previousUpdatedAt) || !Number.isFinite(latestUpdatedAt)
+      || latestUpdatedAt <= previousUpdatedAt) {
+      throw ApiError.forbidden('This invitation expired before the password change could be confirmed. Request a fresh invitation.');
+    }
+    result = latest;
+  } else {
+    try {
+      result = recovery
+        ? await getServiceClient().auth.admin.updateUserById(owner.id, { password: validation.value.password })
+        : await repository.updatePersonnelOwnPassword({ accessToken, password: validation.value.password });
+    } catch {
+      throw new ApiError(503, 'The password change could not be confirmed. Please retry without signing out.');
+    }
   }
   if (result.error || result.data?.user?.id !== owner.id) {
     const authErrorStatus = Number(result.error?.status ?? result.error?.statusCode);
@@ -473,7 +500,7 @@ export const setupPersonnelPassword = async ({ accessToken, password, recoverySe
         await repository.releasePersonnelInvitationRecovery({
           id: owner.id,
           tokenDigest: digestInvitationRecoverySecret(recoverySecret),
-          claimId: recovery,
+          claimId: recovery.claimId,
         });
       } catch { /* Preserve the original Auth error if the cleanup RPC is unavailable. */ }
     }
@@ -484,7 +511,7 @@ export const setupPersonnelPassword = async ({ accessToken, password, recoverySe
       ? await repository.completePersonnelInvitationRecovery({
         id: owner.id,
         tokenDigest: digestInvitationRecoverySecret(recoverySecret),
-        claimId: recovery,
+        claimId: recovery.claimId,
       })
       : await repository.completePersonnelAccountSetup(owner.id);
     if (!completed || completed.setupRequired || completed.lifecycleVersion === null) throw new Error('Setup was not confirmed');

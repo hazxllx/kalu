@@ -16,6 +16,7 @@ const PASSWORD = 'OwnerChosen9!';
 const RECOVERY_SECRET = 'supabase-generated-one-time-token-hash';
 const account = (patch = {}) => ({
   id: ACCOUNT_ID,
+  email: 'nurse@example.gov',
   status: 'disabled',
   approvalStatus: 'approved',
   activationRequested: false,
@@ -47,6 +48,7 @@ const scenario = async ({
       }
       return { data: { user: {
         id: ACCOUNT_ID, email: 'nurse@example.gov', email_confirmed_at: '2026-11-20T09:00:00Z',
+        updated_at: '2026-11-20T09:00:00Z',
         app_metadata: { personnel_managed: true },
       } }, error: null };
     },
@@ -57,7 +59,7 @@ const scenario = async ({
     },
     getUserById: async (id) => {
       calls.push(['getUserById', id]);
-      return { data: { user: { id, email: 'nurse@example.gov', email_confirmed_at: '2026-11-20T09:00:00Z', app_metadata: { personnel_managed: true } } }, error: null };
+      return { data: { user: { id, email: 'nurse@example.gov', email_confirmed_at: '2026-11-20T09:00:00Z', updated_at: '2026-11-20T09:00:00Z', app_metadata: { personnel_managed: true } } }, error: null };
     },
   }, () => withMethods(repository, {
     updatePersonnelOwnPassword: async ({ password }) => {
@@ -66,7 +68,10 @@ const scenario = async ({
     },
     getPersonnelSetupAccount: async (id) => { calls.push(['account', id]); return accountState; },
     getPersonnelInvitationRecoveryOwner: async (tokenDigest) => { calls.push(['recoveryOwner', tokenDigest]); return proofClaim ? ACCOUNT_ID : null; },
-    beginPersonnelInvitationRecovery: async (input) => { calls.push(['begin', input]); return proofClaim; },
+    beginPersonnelInvitationRecovery: async (input) => {
+      calls.push(['begin', input]);
+      return proofClaim ? { claimId: CLAIM_ID, allowAuthUpdate: true, authUpdatedAtBefore: input.authUpdatedAt } : null;
+    },
     releasePersonnelInvitationRecovery: async (input) => { calls.push(['release', input]); return true; },
     completePersonnelInvitationRecovery: async (input) => {
       calls.push(['completeRecovery', input]);
@@ -158,6 +163,7 @@ test('email secret is hashed and bound to the verified account before Auth mutat
     assert.equal(calls[3][0], 'password');
     assert.equal(calls[4][0], 'completeRecovery');
     assert.equal(calls[2][1].id, ACCOUNT_ID);
+    assert.equal(calls[2][1].authUpdatedAt, '2026-11-20T09:00:00Z');
     assert.match(calls[2][1].tokenDigest, /^[0-9a-f]{64}$/);
     assert.notEqual(calls[2][1].tokenDigest, RECOVERY_SECRET);
     assert.match(calls[2][1].passwordDigest, /^[0-9a-f]{64}$/);

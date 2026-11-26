@@ -17,6 +17,10 @@ const serviceRpc = async (name, params) => {
   await db.exec('set role service_role');
   try { return await rpc(name, params); } finally { await db.exec('reset role'); }
 };
+const beginRecovery = (accountId, digest = tokenDigest, password = passwordDigest) =>
+  rpc('begin_personnel_invitation_recovery', [accountId, digest, password, '2026-11-20T09:00:00Z']);
+const beginRecoveryAsService = (accountId, digest = tokenDigest, password = passwordDigest) =>
+  serviceRpc('begin_personnel_invitation_recovery', [accountId, digest, password, '2026-11-20T09:00:00Z']);
 const id = () => randomUUID();
 const tokenDigest = 'a'.repeat(64);
 const passwordDigest = 'b'.repeat(64);
@@ -30,8 +34,9 @@ const account = async ({ activationRequested = true, suspendedAt = null, tempora
     account_id,approval_status,activation_requested,setup_required,setup_completed_at,
     must_change_password,temporary_password_expires_at,suspended_at,updated_at,version
   ) values ($1,'approved',$2,true,null,true,$4,$3,now(),1)`, [accountId, activationRequested, suspendedAt, temporaryExpiresAt]);
-  await query(`insert into public.personnel_notification_outbox(id,account_id,event_type,status,claim_token,next_attempt_at,claimed_at)
-    values ($1,$2,'invitation','processing',$3,now(),now())`, [notificationId, accountId, claimToken]);
+  await query(`insert into public.personnel_notification_outbox(
+    id,account_id,event_type,status,claim_token,next_attempt_at,claimed_at,link_generation_started_at
+  ) values ($1,$2,'invitation','processing',$3,now(),now(),now())`, [notificationId, accountId, claimToken]);
   return { accountId, notificationId, claimToken };
 };
 
@@ -95,7 +100,7 @@ test('proof registration requires its claimed invitation and a live temporary-pa
   const row = await account();
   assert.equal(await rpc('register_personnel_invitation_recovery', [row.notificationId, row.claimToken, tokenDigest]), true);
   const other = await account();
-  assert.equal(await rpc('begin_personnel_invitation_recovery', [other.accountId, tokenDigest, passwordDigest]), null);
+  assert.equal(await beginRecovery(other.accountId), null);
   const proof = await query('select * from public.personnel_invitation_recovery_proofs where account_id = $1', [row.accountId]);
   assert.equal(proof[0].notification_id, row.notificationId);
   assert.equal(proof[0].token_digest, tokenDigest);
@@ -118,13 +123,17 @@ test('invitation send boundary requires an active recovery proof for temporary-p
 test('an in-flight initial temporary-password change cannot race a recovery invitation', async () => {
   const row = await account({ temporaryExpiresAt: '2099-01-01T00:00:00.000Z' });
   const password = 'c'.repeat(64);
-  const claimId = await rpc('begin_personnel_temporary_password_change', [row.accountId, password]);
-  assert.ok(claimId);
+  const claim = await rpc('begin_personnel_temporary_password_change', [row.accountId, password]);
+  assert.ok(claim.claimId);
   assert.equal(await rpc('register_personnel_invitation_recovery', [row.notificationId, row.claimToken, tokenDigest]), false);
-  assert.equal(await rpc('begin_personnel_temporary_password_change', [row.accountId, password]), claimId);
+  assert.equal(await rpc('begin_personnel_temporary_password_change', [row.accountId, password]), null);
   assert.equal(await rpc('begin_personnel_temporary_password_change', [row.accountId, 'd'.repeat(64)]), null);
+  await query("update public.personnel_accounts set temporary_password_change_lease_expires_at = now() - interval '1 second' where account_id = $1", [row.accountId]);
+  const retry = await rpc('begin_personnel_temporary_password_change', [row.accountId, password]);
+  assert.equal(retry.claimId, claim.claimId);
+  assert.notEqual(retry.leaseId, claim.leaseId);
   await query('insert into auth.users(id,email_confirmed_at) values ($1,now())', [row.accountId]);
-  const completed = await rpc('complete_claimed_temporary_personnel_password_change', [row.accountId, claimId]);
+  const completed = await rpc('complete_claimed_temporary_personnel_password_change', [row.accountId, retry.claimId, retry.leaseId]);
   assert.equal(completed.personnel_account.must_change_password, false);
   const accountRow = await query('select temporary_password_change_claim_id from public.personnel_accounts where account_id = $1', [row.accountId]);
   assert.equal(accountRow[0].temporary_password_change_claim_id, null);
@@ -134,8 +143,10 @@ test('setup completion fences old session iat but permits post-cutoff sessions',
   const row = await account();
   await query('insert into auth.users(id,email_confirmed_at) values ($1,now())', [row.accountId]);
   await rpc('register_personnel_invitation_recovery', [row.notificationId, row.claimToken, tokenDigest]);
-  const claimId = await rpc('begin_personnel_invitation_recovery', [row.accountId, tokenDigest, passwordDigest]);
-  const completed = await rpc('complete_personnel_invitation_recovery', [row.accountId, tokenDigest, claimId]);
+  const claim = await beginRecovery(row.accountId);
+  assert.equal(claim.allowAuthUpdate, true);
+  assert.equal(claim.authUpdatedAtBefore, '2026-11-20T09:00:00+00:00');
+  const completed = await rpc('complete_personnel_invitation_recovery', [row.accountId, tokenDigest, claim.claimId]);
   const cutoff = Number(completed.personnel_account.credential_valid_after);
   await query("select set_config('request.jwt.claim.sub',$1,false), set_config('request.jwt.claims',$2,false)", [
     row.accountId, JSON.stringify({ sub: row.accountId, iat: cutoff - 1 }),
@@ -149,15 +160,15 @@ test('expired and consumed email proofs are denied', async () => {
   const expired = await account();
   await rpc('register_personnel_invitation_recovery', [expired.notificationId, expired.claimToken, tokenDigest]);
   await query('update public.personnel_invitation_recovery_proofs set expires_at = now() - interval \'1 second\' where account_id = $1', [expired.accountId]);
-  assert.equal(await rpc('begin_personnel_invitation_recovery', [expired.accountId, tokenDigest, passwordDigest]), null);
+  assert.equal(await beginRecovery(expired.accountId), null);
   assert.equal(await rpc('begin_personnel_temporary_password_change', [expired.accountId, passwordDigest]), null);
 
   const consumed = await account({ activationRequested: false });
   await query('insert into auth.users(id,email_confirmed_at) values ($1,now())', [consumed.accountId]);
   await rpc('register_personnel_invitation_recovery', [consumed.notificationId, consumed.claimToken, tokenDigest]);
-  const claimId = await rpc('begin_personnel_invitation_recovery', [consumed.accountId, tokenDigest, passwordDigest]);
-  assert.ok(claimId);
-  const completed = await rpc('complete_personnel_invitation_recovery', [consumed.accountId, tokenDigest, claimId]);
+  const claim = await beginRecovery(consumed.accountId);
+  assert.ok(claim.claimId);
+  const completed = await rpc('complete_personnel_invitation_recovery', [consumed.accountId, tokenDigest, claim.claimId]);
   assert.equal(completed.status, 'disabled');
   assert.equal(completed.personnel_account.activation_requested, false);
   assert.equal(completed.personnel_account.must_change_password, false);
@@ -167,7 +178,7 @@ test('expired and consumed email proofs are denied', async () => {
   const proof = await query('select token_digest,consumed_at from public.personnel_invitation_recovery_proofs where account_id = $1', [consumed.accountId]);
   assert.equal(proof[0].token_digest, null);
   assert.ok(proof[0].consumed_at);
-  assert.equal(await rpc('begin_personnel_invitation_recovery', [consumed.accountId, tokenDigest, passwordDigest]), null);
+  assert.equal(await beginRecovery(consumed.accountId), null);
   assert.equal((await query(`select action from public.recovery_audit where action = 'ACCOUNT_TEMPORARY_PASSWORD_RECOVERED'
     and metadata->>'recovery_notification_id' = $1`, [consumed.notificationId])).length, 1);
 });
@@ -175,23 +186,23 @@ test('expired and consumed email proofs are denied', async () => {
 test('a rejected Auth password update can release only its matching unconsumed claim', async () => {
   const row = await account();
   await rpc('register_personnel_invitation_recovery', [row.notificationId, row.claimToken, tokenDigest]);
-  const claim = await rpc('begin_personnel_invitation_recovery', [row.accountId, tokenDigest, passwordDigest]);
+  const claim = await beginRecovery(row.accountId);
   assert.equal(await rpc('release_personnel_invitation_recovery', [row.accountId, tokenDigest, id()]), false);
-  assert.equal(await rpc('release_personnel_invitation_recovery', [row.accountId, tokenDigest, claim]), true);
-  assert.ok(await rpc('begin_personnel_invitation_recovery', [row.accountId, tokenDigest, 'c'.repeat(64)]));
+  assert.equal(await rpc('release_personnel_invitation_recovery', [row.accountId, tokenDigest, claim.claimId]), true);
+  assert.ok(await beginRecovery(row.accountId, tokenDigest, 'c'.repeat(64)));
 });
 
 test('suspension is enforced both before Auth mutation and during finalization', async () => {
   const alreadySuspended = await account({ suspendedAt: new Date().toISOString() });
   await rpc('register_personnel_invitation_recovery', [alreadySuspended.notificationId, alreadySuspended.claimToken, tokenDigest]);
-  assert.equal(await rpc('begin_personnel_invitation_recovery', [alreadySuspended.accountId, tokenDigest, passwordDigest]), null);
+  assert.equal(await beginRecovery(alreadySuspended.accountId), null);
 
   const suspendedDuringSetup = await account();
   await query('insert into auth.users(id,email_confirmed_at) values ($1,now())', [suspendedDuringSetup.accountId]);
   await rpc('register_personnel_invitation_recovery', [suspendedDuringSetup.notificationId, suspendedDuringSetup.claimToken, tokenDigest]);
-  const claimId = await rpc('begin_personnel_invitation_recovery', [suspendedDuringSetup.accountId, tokenDigest, passwordDigest]);
+  const claim = await beginRecovery(suspendedDuringSetup.accountId);
   await query('update public.personnel_accounts set suspended_at = now() where account_id = $1', [suspendedDuringSetup.accountId]);
-  await assert.rejects(() => rpc('complete_personnel_invitation_recovery', [suspendedDuringSetup.accountId, tokenDigest, claimId]));
+  await assert.rejects(() => rpc('complete_personnel_invitation_recovery', [suspendedDuringSetup.accountId, tokenDigest, claim.claimId]));
   const state = await query(`select p.status,a.must_change_password,a.setup_required
     from public.profiles p join public.personnel_accounts a on a.account_id = p.id where p.id = $1`, [suspendedDuringSetup.accountId]);
   assert.deepEqual(state[0], { status: 'disabled', must_change_password: true, setup_required: true });
@@ -201,13 +212,13 @@ test('definitively failed or cancelled invitations invalidate stored proofs', as
   const row = await account();
   await rpc('register_personnel_invitation_recovery', [row.notificationId, row.claimToken, tokenDigest]);
   await query("update public.personnel_notification_outbox set status = 'failed' where id = $1", [row.notificationId]);
-  assert.equal(await rpc('begin_personnel_invitation_recovery', [row.accountId, tokenDigest, passwordDigest]), null);
+  assert.equal(await beginRecovery(row.accountId), null);
 });
 
 test('recovery RPCs are unavailable to authenticated clients', async () => {
   await db.exec('set role authenticated');
   try {
-    await assert.rejects(() => rpc('begin_personnel_invitation_recovery', [id(), tokenDigest, passwordDigest]));
+    await assert.rejects(() => beginRecovery(id()));
   } finally {
     await db.exec('reset role');
   }
@@ -216,5 +227,6 @@ test('recovery RPCs are unavailable to authenticated clients', async () => {
 test('service_role can register and begin recovery through the granted RPC surface', async () => {
   const row = await account();
   assert.equal(await serviceRpc('register_personnel_invitation_recovery', [row.notificationId, row.claimToken, tokenDigest]), true);
-  assert.ok(await serviceRpc('begin_personnel_invitation_recovery', [row.accountId, tokenDigest, passwordDigest]));
+  const claim = await beginRecoveryAsService(row.accountId);
+  assert.ok(claim.claimId);
 });

@@ -30,6 +30,13 @@ const SMTP_ERROR_CODES = new Set([
   'EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ETLS', 'EREQUIRETLS', 'ECONNECTION',
   'ESOCKET', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN',
   'EPIPE', 'EENVELOPE', 'EMESSAGE', 'ESTREAM', 'EPROTOCOL', 'ECONFIG', 'EPROXY',
+  'ECONNABORTED', 'EHOSTUNREACH', 'EHOSTDOWN', 'ENETUNREACH', 'EADDRNOTAVAIL',
+  'SELF_SIGNED_CERT_IN_CHAIN', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+const TLS_CERTIFICATE_CODES = new Set([
+  'SELF_SIGNED_CERT_IN_CHAIN', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID',
 ]);
 const SMTP_PHASES = new Set(['auth', 'handshake', 'starttls', 'mail_from', 'rcpt_to', 'data', 'after_send', 'connect', 'unknown']);
 const SMTP_CONNECTION_CODES = new Set(['EDNS', 'ECONNECTION', 'ESOCKET', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE']);
@@ -60,6 +67,9 @@ export const getSmtpFailureDetails = (error) => {
   } else if (['ETLS', 'EREQUIRETLS'].includes(smtpCode) || smtpPhase === 'starttls') {
     failureClass = 'tls_failure';
     code = 'SMTP_TLS_FAILURE';
+  } else if (TLS_CERTIFICATE_CODES.has(smtpCode)) {
+    failureClass = 'tls_failure';
+    code = 'SMTP_TLS_CERTIFICATE_FAILURE';
   } else if (smtpCode === 'ETIMEDOUT' || error?.originalCode === 'ETIMEDOUT') {
     failureClass = 'connection_timeout';
     code = 'SMTP_CONNECTION_TIMEOUT';
@@ -121,9 +131,12 @@ export const getEmailTransporter = () => {
     ...(requireAuthentication ? { auth: { user: env.smtpUser, pass: env.smtpPassword } } : {}),
     logger: false,
     debug: false,
-    connectionTimeout: 30_000,
-    greetingTimeout: 30_000,
-    socketTimeout: 60_000,
+    // Keep email endpoints below the frontend's 30 second request deadline so
+    // SMTP failures return a confirmed response instead of an ambiguous client
+    // timeout. The durable personnel outbox still records uncertain outcomes.
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 15_000,
   });
   return transporter;
 };
@@ -249,9 +262,17 @@ export const sendTransferOtp = async ({ email, otp }) => {
  * @param {Object} params - Email parameters (`email`, `resetUrl`).
  * @returns {Promise<void>}
  */
-export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
-  const safeUrl = String(resetUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const message = {
+export const buildPasswordResetEmailMessage = ({ email, resetUrl }) => {
+  const rawUrl = String(resetUrl || '').trim();
+  let parsedUrl;
+  try { parsedUrl = new URL(rawUrl); } catch {
+    throw new TypeError('Password reset URL must be an absolute HTTP(S) URL.');
+  }
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || !parsedUrl.host) {
+    throw new TypeError('Password reset URL must be an absolute HTTP(S) URL.');
+  }
+  const safeUrl = rawUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return {
     from: emailSender(env.smtpFrom),
     to: { address: email },
     subject: 'KALUSAGAP Password Reset',
@@ -260,6 +281,7 @@ export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
       '',
       'Use the link below to reset your KALUSAGAP password.',
       '',
+      'If the button does not open, copy and paste this address into your browser:',
       resetUrl,
       '',
       'This is a one-time link. If you did not request a password reset, you can ignore this email.',
@@ -268,9 +290,15 @@ export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
       <h1 style="font-size:18px;">Reset your KALUSAGAP password</h1>
       <p>Use the button below to choose a new password. This is a one-time link.</p>
       <p><a href="${safeUrl}" style="display:inline-block;padding:12px 18px;background:#174f86;color:#fff;text-decoration:none;border-radius:6px;">Reset Password</a></p>
+      <p style="font-size:13px;">If the button does not open, copy this address into your browser:</p>
+      <p style="font-family:Consolas,Monaco,monospace;font-size:12px;line-height:1.6;overflow-wrap:anywhere;word-break:break-all;padding:10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;">${safeUrl}</p>
       <p>If you did not request this, you can ignore this email.</p>
     </div>`,
   };
+};
+
+export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
+  const message = buildPasswordResetEmailMessage({ email, resetUrl });
   const result = await sendSmtpMail(message);
   assertRecipientAccepted(result, email, 'Password reset email was not accepted.');
 };

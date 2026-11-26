@@ -2567,7 +2567,10 @@ export const supabaseRepository = {
 
   async sendAccountRecoveryEmail({ user, actorId }) {
     const supabase = createAuthClient();
-    const redirectTo = env.clientUrls[0] ? `${env.clientUrls[0]}/reset-password` : undefined;
+    if (!env.clientUrl) {
+      throw new ApiError(503, 'The password recovery request could not be confirmed because the canonical frontend URL is not configured.');
+    }
+    const redirectTo = `${env.clientUrl}/reset-password`;
     const admin = getServiceClient();
     const { error: auditError } = await admin.from('health_audit_logs').insert({
       actor_id: actorId,
@@ -2580,9 +2583,7 @@ export const supabaseRepository = {
     });
     throwAccountError(auditError, 'Could not record the account access reset request. No recovery request has been sent.');
 
-    const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-      ...(redirectTo ? { redirectTo } : {}),
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo });
     if (error) throw new ApiError(503, 'The password recovery request could not be confirmed. Please try again shortly.');
   },
 
@@ -2769,12 +2770,17 @@ export const supabaseRepository = {
     return { rows, total: count ?? rows.length };
   },
 
-  async beginPersonnelInvitationRecovery({ id, tokenDigest, passwordDigest }) {
+  async beginPersonnelInvitationRecovery({ id, tokenDigest, passwordDigest, authUpdatedAt }) {
     const { data, error } = await getServiceClient().rpc('begin_personnel_invitation_recovery', {
-      p_target_id: id, p_token_digest: tokenDigest, p_password_digest: passwordDigest,
+      p_target_id: id,
+      p_token_digest: tokenDigest,
+      p_password_digest: passwordDigest,
+      p_auth_updated_at: authUpdatedAt ?? null,
     });
     throwAccountError(error, 'Invitation recovery could not be verified. Request a fresh invitation and retry.');
-    return typeof data === 'string' ? data : null;
+    const claim = Array.isArray(data) ? data[0] : data;
+    if (typeof claim === 'string') return { claimId: claim, allowAuthUpdate: true };
+    return claim && typeof claim === 'object' && typeof claim.claimId === 'string' ? claim : null;
   },
 
   async getPersonnelInvitationRecoveryOwner(tokenDigest) {

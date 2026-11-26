@@ -47,7 +47,11 @@ const errorHandler = (err, req, res, next) => {
   if (clinicalRequest) {
     // Database error messages and URL identifiers can contain clinical data.
     // Keep operational correlation without logging values, paths, or stacks.
-    const code = typeof err.code === 'string' && /^[A-Z0-9_]+$/.test(err.code) ? err.code : 'REQUEST_FAILED';
+    // Repository adapters preserve Supabase/PostgREST errors in `details`;
+    // log only their bounded machine code so a rejected clinical write can be
+    // diagnosed without exposing its message, query, or patient data.
+    const code = [err.code, err.databaseCode, err.details?.code]
+      .find((value) => typeof value === 'string' && /^[A-Z0-9_]+$/.test(value)) || 'REQUEST_FAILED';
     if (isServerError) console.error(`[requestId=${req.requestId || 'unknown'}] Clinical request failed`, { method: req.method, statusCode, code });
   } else if (isServerError) {
     console.error(`[requestId=${req.requestId || 'unknown'}] Unhandled error on ${req.method} ${req.path}:`, err.message);

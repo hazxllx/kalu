@@ -44,7 +44,7 @@ const PRODUCTION_CLIENT_URLS = Object.freeze([
 // preventing a misconfigured deployment from starting with degraded security or broken auth.
 if (isProduction) {
   const missing = [];
-  if (!clientUrlValue && !corsOriginValue) missing.push('CLIENT_URL or CORS_ORIGIN');
+  if (!clientUrlValue) missing.push('CLIENT_URL');
   if (!supabaseUrl) missing.push('SUPABASE_URL');
   if (!supabaseAnonKey) missing.push('SUPABASE_ANON_KEY');
   if (!supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
@@ -77,12 +77,31 @@ const parseHttpOrigin = (value) => {
   return url.origin;
 };
 
+const canonicalClientUrl = (() => {
+  const value = clientUrlValue.split(',').map((origin) => origin.trim()).find(Boolean) || '';
+  if (!value) return '';
+  if (isProduction && clientUrlValue.includes(',')) {
+    throw new Error('Production CLIENT_URL must contain one canonical frontend origin. Put additional browser origins in CORS_ORIGIN.');
+  }
+  const origin = parseHttpOrigin(value);
+  if (isProduction) {
+    const url = new URL(origin);
+    const hostname = url.hostname.toLowerCase();
+    const loopback = hostname === 'localhost' || hostname.endsWith('.localhost')
+      || hostname === '[::1]' || hostname.startsWith('127.') || hostname === '0.0.0.0';
+    if (url.protocol !== 'https:' || loopback) {
+      throw new Error('Production CLIENT_URL must be a public HTTPS frontend origin.');
+    }
+  }
+  return origin;
+})();
+
 // Combine comma-separated `CLIENT_URL` and `CORS_ORIGIN` entries with the
 // environment-appropriate defaults into a deduplicated exact-origin allowlist.
 const configuredClientUrls = [
   ...new Set(
     [
-      clientUrlValue,
+      ...clientUrlValue.split(','),
       corsOriginValue,
       ...(isProduction ? PRODUCTION_CLIENT_URLS : DEVELOPMENT_CLIENT_URLS),
     ]
@@ -139,7 +158,7 @@ const env = {
   clientUrls: configuredClientUrls,
   // Mail redirects require an explicitly configured canonical CLIENT_URL, not
   // one of the implicit development CORS origins.
-  clientUrl: clientUrlValue.split(',').map((value) => value.trim()).find(Boolean) || '',
+  clientUrl: canonicalClientUrl,
 
   // --- Supabase (server side) ------------------------------------------------
   // The service-role key bypasses Row Level Security, so it lives ONLY here on

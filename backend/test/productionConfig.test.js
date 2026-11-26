@@ -10,7 +10,7 @@ const loadEnv = (variables) => spawnSync(
   [
     '--input-type=module',
     '-e',
-    `import(${JSON.stringify(pathToFileURL(envModule).href)}).then(({ default: env }) => console.log(JSON.stringify(env.clientUrls)))`,
+    `import(${JSON.stringify(pathToFileURL(envModule).href)}).then(({ default: env }) => console.log(JSON.stringify({ clientUrl: env.clientUrl, clientUrls: env.clientUrls })))`,
   ],
   {
     env: {
@@ -36,7 +36,7 @@ test('production fails fast when required configuration is missing', () => {
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Production configuration is incomplete/);
-  assert.match(result.stderr, /CLIENT_URL or CORS_ORIGIN/);
+  assert.match(result.stderr, /CLIENT_URL/);
   assert.match(result.stderr, /SUPABASE_SERVICE_ROLE_KEY/);
 });
 
@@ -50,10 +50,10 @@ test('development allows both localhost and 127.0.0.1 frontend origins', () => {
     SUPABASE_SERVICE_ROLE_KEY: '',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout.trim()), [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-  ]);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    clientUrl: 'http://localhost:5173',
+    clientUrls: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  });
 });
 
 test('hosted development allows only matching Supabase project credentials with explicit mode', () => {
@@ -75,10 +75,10 @@ test('hosted development allows only matching Supabase project credentials with 
     OPENAI_API_KEY: '',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout.trim()), [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-  ]);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    clientUrl: 'http://localhost:5173',
+    clientUrls: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  });
 });
 
 test('production accepts CLIENT_URL alone and does not add development origins', () => {
@@ -91,14 +91,13 @@ test('production accepts CLIENT_URL alone and does not add development origins',
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout.trim()), [
-    'https://app.example.test',
-    'https://kalusagap-frontend.onrender.com',
-    'https://kalusagap.vercel.app',
-  ]);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    clientUrl: 'https://app.example.test',
+    clientUrls: ['https://app.example.test', 'https://kalusagap-frontend.onrender.com', 'https://kalusagap.vercel.app'],
+  });
 });
 
-test('production accepts CORS_ORIGIN as the documented fallback alias', () => {
+test('production requires canonical CLIENT_URL even when CORS_ORIGIN is configured', () => {
   const result = loadEnv({
     NODE_ENV: 'production',
     CLIENT_URL: '',
@@ -107,12 +106,41 @@ test('production accepts CORS_ORIGIN as the documented fallback alias', () => {
     SUPABASE_ANON_KEY: 'test-anon-key',
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
   });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Missing required environment variable\(s\): CLIENT_URL/);
+});
+
+test('production canonical frontend URL must be public HTTPS and separate from CORS origins', () => {
+  for (const CLIENT_URL of [
+    'http://app.example.test',
+    'https://localhost:5173',
+    'https://127.0.0.1:5173',
+    'https://app.example.test,https://preview.example.test',
+  ]) {
+    const result = loadEnv({
+      NODE_ENV: 'production', CLIENT_URL, CORS_ORIGIN: '',
+      SUPABASE_URL: 'https://project.example.test',
+      SUPABASE_ANON_KEY: 'test-anon-key',
+      SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+    });
+    assert.notEqual(result.status, 0, `Expected ${CLIENT_URL} to be rejected`);
+  }
+});
+
+test('production accepts an HTTPS canonical URL and keeps extra origins in CORS_ORIGIN', () => {
+  const result = loadEnv({
+    NODE_ENV: 'production',
+    CLIENT_URL: 'https://app.example.test',
+    CORS_ORIGIN: 'https://preview.example.test',
+    SUPABASE_URL: 'https://project.example.test',
+    SUPABASE_ANON_KEY: 'test-anon-key',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+  });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout.trim()), [
-    'https://app.example.test',
-    'https://kalusagap-frontend.onrender.com',
-    'https://kalusagap.vercel.app',
-  ]);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    clientUrl: 'https://app.example.test',
+    clientUrls: ['https://app.example.test', 'https://preview.example.test', 'https://kalusagap-frontend.onrender.com', 'https://kalusagap.vercel.app'],
+  });
 });
 
 test('origin configuration rejects paths, credentials, and non-http protocols', () => {

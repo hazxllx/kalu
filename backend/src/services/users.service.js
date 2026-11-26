@@ -310,7 +310,9 @@ const requireInvitationDelivery = (user) => {
   const status = String(user?.notification?.status || '').toLowerCase();
   const rawDeliveryCode = String(user?.notification?.lastErrorCode || status || '').toUpperCase();
   const deliveryCode = /^[A-Z0-9_]{1,64}$/.test(rawDeliveryCode) ? rawDeliveryCode : 'DELIVERY_UNCONFIRMED';
-  const guidance = ['delivery_unknown', 'sending'].includes(status)
+  const guidance = rawDeliveryCode === 'WORKER_ENVIRONMENT_NOT_ALLOWED'
+    ? 'This local server cannot send notification jobs for the hosted project. Open the deployed KALUSAGAP site and resend the existing invitation.'
+    : ['delivery_unknown', 'sending'].includes(status)
     ? 'Check Brevo delivery logs before resending to avoid a duplicate email.'
     : status === 'failed'
       ? 'Use the account’s Resend invitation action after correcting the email configuration.'

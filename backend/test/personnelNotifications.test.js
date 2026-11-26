@@ -90,7 +90,7 @@ const fixture = (options = {}) => {
           data: {
             user: options.generatedUser || state.authUser,
             properties: {
-              action_link: options.actionLink || `https://project.example.test/auth/v1/verify?token=${TOKEN}&type=${args.type}&redirect_to=${encodeURIComponent(args.options.redirectTo)}`,
+              action_link: options.actionLink || `https://project.example.test/auth/v1/verify?token=${TOKEN}&type=${args.type}&redirect_to=${encodeURIComponent(args.options?.redirectTo || '')}`,
               hashed_token: options.hashedToken === undefined ? TOKEN : options.hashedToken,
             },
           },
@@ -266,7 +266,7 @@ test('notification worker refuses to send a non-nine-character temporary credent
 test('an unconfirmed setup-required identity gets an expiring invite, never createUser', async () => {
   const f = fixture({ account: { setup_required: true }, profile: { status: 'pending_verification' }, authUser: { email_confirmed_at: null } });
   await f.run();
-  assert.deepEqual(f.state.links, [{ type: 'invite', email: EMAIL, options: { redirectTo: 'https://app.example.test/reset-password' } }]);
+  assert.deepEqual(f.state.links, [{ type: 'invite', email: EMAIL }]);
   assert(f.state.events.indexOf('auth:read') < f.state.events.indexOf('auth:link'));
   assert(f.state.events.indexOf('link:prepare') < f.state.events.indexOf('auth:link'));
   assert(f.state.events.indexOf('auth:link') < f.state.events.indexOf('begin'));
@@ -765,6 +765,27 @@ test('Nodemailer stream tracking recognizes CONN timeout during body consumption
     stream.resume();
   } });
   await assert.rejects(sendSmtpMail({ from: CONFIG.smtpFrom, to: EMAIL, text: 'Private test body' }, { transport }), (error) => error.beforeData === false && error.code === 'ETIMEDOUT');
+});
+
+test('SMTP diagnostics retain only safe TLS certificate codes from nested socket errors', async () => {
+  const certificateError = Object.assign(new Error('private certificate detail'), {
+    code: 'SELF_SIGNED_CERT_IN_CHAIN',
+  });
+  const transport = nodemailer.createTransport({
+    name: 'isolated-test', version: '1',
+    send: (_mail, callback) => callback(Object.assign(new Error('private SMTP response'), {
+      code: 'ESOCKET', command: 'CONN', cause: certificateError,
+    })),
+  });
+  await assert.rejects(sendSmtpMail({ from: CONFIG.smtpFrom, to: EMAIL, text: 'Private test body' }, { transport }), (error) => {
+    const details = getSmtpFailureDetails(error);
+    assert.equal(details.code, 'SMTP_TLS_CERTIFICATE_FAILURE');
+    assert.equal(details.failureClass, 'tls_failure');
+    assert.equal(details.smtpCode, 'SELF_SIGNED_CERT_IN_CHAIN');
+    assert.equal(details.smtpPhase, 'connect');
+    assert.doesNotMatch(JSON.stringify(details), /private|certificate detail/);
+    return true;
+  });
 });
 
 test('overlapping process calls do not claim or send a duplicate batch', async () => {
