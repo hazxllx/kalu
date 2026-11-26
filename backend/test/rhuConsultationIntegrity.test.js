@@ -4,15 +4,15 @@ import { completeSubmission, updateSubmissionForPhn } from '../src/services/phnQ
 import errorHandler from '../src/middleware/errorHandler.js';
 
 const actor = { id: 'clinician-a', role: 'rhu_personnel', rhuStations: ['consultation'], facilityId: 'facility-a', municipalityId: 'municipality-a', name: 'Test Clinician' };
-const outputs = { findings: 'Recorded findings', treatmentGiven: 'Recorded plan', recommendation: 'Recorded plan', phn: { assessment: 'Recorded concern', notes: 'Recorded notes' }, medications: [{ genericName: 'Paracetamol', dose: '1 tablet', frequency: 'As needed', route: 'Oral', duration: '3 days', quantity: '6', instructions: 'Recorded directions', custom: true, source: 'custom' }] };
+const outputs = { findings: 'Recorded findings', treatmentGiven: 'Recorded plan', recommendation: 'Recorded plan', phn: { assessment: 'Recorded concern', notes: 'Recorded notes' }, medications: [{ genericName: 'Paracetamol', frequency: 'Once daily', route: 'Oral', duration: '3', quantity: '3', instructions: 'Recorded directions', custom: true, source: 'custom' }] };
+const recordedVitals = { bp: '120/80', hr: 72, rr: 18, o2sat: 98, temperature: 36.8, heightCm: 170, weightKg: 65, bloodSugar: 100 };
 
-function fixture() {
-  const recordedVitals = { bp: '120/80', hr: 72, rr: 18, o2sat: 98, temperature: 36.8, heightCm: 170, weightKg: 65, bloodSugar: 100 };
+function fixture(initialVitals = recordedVitals) {
   let record = { id: 'visit-a', residentId: 'patient-a', status: 'in_review', facilityId: 'facility-a', visitDate: '2026-11-19T09:00:00+08:00', updatedAt: '2026-11-19T09:00:00Z',
     consultationRoutedAt: '2026-11-19T08:30:00Z', consultationRoutedFacilityId: 'facility-a',
     resident: { id: 'patient-a', municipalityId: 'municipality-a' },
     consultationDetails: { consultationDate: '2026-11-19', consultationTime: '09:00', clinicalIndicators: { dangerSignsReviewed: true } },
-    vitals: recordedVitals, triageSnapshot: { residentId: 'patient-a', vitals: recordedVitals } };
+    vitals: structuredClone(initialVitals), triageSnapshot: { residentId: 'patient-a', vitals: structuredClone(initialVitals) } };
   const writes = [];
   const repo = {
     driver: 'supabase', getVisit: async () => structuredClone(record),
@@ -35,9 +35,22 @@ test('consultation completion saves clinician outputs and status in one guarded 
   assert.equal(saved.triageSnapshot.residentId, 'patient-a');
   assert.equal(saved.triageSnapshot.vitals.bloodSugar, 100);
   assert.equal(saved.phn.personnel, 'Test Clinician');
-  assert.equal(saved.medications[0].dose, '1 tablet');
+  assert.equal(saved.medications[0].instructions, 'Recorded directions');
   assert.equal(f.writes[0].patch.status, 'completed');
   assert.equal(f.writes[0].guard.expectedUpdatedAt, '2026-11-19T09:00:00Z');
+});
+
+test('consultation completion persists only missing triage measurements in the guarded write', async () => {
+  const f = fixture({ ...recordedVitals, bp: null });
+  const saved = await completeSubmission({
+    id: 'visit-a', user: actor,
+    patch: { ...outputs, consultationVitals: { bloodPressure: '130/85' } }, repo: f.repo,
+  });
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].patch.vitals.bp, '130/85');
+  assert.deepEqual(f.writes[0].patch.vitals, { bp: '130/85' });
+  assert.equal(f.writes[0].patch.consultationDetails.consultationVitals.bloodPressure, '130/85');
+  assert.equal(saved.triageSnapshot.vitals.bp, null);
 });
 
 test('retrying a confirmed completion returns the same record without another write; changed outputs conflict', async () => {

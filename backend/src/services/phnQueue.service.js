@@ -460,6 +460,19 @@ export const updateSubmissionForPhn = async ({
     vitals.bmiCategory = calculated.category;
   }
   if (Object.keys(consultationVitals).length) {
+    // Persist only the measurements added by consultation. The full `vitals`
+    // object above is used for assessment, but sending it wholesale could
+    // rewrite the original triage columns. The database guard verifies this
+    // sparse supplement against the immutable triage snapshot in the same
+    // completion update.
+    normalized.vitals = Object.fromEntries(Object.entries(consultationVitals).map(([field, value]) => [
+      CONSULTATION_VITAL_COLUMN[field], field === 'bloodPressure' ? String(value).trim() : Number(value),
+    ]));
+    if ((Object.hasOwn(consultationVitals, 'height') || Object.hasOwn(consultationVitals, 'weight'))
+      && vitals.bmi !== null && vitals.bmi !== undefined) {
+      normalized.vitals.bmi = vitals.bmi;
+      normalized.vitals.bmiCategory = vitals.bmiCategory;
+    }
     normalized.consultationDetails = {
       ...submission.consultationDetails,
       ...normalized.consultationDetails,
