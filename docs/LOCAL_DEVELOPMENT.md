@@ -55,4 +55,11 @@ Set `VITE_API_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY` in Vercel.
 Set backend credentials and service configuration in Render or the selected
 native hosting provider. Redeploy after changing public environment variables.
 
+For authentication email links, set the backend's canonical `CLIENT_URL` to the
+deployed frontend origin (for example, `https://kalusagap.vercel.app`). Keep
+extra browser origins in `CORS_ORIGIN`. A local backend connected to hosted
+Supabase cannot send production personnel notification jobs; use the deployed
+KALUSAGAP app for real invitation/reset emails, or run the local Supabase email
+capture service for local-only mail testing.
+
 Do not configure a service-role key for browser builds.

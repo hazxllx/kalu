@@ -49,6 +49,14 @@ export default function ForgotPassword() {
       setSent(true);
     } catch (failure) {
       if (failure?.status === 429) setError("Too many requests. Please wait a moment before trying again.");
+      else if (failure?.code === "API_TIMEOUT") setError("The server took too long to confirm the request. Check your inbox before requesting another reset link.");
+      else if (failure?.payload?.error?.code === "EMAIL_DELIVERY_UNAVAILABLE"
+        && ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+        setError("Local email delivery is unavailable. Use the deployed KALUSAGAP site to test reset emails.");
+      }
+      else if (failure?.payload?.error?.code === "EMAIL_DELIVERY_UNAVAILABLE") {
+        setError("Password email delivery is temporarily unavailable. Please contact your system administrator.");
+      }
       else setError("We couldn't send the reset link right now. Please try again in a moment.");
     } finally {
       setLoading(false);

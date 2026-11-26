@@ -230,7 +230,7 @@ test('new health personnel email includes the generated password and 10-minute e
   assert.match(message.text, /Hello, Nurse Example/);
   assert.match(message.text, new RegExp(EMAIL));
   assert.match(message.text, new RegExp(password));
-  assert.match(message.text, /https:\/\/app\.example\.test\/login/);
+  assert.match(message.text, /https:\/\/app\.example\.test\/login\?switchAccount=1/);
   assert.match(message.text, /expires in 10 minutes/i);
   assert.match(message.text, /required to create a new permanent password before accessing your account/i);
   assert.match(message.text, /select it and use your email client/i);
@@ -238,7 +238,7 @@ test('new health personnel email includes the generated password and 10-minute e
   assert.match(message.html, /COMMUNITY HEALTH MONITORING SYSTEM/);
   assert.match(message.html, /Your account is ready\./);
   assert.match(message.html, /font-family:Consolas,Menlo,monospace/);
-  assert.match(message.html, /https:\/\/app\.example\.test\/login/);
+  assert.match(message.html, /https:\/\/app\.example\.test\/login\?switchAccount=1/);
   assert.doesNotMatch(message.html, /<script/i);
   assert.doesNotMatch(JSON.stringify(f.state.logs), new RegExp(password));
 });

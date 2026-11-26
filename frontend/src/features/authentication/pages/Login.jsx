@@ -13,26 +13,42 @@ import { FieldError, ValidationSummary } from "@/components/common/Validation";
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, user, isSupabaseConfigured, authNotice, isSigningIn, isSigningOut, isLoadingAuth, authChecked, isResolvingProfile, isAuthenticated, role } = useAuth();
+  const { login, logout, user, isSupabaseConfigured, authNotice, isSigningIn, isSigningOut, isLoadingAuth, authChecked, isResolvingProfile, isAuthenticated, role } = useAuth();
   const [show, setShow] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [submitting, setSubmitting] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
   const submittingRef = useRef(false);
+  const invitationSwitchHandled = useRef(false);
   const fieldRefs = { email: emailRef, password: passwordRef };
   const authBusy = isSigningIn || isSigningOut || isLoadingAuth || !authChecked || isResolvingProfile;
+  const invitationAccountSwitch = new URLSearchParams(location.search).get("switchAccount") === "1";
+  const mustSwitchAccount = invitationAccountSwitch && Boolean(user?.id);
   const passwordSetupComplete = new URLSearchParams(location.search).get("passwordSetupComplete") === "1"
     || location.state?.passwordSetupComplete === true;
 
   useEffect(() => {
-    if (isAuthenticated && !authBusy && !submittingRef.current) {
+    if (isAuthenticated && !authBusy && !submittingRef.current && !invitationAccountSwitch) {
       navigate(landingFor(role, location.state?.from) || homeForRole(role), { replace: true });
     }
-  }, [isAuthenticated, authBusy, role, user?.mustChangePassword, location.state?.from, navigate]);
+  }, [isAuthenticated, authBusy, invitationAccountSwitch, role, user?.mustChangePassword, location.state?.from, navigate]);
+
+  useEffect(() => {
+    if (!invitationAccountSwitch || authBusy || invitationSwitchHandled.current) return;
+    invitationSwitchHandled.current = true;
+    if (!user?.id) return;
+
+    setSwitchingAccount(true);
+    setError("");
+    void logout(false).catch(() => {
+      setError("We could not clear the previous sign-in. Please reload this invitation link and try again.");
+    }).finally(() => setSwitchingAccount(false));
+  }, [invitationAccountSwitch, authBusy, user?.id, logout]);
 
   const focusField = (field) => {
     const target = fieldRefs[field]?.current;
@@ -122,6 +138,19 @@ export default function Login() {
                 Access your KALUSAGAP account to continue.
               </p>
 
+              {invitationAccountSwitch && (
+                <div
+                  role="status"
+                  className="mt-4 rounded-lg border border-brand-blue/20 bg-brand-blue/5 px-3 py-3 text-[12.5px] leading-relaxed text-brand-ink dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-slate-200"
+                >
+                  {mustSwitchAccount ? (
+                    <span>{switchingAccount ? "Signing out of the current account before invited sign-in…" : "Preparing sign-in for the invited account…"}</span>
+                  ) : (
+                    <span>Sign in with the invited account’s email address and temporary password from the email.</span>
+                  )}
+                </div>
+              )}
+
               {passwordSetupComplete && (
                 <div
                   role="status"
@@ -177,7 +206,7 @@ export default function Login() {
                       ref={emailRef}
                       type="email"
                       autoComplete="email"
-                      disabled={submitting || authBusy}
+                      disabled={submitting || authBusy || mustSwitchAccount}
                       value={email}
                       onChange={(e) => {
                         setEmail(e.target.value);
@@ -207,7 +236,7 @@ export default function Login() {
                       ref={passwordRef}
                       type={show ? "text" : "password"}
                       autoComplete="current-password"
-                      disabled={submitting || authBusy}
+                      disabled={submitting || authBusy || mustSwitchAccount}
                       value={password}
                       onChange={(e) => {
                         setPassword(e.target.value);
@@ -241,7 +270,7 @@ export default function Login() {
 
                 <button
                   type="submit"
-                  disabled={submitting || authBusy || !isSupabaseConfigured}
+                  disabled={submitting || authBusy || mustSwitchAccount || !isSupabaseConfigured}
                   className="group flex w-full items-center justify-center gap-2.5 rounded-lg bg-brand-blue py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-white shadow-sm transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {submitting || authBusy ? (

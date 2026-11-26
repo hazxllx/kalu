@@ -1337,7 +1337,7 @@ export default function UserManagement({ personnelOnly = false, delegated = fals
     try {
       result = await usersApi.lifecycle(target.id, payload);
     } catch (error) {
-      if (payload.action === "invite" && error?.code === "API_TRANSPORT_ERROR") {
+      if (payload.action === "invite" && ["API_TRANSPORT_ERROR", "API_TIMEOUT"].includes(error?.code)) {
         try {
           const latest = await usersApi.get(target.id);
           const notification = latest?.user?.notification;

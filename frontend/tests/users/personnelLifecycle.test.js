@@ -177,6 +177,16 @@ test("resend feedback confirms SMTP acceptance and distinguishes connection, tim
     "Unable to send the password setup email. Please try again.",
   );
   assert.equal(
+    personnelActionFailureMessage("invite", Object.assign(new Error("Request timed out"), { name: "TimeoutError", code: "API_TIMEOUT" })),
+    "The server took too long to confirm the email. Check the account’s email status and inbox before retrying.",
+  );
+  assert.equal(
+    personnelActionFailureMessage("invite", Object.assign(new Error("Generic"), {
+      payload: { error: { code: "ACCOUNT_CREATED_EMAIL_FAILED", message: "Account created; do not create another account." } },
+    })),
+    "Account created; do not create another account.",
+  );
+  assert.equal(
     personnelActionFailureMessage("invite", Object.assign(new Error("SMTP delivery failed"), { status: 503 })),
     "Unable to send the password setup email. Please try again.",
   );

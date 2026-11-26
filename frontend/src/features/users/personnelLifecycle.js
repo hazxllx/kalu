@@ -100,6 +100,12 @@ export function personnelActionMessage(action, account) {
 export function personnelActionFailureMessage(action, error) {
   if (action !== "invite") return error?.message || "The personnel action could not be completed.";
 
+  const apiCode = error?.payload?.error?.code;
+  const apiMessage = error?.payload?.error?.message;
+  if (apiCode === "ACCOUNT_CREATED_EMAIL_FAILED" && typeof apiMessage === "string") return apiMessage;
+  if (error?.code === "API_TIMEOUT") {
+    return "The server took too long to confirm the email. Check the account’s email status and inbox before retrying.";
+  }
   const message = String(error?.message || "");
   const timedOut = error?.name === "AbortError" || /timeout/i.test(message);
   const connectivityFailure = !timedOut && error?.code === "API_TRANSPORT_ERROR";

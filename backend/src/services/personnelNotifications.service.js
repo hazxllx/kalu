@@ -82,7 +82,7 @@ const eventStillValid = (job, account) => ACCESS_EVENTS.has(job.event_type)
 
 const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, authConfirmed, config, temporaryPassword = null }) => {
   if (temporaryPassword) {
-    const loginUrl = `${origin}/login`;
+    const loginUrl = `${origin}/login?switchAccount=1`;
     const text = [
       'KALUSAGAP',
       'COMMUNITY HEALTH MONITORING SYSTEM',

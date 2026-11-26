@@ -13,13 +13,21 @@ test('the existing login uses Supabase Auth with an accurate network-outage mess
 
 test('the current login form and design remain in place with no role picker or hardcoded sign-in', async () => {
   const source = await readFile(new URL('../../src/features/authentication/pages/Login.jsx', import.meta.url), 'utf8');
-  assert.match(source, /login\(\{ email, password \}, \{/);
+  assert.match(source, /login\(\{ email, password \}\)/);
   assert.match(source, /gov-navy-panel/);
   assert.match(source, /Sign in to the portal/);
   assert.match(source, /id="login-email"/);
   assert.match(source, /id="login-password"/);
   assert.doesNotMatch(source, /mock|hardcodedPassword|service_role/);
   assert.doesNotMatch(source, /Sign-in is unavailable|Supabase project URL|anon\/publishable key|redeploy/);
+});
+
+test('personnel invitation login prevents an existing session from redirecting to its dashboard', async () => {
+  const source = await readFile(new URL('../../src/features/authentication/pages/Login.jsx', import.meta.url), 'utf8');
+  assert.match(source, /get\("switchAccount"\) === "1"/);
+  assert.match(source, /!invitationAccountSwitch/);
+  assert.match(source, /invitationSwitchHandled\.current = true/);
+  assert.match(source, /logout\(false\)/);
 });
 
 test('build-time validation prevents a service-role credential from being shipped to the browser', async () => {

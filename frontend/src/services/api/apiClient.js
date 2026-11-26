@@ -129,6 +129,7 @@ function createTimeoutController(timeoutMs, existingSignal) {
   
   // Clean up timeout on completion
   controller.signal.addEventListener('abort', () => clearTimeout(timeoutId));
+  controller.clearTimeout = () => clearTimeout(timeoutId);
   
   return controller;
 }
@@ -188,6 +189,17 @@ async function request(
         ...rest,
       });
     } catch (error) {
+      if (timeoutController?.signal.aborted && !signal?.aborted) {
+        const timeoutError = Object.assign(
+          new Error('The server took too long to confirm this request.'),
+          { name: 'TimeoutError', code: 'API_TIMEOUT' },
+        );
+        console.warn('[kalusagap/sync] request timeout', {
+          event: 'api_request_timeout', endpoint: path, method,
+          operationUuid: headers?.['Idempotency-Key'] || null,
+        });
+        throw timeoutError;
+      }
       console.warn('[kalusagap/sync] transport failure', {
         event: 'api_transport_failure',
         endpoint: path,
@@ -232,6 +244,7 @@ async function request(
   const payload = responseType === 'blob' && response.ok
     ? await response.blob()
     : isJson ? await response.json() : await response.text();
+  timeoutController?.clearTimeout?.();
   // A late response must never populate the next account's UI/cache after a
   // sign-out or switch, even when the original request committed successfully.
   if (ownerGuard) assertCurrentOwner(ownerGuard);
